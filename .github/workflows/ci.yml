@@ -1,0 +1,23 @@
+# リグレッションテスト (tools/test.sh) を GitHub Actions で実行する。
+# 使用する action は commit SHA で固定する。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      STONE_ENGINE: podman
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run regression tests
+        run: bash tools/test.sh
