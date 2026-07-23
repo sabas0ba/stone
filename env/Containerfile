@@ -1,0 +1,40 @@
+# stone 開発環境
+# base: debian:bookworm-slim (linux/amd64), digest 固定 (2026-07-13 ビルド)
+FROM docker.io/library/debian@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
+
+# パッケージ取得先を base image 作成日時点の snapshot に固定する
+RUN rm /etc/apt/sources.list.d/debian.sources && printf '%s\n' \
+      'Types: deb' \
+      'URIs: http://snapshot.debian.org/archive/debian/20260713T000000Z/' \
+      'Suites: bookworm bookworm-updates' \
+      'Components: main' \
+      'Check-Valid-Until: no' \
+      '' \
+      'Types: deb' \
+      'URIs: http://snapshot.debian.org/archive/debian-security/20260713T000000Z/' \
+      'Suites: bookworm-security' \
+      'Components: main' \
+      'Check-Valid-Until: no' \
+      > /etc/apt/sources.list.d/snapshot.sources
+
+# qemu-system-misc:            qemu-system-riscv32
+# make:                        ビルド・検証の駆動
+# binutils-riscv64-unknown-elf: verify 層専用 (objdump による逆アセンブル照合)
+# gdb-multiarch:               観測用デバッガ (QEMU の GDB stub への接続。成果物の生成には使用しない)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      qemu-system-misc \
+      make \
+      binutils-riscv64-unknown-elf \
+      gdb-multiarch \
+ && rm -rf /var/lib/apt/lists/*
+
+# ポリシー強制: as / ld は削除し，逆アセンブラ等の読取り系ツールのみ残す
+# (docs/plan.md 2.2 検証ポリシー)
+RUN find /usr -regextype posix-extended \
+      -regex '.*(riscv64-unknown-elf-|riscv64-unknown-elf/bin/)(as|ld|ld\.bfd|gold)' \
+      -delete \
+ && ! command -v riscv64-unknown-elf-as \
+ && ! command -v riscv64-unknown-elf-ld
+
+WORKDIR /work
