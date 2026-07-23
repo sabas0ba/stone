@@ -75,5 +75,5 @@ bash tools/test.sh
 
 ## ポリシー
 
-- as / ld はイメージから削除済み (docs/plan.md 2.1, 2.2)。
+- as / ld はイメージから削除済み ([plan.md](../docs/plan.md) 2.1, 2.2)。
 - binutils は verify 層での逆アセンブル照合 (objdump) のみに使用する。

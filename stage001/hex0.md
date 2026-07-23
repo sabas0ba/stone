@@ -1,7 +1,7 @@
 # hex0.bin 説明文書
 
 `stage001/hex0.bin` は人手で命令エンコードした生のバイナリであり，
-ビルドによって生成されない (docs/plan.md 2.1)。仕様は docs/stage001-hex0.md を参照。
+ビルドによって生成されない ([plan.md](../docs/plan.md) 2.1)。仕様は [stage001-hex0.md](../docs/stage001-hex0.md) を参照。
 
 - 対象: RV32I，リトルエンディアン，64 命令 256 バイト
 - ロードアドレス: 0x8000_0000 (QEMU virt, `-bios`)
