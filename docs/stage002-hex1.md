@@ -32,7 +32,7 @@ sh tools/env.sh qemu stage002/hex1.bin < stage003/asm.hex1 > tmp/asm.bin
 
 ### 2.1 前提の要約 (Stage 1 から継承するもの)
 
-本節は判断に必要な前提の要約である。正式な定義は docs/stage001-hex0.md を参照。
+本節は判断に必要な前提の要約である。正式な定義は [stage001-hex0.md](stage001-hex0.md) を参照。
 
 実行モデル: hex1 は hex0 と同じくフィルタである。フラットバイナリを
 QEMU virt の 0x8000_0000 へロードして実行し，UART (stdin) からソーステキストを読み，
@@ -134,10 +134,12 @@ hex1.bin は hex0 によるビルドで再現可能な生成物であり，git �
 (人手エンコードの生バイナリを直接管理するのは hex0.bin までである)。
 ビルドはビット再現であり，期待 SHA-256 を hex1.md に記録して検証する。
 
-ビルド標準化のため，本 Stage で Makefile を導入する:
+ビルド標準化のため，本 Stage でビルドスクリプトを導入する
+(make はホスト環境に導入されておらず，既存のテスト・環境操作と同じく
+POSIX sh スクリプトで統一する):
 
 ```
-make stage002        # hex0 で hex1.hex から tmp/build/hex1.bin を生成
+sh tools/build.sh stage002    # hex0 で hex1.hex から tmp/build/hex1.bin を生成
 ```
 
 ## 5. 検証計画 (tests/stage002)
