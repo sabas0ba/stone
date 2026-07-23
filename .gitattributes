@@ -1,0 +1,5 @@
+# シェルスクリプトおよび生成ファイルの改行コードを LF に統一する
+* text=auto eol=lf
+
+# 人手エンコードのバイナリ成果物 (docs/plan.md 2.1)
+*.bin binary

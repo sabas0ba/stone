@@ -1,0 +1,5 @@
+# 作業用一時ファイル領域 (repo 内で完結させる)
+/tmp/
+
+# 一次資料の実体（URL と SHA-256 は docs/SOURCES.md で管理）
+/docs/external/
