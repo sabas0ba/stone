@@ -38,7 +38,7 @@ QEMU RISC-V (RV32IM, bare-metal) 上で，人手エンコードした機械語 s
 - git 管理下で開発し，機能追加は branch で行う。Commit message は Conventional Commits に従う。
 - テンポラリファイルは repo 内の git ignore された `tmp/` 配下で扱う。
 - 一次資料 (ISA 仕様書等) は `docs/external/` (git ignore) に保存し,
-  URL と SHA-256 を `docs/SOURCES.md` に記録する。
+  URL と SHA-256 を [SOURCES.md](SOURCES.md) に記録する。
 
 ## 3. 実行環境
 
@@ -82,6 +82,9 @@ podman run ... qemu-system-riscv32 ... -bios stageN.bin < input.src > output.bin
 - 各 Stage は「前段の成果物のみでビルドできること」を make ターゲットとして表現し，
   チェーン全体の再ビルドを CI で検証する。
 - 各 Stage の設計文書を `docs/stageN-*.md` として残す（入出力仕様，文法，エンコード規約）。
+- 設計文書は単独で判断できる状態を保つ。前段から継承する前提（言語仕様・実行モデル等）は
+  参照だけで済ませず，判断に必要な範囲の要約を文書内に含める。
+- 文書間の参照は相対パスの markdown リンクで記述する。
 
 ## 5. リポジトリ構成
 
@@ -101,4 +104,4 @@ stone/
 - The RISC-V Instruction Set Manual Volume I: Unprivileged ISA (ratified)
 - The RISC-V Instruction Set Manual Volume II: Privileged Architecture (ratified)
 
-取得元・版・SHA-256 は `docs/SOURCES.md` を参照。
+取得元・版・SHA-256 は [SOURCES.md](SOURCES.md) を参照。

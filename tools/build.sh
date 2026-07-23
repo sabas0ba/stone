@@ -1,0 +1,25 @@
+#!/bin/sh
+# 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
+# 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
+#
+# 使用法: build.sh [stage002|all]
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repo_root"
+mkdir -p tmp/build
+
+build_stage002() {
+    sh tools/env.sh qemu stage001/hex0.bin < stage002/hex1.hex > tmp/build/hex1.bin
+    echo "built tmp/build/hex1.bin" >&2
+}
+
+case "${1:-all}" in
+stage002|all)
+    build_stage002
+    ;;
+*)
+    echo "usage: build.sh [stage002|all]" >&2
+    exit 2
+    ;;
+esac
