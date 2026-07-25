@@ -156,6 +156,60 @@ stmt := '{' stmt* '}'
 | 5 | 型エラー (非左辺値への代入・非ポインタの参照はがし・メンバ誤り・引数個数不一致など) |
 | 6 | 容量超過 (フレーム 2040 バイト超・文字列 255 超・表あふれなど) |
 
+### 2.9 前段からの変化と記述例
+
+前段 (sol) からの主な変化:
+
+- スタック操作 (dup/swap 等) と後置記法が消え，中置演算子の式・優先順位・
+  括弧が使えるようになった。レジスタもスタックも書き手からは見えない。
+- 関数が名前付きの引数とローカル変数を持ち，値を `return` で返すようになった
+  (sol は大域変数とデータスタックのみ)。
+- ポインタ・配列・構造体という型の概念が入った。ポインタ演算は指し先の
+  サイズでスケールされる。
+- 入力終端が `.` から EOT (0x04) に変わった (2.1 節)。
+
+想定している記述の例 (連結リストの走査。宣言・構造体・ポインタ・
+制御構造・関数の組合せ):
+
+```
+// 単方向リストの合計を返す
+struct node {
+  int val;
+  struct node *next;
+};
+struct node n1;
+struct node n2;
+
+int total(struct node *p) {
+  int s;
+  s = 0;
+  while (p) {
+    s = s + p->val;
+    p = p->next;
+  }
+  return s;
+}
+
+int main() {
+  n1.val = 40;
+  n2.val = 8;
+  n1.next = &n2;
+  n2.next = 0;
+  putc('0' + total(&n1) / 10);
+  putc('0' + total(&n1) % 10);
+  putc('\n');
+  return 0;
+}
+```
+
+仕様の各機能を網羅する実例はテストスイート (5 章) を参照:
+
+- [tests/stage005/arith.sc](../tests/stage005/arith.sc): 演算子の優先順位・短絡評価
+- [tests/stage005/fib.sc](../tests/stage005/fib.sc): 再帰・前方参照・10 進出力
+- [tests/stage005/ptr.sc](../tests/stage005/ptr.sc): ポインタ・配列・アドレス取得・文字列
+- [tests/stage005/struct.sc](../tests/stage005/struct.sc): 構造体・メンバアクセス・連結リスト
+- [tests/stage005/upper.sc](../tests/stage005/upper.sc): getc/putc によるフィルタ
+
 ## 3. 実装方針 (sc コンパイラ = sol プログラム)
 
 ### 3.1 単一パス + 出力バッファ
