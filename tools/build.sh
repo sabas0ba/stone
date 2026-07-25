@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|stage003|stage004|all]
+# 使用法: build.sh [stage002|stage003|stage004|stage005|all]
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -24,6 +24,11 @@ build_stage004() {
     echo "built tmp/build/sol.bin" >&2
 }
 
+build_stage005() {
+    sh tools/env.sh qemu tmp/build/sol.bin < stage005/sc.sol > tmp/build/sc.bin
+    echo "built tmp/build/sc.bin" >&2
+}
+
 case "${1:-all}" in
 stage002)
     build_stage002
@@ -37,13 +42,20 @@ stage004)
     build_stage003
     build_stage004
     ;;
+stage005)
+    build_stage002
+    build_stage003
+    build_stage004
+    build_stage005
+    ;;
 all)
     build_stage002
     build_stage003
     build_stage004
+    build_stage005
     ;;
 *)
-    echo "usage: build.sh [stage002|stage003|stage004|all]" >&2
+    echo "usage: build.sh [stage002|stage003|stage004|stage005|all]" >&2
     exit 2
     ;;
 esac
