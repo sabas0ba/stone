@@ -1,0 +1,81 @@
+# rv32im.s の期待バイナリ (hex0 言語による手エンコード)。
+# アドレスは 0x8000_0000 からの相対。top = +0x000, bot = +0x0c0。
+b3 00 31 00   # 000: add x1, x2, x3
+b3 0f df 41   # 004: sub x31, x30, x29
+33 92 62 00   # 008: sll x4, x5, x6
+b3 23 94 00   # 00c: slt x7, x8, x9
+33 b5 c5 00   # 010: sltu x10, x11, x12
+b3 46 f7 00   # 014: xor x13, x14, x15
+33 d8 28 01   # 018: srl x16, x17, x18
+b3 59 5a 41   # 01c: sra x19, x20, x21
+33 eb 8b 01   # 020: or x22, x23, x24
+b3 7c bd 01   # 024: and x25, x26, x27
+b3 00 31 02   # 028: mul x1, x2, x3
+33 92 62 02   # 02c: mulh x4, x5, x6
+b3 23 94 02   # 030: mulhsu x7, x8, x9
+33 b5 c5 02   # 034: mulhu x10, x11, x12
+b3 46 f7 02   # 038: div x13, x14, x15
+33 d8 28 03   # 03c: divu x16, x17, x18
+b3 69 5a 03   # 040: rem x19, x20, x21
+33 fb 8b 03   # 044: remu x22, x23, x24
+93 00 01 80   # 048: addi x1, x2, -2048
+93 21 f2 7f   # 04c: slti x3, x4, 2047
+93 32 f3 0f   # 050: sltiu x5, x6, 0xff
+93 43 f4 ff   # 054: xori x7, x8, -1
+93 64 f5 07   # 058: ori x9, x10, 0x7f
+93 75 f6 0f   # 05c: andi x11, x12, 255
+93 16 07 00   # 060: slli x13, x14, 0
+93 57 f8 01   # 064: srli x15, x16, 31
+93 58 19 40   # 068: srai x17, x18, 1
+83 00 f1 ff   # 06c: lb x1, -1(x2)
+83 11 22 00   # 070: lh x3, 2(x4)
+83 22 03 01   # 074: lw x5, 0x10(x6)
+83 43 44 06   # 078: lbu x7, 100(x8)
+83 54 05 80   # 07c: lhu x9, -2048(x10)
+e7 05 f6 7f   # 080: jalr x11, 2047(x12)
+a3 0f 11 fe   # 084: sb x1, -1(x2)
+23 1f 32 00   # 088: sh x3, 30(x4)
+23 21 53 fe   # 08c: sw x5, -30(x6)
+e3 88 20 f6   # 090: beq x1, x2, top   (rel -0x090)
+e3 96 41 f6   # 094: bne x3, x4, top   (rel -0x094)
+63 c4 62 02   # 098: blt x5, x6, bot   (rel +0x028)
+63 d2 83 02   # 09c: bge x7, x8, bot   (rel +0x024)
+e3 e0 a4 f6   # 0a0: bltu x9, x10, top (rel -0x0a0)
+63 fe c5 00   # 0a4: bgeu x11, x12, bot (rel +0x01c)
+b7 f6 ff ff   # 0a8: lui x13, 0xfffff
+17 07 00 00   # 0ac: auipc x14, 0
+ef f7 1f f5   # 0b0: jal x15, top      (rel -0x0b0)
+0f 00 f0 0f   # 0b4: fence
+73 00 00 00   # 0b8: ecall
+73 00 10 00   # 0bc: ebreak
+13 00 00 00   # 0c0: bot: nop
+93 80 0f 00   # 0c4: mv x1, x31
+37 01 00 00   # 0c8: li x2, 0          (lui x2, 0)
+13 01 01 00   # 0cc:                   (addi x2, x2, 0)
+b7 01 00 00   # 0d0: li x3, -1         (lui x3, 0)
+93 81 f1 ff   # 0d4:                   (addi x3, x3, -1)
+37 52 34 12   # 0d8: li x4, 0x12345678 (lui x4, 0x12345)
+13 02 82 67   # 0dc:                   (addi x4, x4, 0x678)
+b7 02 00 00   # 0e0: li x5, 2047       (lui x5, 0)
+93 82 f2 7f   # 0e4:                   (addi x5, x5, 2047)
+37 03 00 00   # 0e8: li x6, -2048      (lui x6, 0)
+13 03 03 80   # 0ec:                   (addi x6, x6, -2048)
+b7 03 00 80   # 0f0: la x7, top        (lui x7, 0x80000)
+93 83 03 00   # 0f4:                   (addi x7, x7, 0)
+37 04 00 80   # 0f8: la x8, bot        (lui x8, 0x80000)
+13 04 04 0c   # 0fc:                   (addi x8, x8, 0xc0)
+6f f0 1f f0   # 100: j top             (rel -0x100)
+ef f0 df fb   # 104: call bot          (rel -0x044)
+67 80 04 00   # 108: jr x9
+67 80 00 00   # 10c: ret
+e3 08 05 fa   # 110: beqz x10, bot     (rel -0x050)
+e3 96 05 ee   # 114: bnez x11, top     (rel -0x114)
+ef be ad de   # 118: word 0xdeadbeef
+ff ff ff ff   # 11c: word -1
+00 00 00 80   # 120: word top          (0x8000_0000)
+c0 00 00 80   # 124: word bot          (0x8000_00c0)
+00            # 128: byte 0
+ff            # 129: byte 255
+80            # 12a: byte -128
+7f            # 12b: byte 0x7f
+.
