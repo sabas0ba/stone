@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|all]
+# 使用法: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|stage008|all]
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -48,6 +48,26 @@ build_stage007() {
     echo "built tmp/build/occ.bin" >&2
 }
 
+# Stage 8 以降は「コンパイル -> リンク」の 2 段になる。
+# cc / ld 自身のブートストラップは occ (フラット出力) が担う。
+build_stage008() {
+    { cat stage008/cc.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/occ.bin > tmp/build/cc0.bin
+    { cat stage008/ld.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/occ.bin > tmp/build/ld0.bin
+    echo "built tmp/build/cc0.bin tmp/build/ld0.bin (bootstrap)" >&2
+    { cat stage008/cc.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc0.bin > tmp/build/cc.o
+    { cat tmp/build/cc.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld0.bin > tmp/build/cc.bin
+    echo "built tmp/build/cc.bin" >&2
+    { cat stage008/ld.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc0.bin > tmp/build/ld.o
+    { cat tmp/build/ld.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld0.bin > tmp/build/ld.bin
+    echo "built tmp/build/ld.bin" >&2
+}
+
 case "${1:-all}" in
 stage002)
     build_stage002
@@ -82,6 +102,15 @@ stage007)
     build_stage006
     build_stage007
     ;;
+stage008)
+    build_stage002
+    build_stage003
+    build_stage004
+    build_stage005
+    build_stage006
+    build_stage007
+    build_stage008
+    ;;
 all)
     build_stage002
     build_stage003
@@ -89,9 +118,10 @@ all)
     build_stage005
     build_stage006
     build_stage007
+    build_stage008
     ;;
 *)
-    echo "usage: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|all]" >&2
+    echo "usage: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|stage008|all]" >&2
     exit 2
     ;;
 esac
