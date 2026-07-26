@@ -39,6 +39,8 @@ QEMU RISC-V (RV32IM, bare-metal) 上で，人手エンコードした機械語 s
 - テンポラリファイルは repo 内の git ignore された `tmp/` 配下で扱う。
 - 一次資料 (ISA 仕様書等) は `docs/external/` (git ignore) に保存し,
   URL と SHA-256 を [SOURCES.md](SOURCES.md) に記録する。
+- 実務上の手順 (コンテナが使えない環境での代替，デバッグ手法，検証レシピ) は
+  [dev-notes.md](dev-notes.md) に記録する。
 
 ## 3. 実行環境
 
