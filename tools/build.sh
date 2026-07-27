@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|...|stage008|stage009|all]
+# 使用法: build.sh [stage002|...|stage009|stage010|all]
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -50,6 +50,9 @@ build_stage007() {
 
 # Stage 8 以降は「コンパイル -> リンク」の 2 段になる。
 # cc / ld 自身のブートストラップは occ (フラット出力) が担う。
+# 生成物を cc8.bin と呼ぶのは，Stage 10 で後継の C コンパイラが出てくるため。
+# cc.bin は常に最新世代を指し，過去世代は世代番号を付けて呼ぶ
+# (docs/stage010-c89.md 2.1)。
 build_stage008() {
     { cat stage008/cc.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/occ.bin > tmp/build/cc0.bin
@@ -57,10 +60,10 @@ build_stage008() {
         | sh tools/env.sh qemu tmp/build/occ.bin > tmp/build/ld0.bin
     echo "built tmp/build/cc0.bin tmp/build/ld0.bin (bootstrap)" >&2
     { cat stage008/cc.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc0.bin > tmp/build/cc.o
-    { cat tmp/build/cc.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld0.bin > tmp/build/cc.bin
-    echo "built tmp/build/cc.bin" >&2
+        | sh tools/env.sh qemu tmp/build/cc0.bin > tmp/build/cc8.o
+    { cat tmp/build/cc8.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld0.bin > tmp/build/cc8.bin
+    echo "built tmp/build/cc8.bin" >&2
     { cat stage008/ld.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc0.bin > tmp/build/ld.o
     { cat tmp/build/ld.o; printf '\0'; } \
@@ -68,14 +71,31 @@ build_stage008() {
     echo "built tmp/build/ld.bin" >&2
 }
 
-# Stage 9 は cc + ld でビルドする。pp 自身は指令を含まないため，
-# 前処理を通さずに直接コンパイルできる。
+# Stage 9 は Stage 8 の cc + ld でビルドする。pp 自身は指令を含まないため，
+# 前処理を通さずに直接コンパイルできる。前段の成果物のみでビルドするという
+# 約束のとおり，ここは Stage 10 の cc ではなく cc8 を使う。
 build_stage009() {
     { cat stage009/pp.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/pp.o
+        | sh tools/env.sh qemu tmp/build/cc8.bin > tmp/build/pp.o
     { cat tmp/build/pp.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp.bin
     echo "built tmp/build/pp.bin" >&2
+}
+
+# Stage 10 の cc は Stage 8 の cc8 でブートストラップする。
+# 第 1 部はコード生成規則を変えないので cc1.bin == cc.bin になる
+# (docs/stage010-c89.md 2.2)。
+build_stage010() {
+    { cat stage010/cc.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc8.bin > tmp/build/cc1.o
+    { cat tmp/build/cc1.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc1.bin
+    echo "built tmp/build/cc1.bin (bootstrap)" >&2
+    { cat stage010/cc.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc1.bin > tmp/build/cc.o
+    { cat tmp/build/cc.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc.bin
+    echo "built tmp/build/cc.bin" >&2
 }
 
 case "${1:-all}" in
@@ -131,6 +151,17 @@ stage009)
     build_stage008
     build_stage009
     ;;
+stage010)
+    build_stage002
+    build_stage003
+    build_stage004
+    build_stage005
+    build_stage006
+    build_stage007
+    build_stage008
+    build_stage009
+    build_stage010
+    ;;
 all)
     build_stage002
     build_stage003
@@ -140,9 +171,10 @@ all)
     build_stage007
     build_stage008
     build_stage009
+    build_stage010
     ;;
 *)
-    echo "usage: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|stage008|stage009|all]" >&2
+    echo "usage: build.sh [stage002|...|stage009|stage010|all]" >&2
     exit 2
     ;;
 esac

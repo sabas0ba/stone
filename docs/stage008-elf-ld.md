@@ -191,6 +191,10 @@ cc0(ld.sc)  -> ld.o ; ld0(ld.o) -> ld.bin
 
 以降の正本は `cc.bin` / `ld.bin` である。
 
+> Stage 10 で後継の C コンパイラが出たため，本 Stage の生成物は
+> `tmp/build/cc8.bin` という名前になった。`cc.bin` は常に最新世代を指す
+> ([stage010-c89.md](stage010-c89.md) 2.1)。ソースと SHA-256 は変わらない。
+
 ## 5. 検証計画 (tests/stage008)
 
 1. ビルド再現: `cc.bin` / `ld.bin` の SHA-256 が各 `.md` の記載値と一致する
