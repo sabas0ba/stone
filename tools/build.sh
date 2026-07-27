@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|stage008|all]
+# 使用法: build.sh [stage002|...|stage008|stage009|all]
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -68,6 +68,16 @@ build_stage008() {
     echo "built tmp/build/ld.bin" >&2
 }
 
+# Stage 9 は cc + ld でビルドする。pp 自身は指令を含まないため，
+# 前処理を通さずに直接コンパイルできる。
+build_stage009() {
+    { cat stage009/pp.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/pp.o
+    { cat tmp/build/pp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp.bin
+    echo "built tmp/build/pp.bin" >&2
+}
+
 case "${1:-all}" in
 stage002)
     build_stage002
@@ -111,6 +121,16 @@ stage008)
     build_stage007
     build_stage008
     ;;
+stage009)
+    build_stage002
+    build_stage003
+    build_stage004
+    build_stage005
+    build_stage006
+    build_stage007
+    build_stage008
+    build_stage009
+    ;;
 all)
     build_stage002
     build_stage003
@@ -119,9 +139,10 @@ all)
     build_stage006
     build_stage007
     build_stage008
+    build_stage009
     ;;
 *)
-    echo "usage: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|stage008|all]" >&2
+    echo "usage: build.sh [stage002|stage003|stage004|stage005|stage006|stage007|stage008|stage009|all]" >&2
     exit 2
     ;;
 esac
