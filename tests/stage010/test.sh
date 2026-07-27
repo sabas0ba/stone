@@ -1,22 +1,24 @@
 #!/bin/bash
-# Stage 10 テスト: C89 言語完成 第 1 部 (文と式) の検証
-# (docs/stage010-c89.md 7 章)。
+# Stage 10 テスト: C89 言語完成の検証 (docs/stage010-c89.md 7 章)。
+#   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型と宣言 (cc10b)
 #
 # テストの素材は用途で分ける。
 #   src/       コンパイルして実行するプログラム
 #   expected/  その標準出力
 #
 # 検証項目:
-#   1. ビルド再現: cc.bin の SHA-256 が stage010/cc.md 記載値と一致
-#   2. セルフホストの健全性: cc1.bin == cc.bin
+#   1. ビルド再現: cc10a.bin / cc10b.bin の SHA-256 が各 .md 記載値と一致
+#   2. セルフホストの健全性: cc10a0.bin == cc10a.bin
 #      (第 1 部はコード生成規則を変えないので，cc8 が作った 1 段目と
 #       それが自分自身を再コンパイルしたものは一致しなければならない)
-#   3. 固定点: cc.bin が自分自身を再生成する (B2 == B3)
+#   3. 固定点: 各世代が自分自身を再生成する (B2 == B3)
 #   4. 同値性: Stage 5 の仕様スイートと Stage 8 の分割コンパイル例が
 #      新しい cc でも同じ結果になる (退行がないこと)
-#   5. 新機能: for / do / switch / break / continue / goto / ?: /
-#      複合代入 / ++ -- / カンマ / sizeof / キャストの実行結果
-#   6. エラー系: 反復外の break -> 1, 未定義ラベルへの goto -> 2
+#   5. 新機能: (第 1 部) for / do / switch / break / continue / goto / ?: /
+#      複合代入 / ++ -- / カンマ / sizeof / キャスト
+#      (第 2 部) typedef / enum / union / const・volatile / void / 大文字識別子
+#   6. エラー系: 反復外の break -> 1, 未定義ラベルへの goto -> 2,
+#      typedef と列挙定数の重複 -> 4, 未定義の struct タグ -> 2
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -24,7 +26,8 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin
+cc=tmp/build/cc.bin        # 最新世代 (= cc10b.bin)
+cca=tmp/build/cc10a.bin    # 第 1 部
 ld=tmp/build/ld.bin
 src=tests/stage010/src
 exp=tests/stage010/expected
@@ -41,19 +44,30 @@ link() {
 # 1. ビルド再現
 sh tools/build.sh stage010 > /dev/null 2>&1
 rc=$?
-want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage010/cc.md | cut -d' ' -f2)
-got=$(sha256sum tmp/build/cc.bin); got=${got%% *}
-[ "$rc" -eq 0 ] && [ -n "$want" ] && [ "$want" = "$got" ]
-report $? "build: cc.bin の SHA-256 が stage010/cc.md 記載値と一致"
+ok=0
+[ "$rc" -eq 0 ] || ok=1
+for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md; do
+    n=${pair%%:*}
+    doc=${pair##*:}
+    want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
+    got=$(sha256sum "tmp/build/$n.bin"); got=${got%% *}
+    [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "build: cc10a.bin / cc10b.bin の SHA-256 が各 .md 記載値と一致"
 
 # 2. セルフホストの健全性
-cmp -s tmp/build/cc1.bin tmp/build/cc.bin
-report $? "bootstrap: cc1.bin == cc.bin (コード生成が変わっていない)"
+cmp -s tmp/build/cc10a0.bin tmp/build/cc10a.bin
+report $? "bootstrap: cc10a0.bin == cc10a.bin (第 1 部はコード生成が変わっていない)"
 
 # 3. 固定点
-compile stage010/cc.sc tmp/s10/cc3.o && link tmp/s10/cc3.bin tmp/s10/cc3.o \
-    && cmp -s tmp/s10/cc3.bin "$cc"
-report $? "fixpoint: cc が自分自身を再生成する"
+{ cat stage010/cc.sc; printf '\004'; } | sh tools/env.sh qemu "$cca" > tmp/s10/cc3.o \
+    && link tmp/s10/cc3.bin tmp/s10/cc3.o && cmp -s tmp/s10/cc3.bin "$cca"
+report $? "fixpoint: cc10a が自分自身を再生成する"
+
+compile stage010/cc2.sc tmp/s10/cc4.o && link tmp/s10/cc4.bin tmp/s10/cc4.o \
+    && cmp -s tmp/s10/cc4.bin "$cc"
+report $? "fixpoint: cc10b が自分自身を再生成する"
 
 # 4. 同値性 (Stage 5 の仕様スイート)
 run_case() {
@@ -100,6 +114,7 @@ featcase() {
 }
 featcase feat
 featcase loops
+featcase types
 
 # 6. エラー系
 errcase() {
@@ -117,5 +132,8 @@ errcase 2 '未定義のラベルへの goto' 'int main() { goto nowhere; return 
 errcase 4 'ラベルの多重定義' 'int main() { a: a: return 0; }'
 errcase 5 'ポインタへの *=' 'int main() { char *p; p = 0; p *= 2; return 0; }'
 errcase 5 '左辺値でない対象への +=' 'int main() { int a; a = 1; 3 += a; return 0; }'
+errcase 4 'typedef 名の重複' 'typedef int T; typedef char T; int main() { return 0; }'
+errcase 4 '列挙定数の重複' 'enum { A }; enum { A }; int main() { return 0; }'
+errcase 2 '未定義の struct タグ' 'struct nosuch v; int main() { return 0; }'
 
 summary

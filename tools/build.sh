@@ -82,20 +82,31 @@ build_stage009() {
     echo "built tmp/build/pp.bin" >&2
 }
 
-# Stage 10 の cc は Stage 8 の cc8 でブートストラップする。
-# 第 1 部はコード生成規則を変えないので cc1.bin == cc.bin になる
-# (docs/stage010-c89.md 2.2)。
+# Stage 10 は 3 部に分かれ，各部のコンパイラが次の部をビルドする。
+# 生成物は世代ごとに名前を持ち (cc10a = 第 1 部, cc10b = 第 2 部)，
+# 最新世代を cc.bin として複製する (docs/stage010-c89.md 2.1)。
+#
+#   cc8   -> cc10a0 -> cc10a  (第 1 部。cc10a0 == cc10a)
+#   cc10a -> cc10b           (第 2 部)
 build_stage010() {
     { cat stage010/cc.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc8.bin > tmp/build/cc1.o
-    { cat tmp/build/cc1.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc1.bin
-    echo "built tmp/build/cc1.bin (bootstrap)" >&2
+        | sh tools/env.sh qemu tmp/build/cc8.bin > tmp/build/cc10a0.o
+    { cat tmp/build/cc10a0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10a0.bin
+    echo "built tmp/build/cc10a0.bin (bootstrap)" >&2
     { cat stage010/cc.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc1.bin > tmp/build/cc.o
-    { cat tmp/build/cc.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc.bin
-    echo "built tmp/build/cc.bin" >&2
+        | sh tools/env.sh qemu tmp/build/cc10a0.bin > tmp/build/cc10a.o
+    { cat tmp/build/cc10a.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10a.bin
+    echo "built tmp/build/cc10a.bin" >&2
+    { cat stage010/cc2.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10a.bin > tmp/build/cc10b.o
+    { cat tmp/build/cc10b.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10b.bin
+    echo "built tmp/build/cc10b.bin" >&2
+    # cc.bin は常に最新世代を指す別名
+    cp tmp/build/cc10b.bin tmp/build/cc.bin
+    echo "built tmp/build/cc.bin (= cc10b.bin)" >&2
 }
 
 case "${1:-all}" in
