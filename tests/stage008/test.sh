@@ -15,7 +15,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s8
 
-cc=tmp/build/cc.bin
+cc=tmp/build/cc8.bin
 ld=tmp/build/ld.bin
 
 # ソースを ELF オブジェクトへ (sc の入力終端は EOT)
@@ -34,7 +34,7 @@ sh tools/build.sh stage008 > /dev/null 2>&1
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in cc:stage008/cc.md ld:stage008/ld.md; do
+for pair in cc8:stage008/cc.md ld:stage008/ld.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -42,12 +42,12 @@ for pair in cc:stage008/cc.md ld:stage008/ld.md; do
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc.bin / ld.bin の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc8.bin / ld.bin の SHA-256 が各 .md 記載値と一致"
 
 # 2. 固定点
 compile stage008/cc.sc tmp/s8/cc2.o && link tmp/s8/cc2.bin tmp/s8/cc2.o \
     && cmp -s tmp/s8/cc2.bin "$cc"
-report $? "fixpoint: cc が自分自身を再生成する"
+report $? "fixpoint: cc8 が自分自身を再生成する"
 
 compile stage008/ld.sc tmp/s8/ld2.o && link tmp/s8/ld2.bin tmp/s8/ld2.o \
     && cmp -s tmp/s8/ld2.bin "$ld"

@@ -143,4 +143,8 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 |---|---|---|
 | 8 | 完了 | [stage008-elf-ld.md](stage008-elf-ld.md) |
 | 9 | 完了 | [stage009-pp.md](stage009-pp.md) |
-| 10 | 次 | C89 言語完成 |
+| 10 | 第 1 部 (文と式) 完了 | [stage010-c89.md](stage010-c89.md) |
+
+Stage 10 は 3 部に分ける。第 2 部は型と宣言 (`unsigned` / `enum` / `union` /
+`typedef` / 関数プロトタイプ / `extern` / `static` / 関数ポインタ /
+多次元配列)，第 3 部は初期化子・可変長引数・構造体の値渡しである。

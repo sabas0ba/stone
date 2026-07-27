@@ -22,7 +22,7 @@ cd "$repo_root"
 mkdir -p tmp/s9
 
 pp=tmp/build/pp.bin
-cc=tmp/build/cc.bin
+cc=tmp/build/cc8.bin
 ld=tmp/build/ld.bin
 src=tests/stage009/src
 exp=tests/stage009/expected
@@ -67,9 +67,9 @@ passthru() {
         && compile "tmp/s9/$name.i" "tmp/s9/$name.o" \
         && link "tmp/s9/$name.bin" "tmp/s9/$name.o" \
         && cmp -s "tmp/s9/$name.bin" "$ref"
-    report $? "passthru: pp($name.sc) -> cc -> ld が $name.bin と一致"
+    report $? "passthru: pp($name) -> cc8 -> ld が $name.bin と一致"
 }
-passthru stage008/cc.sc tmp/build/cc.bin cc
+passthru stage008/cc.sc tmp/build/cc8.bin cc8
 passthru stage008/ld.sc tmp/build/ld.bin ld
 passthru stage009/pp.sc tmp/build/pp.bin pp
 

@@ -33,7 +33,7 @@ SHA-256: e54e418ba47b72253d804addaaa342be3dde4e44db492f611859391e9053afd3
 
 ```
 sh tools/bundle.sh util.h main.c | sh tools/env.sh qemu tmp/build/pp.bin > main.i
-cat main.i | sh tools/env.sh qemu tmp/build/cc.bin > main.o
+cat main.i | sh tools/env.sh qemu tmp/build/cc.bin > main.o   # cc は最新世代
 { cat main.o; printf '\0'; } | sh tools/env.sh qemu tmp/build/ld.bin > main.bin
 ```
 
