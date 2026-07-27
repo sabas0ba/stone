@@ -1,11 +1,11 @@
-/// @file cpp.sc
+/// @file pp.sc
 /// @brief C プリプロセッサ。テキストを受け取り，前処理済みテキストを返す。
 ///
-/// 仕様は docs/stage009-cpp.md，実装言語 sc の仕様は docs/stage005-sc.md 2 章。
+/// 仕様は docs/stage009-pp.md，実装言語 sc の仕様は docs/stage005-sc.md 2 章。
 /// Stage 8 の cc + ld でビルドする。
 ///
 /// @section model 中核となる考え方: 入力フレームの積み
-/// cpp の処理はすべて「文字を 1 個引き出す」操作の上に載っている。引き出し元は
+/// pp の処理はすべて「文字を 1 個引き出す」操作の上に載っている。引き出し元は
 /// 単一のソースではなく，フレームの積みである。底が翻訳単位で，#include は
 /// ファイルのフレームを，マクロ展開は置換結果のフレームを積む。フレームが
 /// 尽きれば自動的に一段下へ戻る。
@@ -155,7 +155,7 @@ int isws(int c) { return c == 32 || c == 9 || c == 13 || c == 10; }
 int isdig(int c) { return c >= '0' && c <= '9'; }
 /// @brief 識別子の先頭に置ける文字か。
 /// @note sc の識別子は英小文字のみだが，マクロ名は大文字が慣習であり，
-///       取り込む外部ヘッダも大文字を使う。cpp は入力言語より広く受ける。
+///       取り込む外部ヘッダも大文字を使う。pp は入力言語より広く受ける。
 int isidh(int c) {
   if (c >= 'a' && c <= 'z') return 1;
   if (c >= 'A' && c <= 'Z') return 1;
@@ -206,7 +206,7 @@ int rdall() {
 }
 
 /// @brief 前処理結果の 1 文字を出力する。
-/// @details 行き先は 3 通り (docs/stage009-cpp.md 4.3)。
+/// @details 行き先は 3 通り (docs/stage009-pp.md 4.3)。
 ///          事前展開中は eb，抑止区間では捨て，それ以外は標準出力。
 int emit(int c) {
   if (edep > 0) {
@@ -1186,7 +1186,7 @@ int e_un() {
 /// @brief 乗除。
 /// @note 0 除算は 0 とする。&& / || が短絡しないため，
 ///       `defined(N) && 100 / N` のような式で停止しないようにするための規定
-///       (docs/stage009-cpp.md 3.4)。
+///       (docs/stage009-pp.md 3.4)。
 int e_mul() {
   int v;
   int r;

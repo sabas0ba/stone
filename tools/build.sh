@@ -68,14 +68,14 @@ build_stage008() {
     echo "built tmp/build/ld.bin" >&2
 }
 
-# Stage 9 は cc + ld でビルドする。cpp 自身は指令を含まないため，
+# Stage 9 は cc + ld でビルドする。pp 自身は指令を含まないため，
 # 前処理を通さずに直接コンパイルできる。
 build_stage009() {
-    { cat stage009/cpp.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/cpp.o
-    { cat tmp/build/cpp.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cpp.bin
-    echo "built tmp/build/cpp.bin" >&2
+    { cat stage009/pp.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/pp.o
+    { cat tmp/build/pp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp.bin
+    echo "built tmp/build/pp.bin" >&2
 }
 
 case "${1:-all}" in

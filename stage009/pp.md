@@ -1,21 +1,25 @@
-# cpp 説明文書
+# pp 説明文書
 
-cpp は C プリプロセッサである。ソース群を束ねたものを受け取り，
+pp は C プリプロセッサである。ソース群を束ねたものを受け取り，
 `#include` の差込みとマクロ展開，条件コンパイル，コメントの除去を行って，
 前処理済みのテキストを返す。設計は
-[stage009-cpp.md](../docs/stage009-cpp.md) を参照。
+[stage009-pp.md](../docs/stage009-pp.md) を参照。
 
-ソース [cpp.sc](cpp.sc) が正本である。バイナリはビルドで再現される生成物であり，
+名称が `cpp` でないのは，`.cpp` が C++ のソース拡張子として広く使われており，
+将来 C++ を扱う場合にその名前が要るためである
+([stage009-pp.md](../docs/stage009-pp.md) 1.2)。
+
+ソース [pp.sc](pp.sc) が正本である。バイナリはビルドで再現される生成物であり，
 git 管理しない。
 
 ## ビルド
 
 ```
 sh tools/build.sh stage009
-# ... -> cc, ld -> cpp.o -> cpp.bin
+# ... -> cc, ld -> pp.o -> pp.bin
 ```
 
-cpp.sc 自身は指令を含まないため，前処理を通さずに cc + ld でビルドできる。
+pp.sc 自身は指令を含まないため，前処理を通さずに cc + ld でビルドできる。
 
 SHA-256: e54e418ba47b72253d804addaaa342be3dde4e44db492f611859391e9053afd3
 
@@ -28,7 +32,7 @@ SHA-256: e54e418ba47b72253d804addaaa342be3dde4e44db492f611859391e9053afd3
 **標準入力から与えた束ね** に限られる。束ねは `tools/bundle.sh` が作る。
 
 ```
-sh tools/bundle.sh util.h main.c | sh tools/env.sh qemu tmp/build/cpp.bin > main.i
+sh tools/bundle.sh util.h main.c | sh tools/env.sh qemu tmp/build/pp.bin > main.i
 cat main.i | sh tools/env.sh qemu tmp/build/cc.bin > main.o
 { cat main.o; printf '\0'; } | sh tools/env.sh qemu tmp/build/ld.bin > main.bin
 ```
@@ -41,7 +45,7 @@ cat main.i | sh tools/env.sh qemu tmp/build/cc.bin > main.o
 指令の試験など，ヘッダを伴わない用途ではこちらが手軽である。
 
 ```
-printf '#define A 1\nint main() { return A; }\n\004' | ... qemu cpp.bin
+printf '#define A 1\nint main() { return A; }\n\004' | ... qemu pp.bin
 ```
 
 ## 対応する指令
@@ -93,7 +97,7 @@ printf '#define A 1\nint main() { return A; }\n\004' | ... qemu cpp.bin
 - `#if` の `||` `&&` `?:` は短絡しない。代わりに 0 除算の結果を 0 と定める
 - GNU 拡張の `, ## __VA_ARGS__` (可変引数が空のときのカンマ削除) は無い
 - 前処理後のソースが cc の字句制限 (識別子は英小文字 15 バイト以下) に
-  収まるかどうかは利用者の責任である。cpp 自身はより広い字句を受け付ける
+  収まるかどうかは利用者の責任である。pp 自身はより広い字句を受け付ける
 
 ## 検証
 
