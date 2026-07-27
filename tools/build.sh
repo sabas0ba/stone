@@ -104,9 +104,22 @@ build_stage010() {
     { cat tmp/build/cc10b.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10b.bin
     echo "built tmp/build/cc10b.bin" >&2
+    # 第 2 部の 2 はフレームの割付け方を変えるので，1 段目 (cc10b が作ったもの)
+    # と正本は一致しない。正本はその 1 段目が自分自身を再コンパイルしたもので，
+    # 以降は固定点になる (B2 == B3)
+    { cat stage010/cc3.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10b.bin > tmp/build/cc10c0.o
+    { cat tmp/build/cc10c0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10c0.bin
+    echo "built tmp/build/cc10c0.bin (bootstrap)" >&2
+    { cat stage010/cc3.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10c0.bin > tmp/build/cc10c.o
+    { cat tmp/build/cc10c.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10c.bin
+    echo "built tmp/build/cc10c.bin" >&2
     # cc.bin は常に最新世代を指す別名
-    cp tmp/build/cc10b.bin tmp/build/cc.bin
-    echo "built tmp/build/cc.bin (= cc10b.bin)" >&2
+    cp tmp/build/cc10c.bin tmp/build/cc.bin
+    echo "built tmp/build/cc.bin (= cc10c.bin)" >&2
 }
 
 case "${1:-all}" in

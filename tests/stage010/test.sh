@@ -1,6 +1,7 @@
 #!/bin/bash
 # Stage 10 テスト: C89 言語完成の検証 (docs/stage010-c89.md 7 章)。
-#   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型と宣言 (cc10b)
+#   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型 (cc10b)，
+#   第 2 部の 2 = 宣言 (cc10c)
 #
 # テストの素材は用途で分ける。
 #   src/       コンパイルして実行するプログラム
@@ -26,8 +27,9 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10b.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10c.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
+ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ld=tmp/build/ld.bin
 src=tests/stage010/src
 exp=tests/stage010/expected
@@ -46,7 +48,7 @@ sh tools/build.sh stage010 > /dev/null 2>&1
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md; do
+for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -54,7 +56,7 @@ for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md; do
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc10a.bin / cc10b.bin の SHA-256 が各 .md 記載値と一致"
+report $? "build: 各世代の SHA-256 が各 .md 記載値と一致"
 
 # 2. セルフホストの健全性
 cmp -s tmp/build/cc10a0.bin tmp/build/cc10a.bin
@@ -65,9 +67,13 @@ report $? "bootstrap: cc10a0.bin == cc10a.bin (第 1 部はコード生成が変
     && link tmp/s10/cc3.bin tmp/s10/cc3.o && cmp -s tmp/s10/cc3.bin "$cca"
 report $? "fixpoint: cc10a が自分自身を再生成する"
 
-compile stage010/cc2.sc tmp/s10/cc4.o && link tmp/s10/cc4.bin tmp/s10/cc4.o \
-    && cmp -s tmp/s10/cc4.bin "$cc"
+{ cat stage010/cc2.sc; printf '\004'; } | sh tools/env.sh qemu "$ccb" > tmp/s10/cc4.o \
+    && link tmp/s10/cc4.bin tmp/s10/cc4.o && cmp -s tmp/s10/cc4.bin "$ccb"
 report $? "fixpoint: cc10b が自分自身を再生成する"
+
+compile stage010/cc3.sc tmp/s10/cc5.o && link tmp/s10/cc5.bin tmp/s10/cc5.o \
+    && cmp -s tmp/s10/cc5.bin "$cc"
+report $? "fixpoint: cc10c が自分自身を再生成する"
 
 # 4. 同値性 (Stage 5 の仕様スイート)
 run_case() {
@@ -116,6 +122,15 @@ featcase feat
 featcase loops
 featcase types
 
+# 宣言の共有 (プロトタイプ・extern・ブロック内宣言)。2 翻訳単位に分ける
+compile $src/decl-a.c tmp/s10/decl-a.o \
+    && compile $src/decl-b.c tmp/s10/decl-b.o \
+    && link tmp/s10/decl.bin tmp/s10/decl-a.o tmp/s10/decl-b.o \
+    && sh tools/env.sh qemu tmp/s10/decl.bin < /dev/null > tmp/s10/decl.out
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s10/decl.out "$exp/decl.txt" > /dev/null
+report $? "feature: decl (プロトタイプ・extern・ブロック内宣言)"
+
 # 6. エラー系
 errcase() {
     want=$1
@@ -135,5 +150,8 @@ errcase 5 '左辺値でない対象への +=' 'int main() { int a; a = 1; 3 += a
 errcase 4 'typedef 名の重複' 'typedef int T; typedef char T; int main() { return 0; }'
 errcase 4 '列挙定数の重複' 'enum { A }; enum { A }; int main() { return 0; }'
 errcase 2 '未定義の struct タグ' 'struct nosuch v; int main() { return 0; }'
+errcase 5 'プロトタイプと定義で引数の個数が違う' 'int f(int a); int f(int a, int b) { return a + b; } int main() { return 0; }'
+errcase 4 '関数の多重定義' 'int f() { return 0; } int f() { return 1; } int main() { return 0; }'
+errcase 1 '局所の static 宣言は未対応' 'int main() { static int x; return 0; }'
 
 summary
