@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stage 10 テスト: C89 言語完成の検証 (docs/stage010-c89.md 7 章)。
 #   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型 (cc10b)，
-#   第 2 部の 2 = 宣言 (cc10c)
+#   第 2 部の 2 = 宣言 (cc10c)，第 2 部の 3 = 識別子と配列 (cc10d)
 #
 # テストの素材は用途で分ける。
 #   src/       コンパイルして実行するプログラム
@@ -27,9 +27,10 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10c.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10d.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
+ccc=tmp/build/cc10c.bin    # 第 2 部の 2
 ld=tmp/build/ld.bin
 src=tests/stage010/src
 exp=tests/stage010/expected
@@ -48,7 +49,7 @@ sh tools/build.sh stage010 > /dev/null 2>&1
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md; do
+for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -61,6 +62,8 @@ report $? "build: 各世代の SHA-256 が各 .md 記載値と一致"
 # 2. セルフホストの健全性
 cmp -s tmp/build/cc10a0.bin tmp/build/cc10a.bin
 report $? "bootstrap: cc10a0.bin == cc10a.bin (第 1 部はコード生成が変わっていない)"
+cmp -s tmp/build/cc10d0.bin tmp/build/cc10d.bin
+report $? "bootstrap: cc10d0.bin == cc10d.bin (第 2 部の 3 もコード生成が変わっていない)"
 
 # 3. 固定点
 { cat stage010/cc.sc; printf '\004'; } | sh tools/env.sh qemu "$cca" > tmp/s10/cc3.o \
@@ -71,9 +74,13 @@ report $? "fixpoint: cc10a が自分自身を再生成する"
     && link tmp/s10/cc4.bin tmp/s10/cc4.o && cmp -s tmp/s10/cc4.bin "$ccb"
 report $? "fixpoint: cc10b が自分自身を再生成する"
 
-compile stage010/cc3.sc tmp/s10/cc5.o && link tmp/s10/cc5.bin tmp/s10/cc5.o \
-    && cmp -s tmp/s10/cc5.bin "$cc"
+{ cat stage010/cc3.sc; printf '\004'; } | sh tools/env.sh qemu "$ccc" > tmp/s10/cc5.o \
+    && link tmp/s10/cc5.bin tmp/s10/cc5.o && cmp -s tmp/s10/cc5.bin "$ccc"
 report $? "fixpoint: cc10c が自分自身を再生成する"
+
+compile stage010/cc4.sc tmp/s10/cc6.o && link tmp/s10/cc6.bin tmp/s10/cc6.o \
+    && cmp -s tmp/s10/cc6.bin "$cc"
+report $? "fixpoint: cc10d が自分自身を再生成する"
 
 # 4. 同値性 (Stage 5 の仕様スイート)
 run_case() {
@@ -121,6 +128,7 @@ featcase() {
 featcase feat
 featcase loops
 featcase types
+featcase mdarr
 
 # 宣言の共有 (プロトタイプ・extern・ブロック内宣言)。2 翻訳単位に分ける
 compile $src/decl-a.c tmp/s10/decl-a.o \
@@ -153,5 +161,6 @@ errcase 2 '未定義の struct タグ' 'struct nosuch v; int main() { return 0; 
 errcase 5 'プロトタイプと定義で引数の個数が違う' 'int f(int a); int f(int a, int b) { return a + b; } int main() { return 0; }'
 errcase 4 '関数の多重定義' 'int f() { return 0; } int f() { return 1; } int main() { return 0; }'
 errcase 1 '局所の static 宣言は未対応' 'int main() { static int x; return 0; }'
+errcase 1 '識別子が 31 バイトを超える' 'int main() { int abcdefghijabcdefghijabcdefghijab; return 0; }'
 
 summary
