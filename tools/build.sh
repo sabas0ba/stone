@@ -147,9 +147,29 @@ build_stage010() {
     { cat tmp/build/cc10f.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10f.bin
     echo "built tmp/build/cc10f.bin" >&2
+    { cat stage010/cc7.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10f.bin > tmp/build/cc10g0.o
+    { cat tmp/build/cc10g0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10g0.bin
+    echo "built tmp/build/cc10g0.bin (bootstrap)" >&2
+    { cat stage010/cc7.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10g0.bin > tmp/build/cc10g.o
+    { cat tmp/build/cc10g.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10g.bin
+    echo "built tmp/build/cc10g.bin" >&2
+    { cat stage010/cc8.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10g.bin > tmp/build/cc10h0.o
+    { cat tmp/build/cc10h0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10h0.bin
+    echo "built tmp/build/cc10h0.bin (bootstrap)" >&2
+    { cat stage010/cc8.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10h0.bin > tmp/build/cc10h.o
+    { cat tmp/build/cc10h.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10h.bin
+    echo "built tmp/build/cc10h.bin" >&2
     # cc.bin は常に最新世代を指す別名
-    cp tmp/build/cc10f.bin tmp/build/cc.bin
-    echo "built tmp/build/cc.bin (= cc10f.bin)" >&2
+    cp tmp/build/cc10h.bin tmp/build/cc.bin
+    echo "built tmp/build/cc.bin (= cc10h.bin)" >&2
 }
 
 case "${1:-all}" in

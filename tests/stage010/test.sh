@@ -2,7 +2,8 @@
 # Stage 10 テスト: C89 言語完成の検証 (docs/stage010-c89.md 7 章)。
 #   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型 (cc10b)，
 #   第 2 部の 2 = 宣言 (cc10c)，第 2 部の 3 = 識別子と配列 (cc10d)，
-#   第 2 部の 4 = 整数型 (cc10e)，第 2 部の 5 = 関数ポインタと static (cc10f)
+#   第 2 部の 4 = 整数型 (cc10e)，第 2 部の 5 = 関数ポインタと static (cc10f)，
+#   第 3 部の 1 = 初期化子 (cc10g)，第 3 部の 2 = 可変長引数 (cc10h)
 #
 # テストの素材は用途で分ける。
 #   src/       コンパイルして実行するプログラム
@@ -19,6 +20,8 @@
 #   5. 新機能: (第 1 部) for / do / switch / break / continue / goto / ?: /
 #      複合代入 / ++ -- / カンマ / sizeof / キャスト
 #      (第 2 部) typedef / enum / union / const・volatile / void / 大文字識別子
+#      (第 3 部) 大域・局所の初期化子，初期値を持つ大域の .text 配置，
+#      可変長引数 (include/stdarg.h を pp 経由で取り込む)
 #   6. エラー系: 反復外の break -> 1, 未定義ラベルへの goto -> 2,
 #      typedef と列挙定数の重複 -> 4, 未定義の struct タグ -> 2
 set -u
@@ -28,12 +31,15 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10f.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10h.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ccc=tmp/build/cc10c.bin    # 第 2 部の 2
 ccd=tmp/build/cc10d.bin    # 第 2 部の 3
 cce=tmp/build/cc10e.bin    # 第 2 部の 4
+ccf=tmp/build/cc10f.bin    # 第 2 部の 5
+ccg=tmp/build/cc10g.bin    # 第 3 部の 1
+pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 src=tests/stage010/src
 exp=tests/stage010/expected
@@ -52,7 +58,7 @@ sh tools/build.sh stage010 > /dev/null 2>&1
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md; do
+for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md cc10g:stage010/cc7.md cc10h:stage010/cc8.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -67,6 +73,8 @@ cmp -s tmp/build/cc10a0.bin tmp/build/cc10a.bin
 report $? "bootstrap: cc10a0.bin == cc10a.bin (第 1 部はコード生成が変わっていない)"
 cmp -s tmp/build/cc10d0.bin tmp/build/cc10d.bin
 report $? "bootstrap: cc10d0.bin == cc10d.bin (第 2 部の 3 もコード生成が変わっていない)"
+cmp -s tmp/build/cc10g0.bin tmp/build/cc10g.bin
+report $? "bootstrap: cc10g0.bin == cc10g.bin (第 3 部の 1 もコード生成が変わっていない)"
 
 # 3. 固定点
 { cat stage010/cc.sc; printf '\004'; } | sh tools/env.sh qemu "$cca" > tmp/s10/cc3.o \
@@ -89,9 +97,17 @@ report $? "fixpoint: cc10d が自分自身を再生成する"
     && link tmp/s10/cc7.bin tmp/s10/cc7.o && cmp -s tmp/s10/cc7.bin "$cce"
 report $? "fixpoint: cc10e が自分自身を再生成する"
 
-compile stage010/cc6.sc tmp/s10/cc8.o && link tmp/s10/cc8.bin tmp/s10/cc8.o \
-    && cmp -s tmp/s10/cc8.bin "$cc"
+{ cat stage010/cc6.sc; printf '\004'; } | sh tools/env.sh qemu "$ccf" > tmp/s10/cc8.o \
+    && link tmp/s10/cc8.bin tmp/s10/cc8.o && cmp -s tmp/s10/cc8.bin "$ccf"
 report $? "fixpoint: cc10f が自分自身を再生成する"
+
+{ cat stage010/cc7.sc; printf '\004'; } | sh tools/env.sh qemu "$ccg" > tmp/s10/cc9.o \
+    && link tmp/s10/cc9.bin tmp/s10/cc9.o && cmp -s tmp/s10/cc9.bin "$ccg"
+report $? "fixpoint: cc10g が自分自身を再生成する"
+
+compile stage010/cc8.sc tmp/s10/cc10.o && link tmp/s10/cc10.bin tmp/s10/cc10.o \
+    && cmp -s tmp/s10/cc10.bin "$cc"
+report $? "fixpoint: cc10h が自分自身を再生成する"
 
 # 4. 同値性 (Stage 5 の仕様スイート)
 run_case() {
@@ -141,6 +157,17 @@ featcase loops
 featcase types
 featcase mdarr
 featcase ints
+featcase init
+
+# 可変長引数。va_list / va_start / va_arg は include/stdarg.h のマクロなので，
+# pp を通してからコンパイルする
+sh tools/bundle.sh include/stdarg.h $src/varg.c | sh tools/env.sh qemu "$pp" > tmp/s10/varg.i \
+    && sh tools/env.sh qemu "$cc" < tmp/s10/varg.i > tmp/s10/varg.o \
+    && link tmp/s10/varg.bin tmp/s10/varg.o \
+    && sh tools/env.sh qemu tmp/s10/varg.bin < /dev/null > tmp/s10/varg.out
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s10/varg.out "$exp/varg.txt" > /dev/null
+report $? "feature: varg (可変長引数)"
 
 # 関数ポインタと static のリンケージ。2 翻訳単位が同名の static を持つ
 compile $src/fnptr-a.c tmp/s10/fnptr-a.o \
@@ -156,6 +183,15 @@ sh tools/env.sh run riscv64-unknown-elf-readelf -sW tmp/s10/fnptr-b.o > tmp/s10/
     && grep -q 'LOCAL .*hidden' tmp/s10/fnptr.sym \
     && grep -q 'GLOBAL .*fromother' tmp/s10/fnptr.sym
 report $? "verify: static は LOCAL，非 static は GLOBAL で出る"
+
+# 初期値を持つ大域は .text (節 1)，持たないものは .bss (節 2) にあること。
+# 実体の置き場が設計どおりかは，値の一致だけでは確かめられない
+sh tools/env.sh run riscv64-unknown-elf-readelf -sW tmp/s10/init.o > tmp/s10/init.sym 2>&1 \
+    && grep -qE 'OBJECT +GLOBAL +DEFAULT +1 +gi$' tmp/s10/init.sym \
+    && grep -qE 'OBJECT +GLOBAL +DEFAULT +1 +gp$' tmp/s10/init.sym \
+    && grep -qE 'OBJECT +LOCAL +DEFAULT +1 +gstat$' tmp/s10/init.sym \
+    && grep -qE 'OBJECT +GLOBAL +DEFAULT +2 +ob$' tmp/s10/init.sym
+report $? "verify: 初期値のある大域は .text，無い大域は .bss に出る"
 
 # 宣言の共有 (プロトタイプ・extern・ブロック内宣言)。2 翻訳単位に分ける
 compile $src/decl-a.c tmp/s10/decl-a.o \
@@ -190,5 +226,13 @@ errcase 4 '関数の多重定義' 'int f() { return 0; } int f() { return 1; } i
 errcase 1 '局所の static 宣言は未対応' 'int main() { static int x; return 0; }'
 errcase 1 '識別子が 31 バイトを超える' 'int main() { int abcdefghijabcdefghijabcdefghijab; return 0; }'
 errcase 5 '関数でないものの間接呼出し' 'int main() { int a; a = 1; return a(1); }'
+errcase 1 'extern 宣言に初期値' 'extern int x = 1; int main() { return 0; }'
+errcase 6 '初期化子が要素数を超える' 'int a[2] = {1, 2, 3}; int main() { return 0; }'
+errcase 1 '初期化子の区切りが不正' 'int a[2] = {1 2}; int main() { return 0; }'
+errcase 1 '名前つき引数のない ...' 'int f(...); int main() { return 0; }'
+errcase 1 'ピリオド 2 個' 'int f(int a, ..); int main() { return 0; }'
+errcase 5 '可変長の呼出しに名前つきが足りない' 'int f(int a, int b, ...); int main() { return f(1); }'
+errcase 5 '個数不明のまま呼んだ後に可変長と判る' 'int main() { return f(1, 2); } int f(int a, ...) { return a; }'
+errcase 5 'プロトタイプと定義で可変長かどうかが違う' 'int f(int a, ...); int f(int a) { return a; } int main() { return 0; }'
 
 summary
