@@ -3,7 +3,8 @@
 #   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型 (cc10b)，
 #   第 2 部の 2 = 宣言 (cc10c)，第 2 部の 3 = 識別子と配列 (cc10d)，
 #   第 2 部の 4 = 整数型 (cc10e)，第 2 部の 5 = 関数ポインタと static (cc10f)，
-#   第 3 部の 1 = 初期化子 (cc10g)，第 3 部の 2 = 可変長引数 (cc10h)
+#   第 3 部の 1 = 初期化子 (cc10g)，第 3 部の 2 = 可変長引数 (cc10h)，
+#   第 3 部の 3 = 構造体の値 (cc10i)
 #
 # テストの素材は用途で分ける。
 #   src/       コンパイルして実行するプログラム
@@ -21,7 +22,8 @@
 #      複合代入 / ++ -- / カンマ / sizeof / キャスト
 #      (第 2 部) typedef / enum / union / const・volatile / void / 大文字識別子
 #      (第 3 部) 大域・局所の初期化子，初期値を持つ大域の .text 配置，
-#      可変長引数 (include/stdarg.h を pp 経由で取り込む)
+#      可変長引数 (include/stdarg.h を pp 経由で取り込む)，
+#      構造体の値渡し・代入・局所の構造体変数・入れ子のメンバ
 #   6. エラー系: 反復外の break -> 1, 未定義ラベルへの goto -> 2,
 #      typedef と列挙定数の重複 -> 4, 未定義の struct タグ -> 2
 set -u
@@ -31,7 +33,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10h.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10i.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ccc=tmp/build/cc10c.bin    # 第 2 部の 2
@@ -39,6 +41,7 @@ ccd=tmp/build/cc10d.bin    # 第 2 部の 3
 cce=tmp/build/cc10e.bin    # 第 2 部の 4
 ccf=tmp/build/cc10f.bin    # 第 2 部の 5
 ccg=tmp/build/cc10g.bin    # 第 3 部の 1
+cch=tmp/build/cc10h.bin    # 第 3 部の 2
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 src=tests/stage010/src
@@ -58,7 +61,7 @@ sh tools/build.sh stage010 > /dev/null 2>&1
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md cc10g:stage010/cc7.md cc10h:stage010/cc8.md; do
+for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md cc10g:stage010/cc7.md cc10h:stage010/cc8.md cc10i:stage010/cc9.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -75,6 +78,8 @@ cmp -s tmp/build/cc10d0.bin tmp/build/cc10d.bin
 report $? "bootstrap: cc10d0.bin == cc10d.bin (第 2 部の 3 もコード生成が変わっていない)"
 cmp -s tmp/build/cc10g0.bin tmp/build/cc10g.bin
 report $? "bootstrap: cc10g0.bin == cc10g.bin (第 3 部の 1 もコード生成が変わっていない)"
+cmp -s tmp/build/cc10i0.bin tmp/build/cc10i.bin
+report $? "bootstrap: cc10i0.bin == cc10i.bin (第 3 部の 3 もコード生成が変わっていない)"
 
 # 3. 固定点
 { cat stage010/cc.sc; printf '\004'; } | sh tools/env.sh qemu "$cca" > tmp/s10/cc3.o \
@@ -105,9 +110,13 @@ report $? "fixpoint: cc10f が自分自身を再生成する"
     && link tmp/s10/cc9.bin tmp/s10/cc9.o && cmp -s tmp/s10/cc9.bin "$ccg"
 report $? "fixpoint: cc10g が自分自身を再生成する"
 
-compile stage010/cc8.sc tmp/s10/cc10.o && link tmp/s10/cc10.bin tmp/s10/cc10.o \
-    && cmp -s tmp/s10/cc10.bin "$cc"
+{ cat stage010/cc8.sc; printf '\004'; } | sh tools/env.sh qemu "$cch" > tmp/s10/cc10.o \
+    && link tmp/s10/cc10.bin tmp/s10/cc10.o && cmp -s tmp/s10/cc10.bin "$cch"
 report $? "fixpoint: cc10h が自分自身を再生成する"
+
+compile stage010/cc9.sc tmp/s10/cc11.o && link tmp/s10/cc11.bin tmp/s10/cc11.o \
+    && cmp -s tmp/s10/cc11.bin "$cc"
+report $? "fixpoint: cc10i が自分自身を再生成する"
 
 # 4. 同値性 (Stage 5 の仕様スイート)
 run_case() {
@@ -158,6 +167,7 @@ featcase types
 featcase mdarr
 featcase ints
 featcase init
+featcase struct
 
 # 可変長引数。va_list / va_start / va_arg は include/stdarg.h のマクロなので，
 # pp を通してからコンパイルする
@@ -234,5 +244,9 @@ errcase 1 'ピリオド 2 個' 'int f(int a, ..); int main() { return 0; }'
 errcase 5 '可変長の呼出しに名前つきが足りない' 'int f(int a, int b, ...); int main() { return f(1); }'
 errcase 5 '個数不明のまま呼んだ後に可変長と判る' 'int main() { return f(1, 2); } int f(int a, ...) { return a; }'
 errcase 5 'プロトタイプと定義で可変長かどうかが違う' 'int f(int a, ...); int f(int a) { return a; } int main() { return 0; }'
+errcase 5 '構造体の返却は未対応' 'struct S { int a; }; struct S f() { struct S s; return s; } int main() { return 0; }'
+errcase 5 '自分自身をメンバに持つ構造体' 'struct S { struct S s; }; int main() { return 0; }'
+errcase 5 '型の違う構造体の代入' 'struct A { int a; }; struct B { int b; }; struct A x; struct B y; int main() { x = y; return 0; }'
+errcase 5 '可変長の可変部に構造体' 'struct S { int a; int b; }; int f(int n, ...); struct S s; int main() { return f(1, s); }'
 
 summary
