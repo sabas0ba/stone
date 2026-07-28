@@ -19,7 +19,7 @@ hex1=tmp/build/hex1.bin
 doc=stage002/hex1.md
 
 # 1. ビルド再現
-sh tools/build.sh stage002 > /dev/null 2>&1
+ensure_build stage002
 rc=$?
 recorded=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
 actual=$(sha256sum "$hex1")

@@ -19,5 +19,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # コンテナ像は env/Containerfile だけで決まる (base image は digest 固定，
+      # パッケージ取得先は snapshot.debian.org の日付固定)。したがって
+      # そのハッシュを鍵にすれば，像をそのまま持ち回してよい。
+      # 復元できれば tools/env.sh build がビルドを省くので，毎回の apt-get が
+      # 丸ごと消える。復元できなければ従来どおりビルドして次回のために保存する。
+      - name: Restore container image
+        id: image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/stone-env.tar
+          key: stone-env-${{ hashFiles('env/Containerfile') }}
+
+      - name: Load container image
+        if: steps.image.outputs.cache-hit == 'true'
+        run: podman load -i tmp/stone-env.tar
+
       - name: Run regression tests
         run: bash tools/test.sh
+
+      # 保存は取り出せなかったときだけ。actions/cache の post 段が
+      # tmp/stone-env.tar を拾って次回へ持ち越す
+      - name: Save container image
+        if: steps.image.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p tmp
+          podman save -o tmp/stone-env.tar stone-env

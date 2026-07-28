@@ -20,7 +20,7 @@ asm=tmp/build/asm.bin
 doc=stage003/asm.md
 
 # 1. ビルド再現
-sh tools/build.sh stage003 > /dev/null 2>&1
+ensure_build stage003
 rc=$?
 recorded=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
 actual=$(sha256sum "$asm")

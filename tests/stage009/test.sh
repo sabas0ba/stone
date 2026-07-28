@@ -49,7 +49,7 @@ link() {
 }
 
 # 1. ビルド再現
-sh tools/build.sh stage009 > /dev/null 2>&1
+ensure_build stage009
 rc=$?
 want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage009/pp.md | cut -d' ' -f2)
 got=$(sha256sum tmp/build/pp.bin); got=${got%% *}
