@@ -2,7 +2,7 @@
 # Stage 10 テスト: C89 言語完成の検証 (docs/stage010-c89.md 7 章)。
 #   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型 (cc10b)，
 #   第 2 部の 2 = 宣言 (cc10c)，第 2 部の 3 = 識別子と配列 (cc10d)，
-#   第 2 部の 4 = 整数型 (cc10e)
+#   第 2 部の 4 = 整数型 (cc10e)，第 2 部の 5 = 関数ポインタと static (cc10f)
 #
 # テストの素材は用途で分ける。
 #   src/       コンパイルして実行するプログラム
@@ -28,11 +28,12 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10e.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10f.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ccc=tmp/build/cc10c.bin    # 第 2 部の 2
 ccd=tmp/build/cc10d.bin    # 第 2 部の 3
+cce=tmp/build/cc10e.bin    # 第 2 部の 4
 ld=tmp/build/ld.bin
 src=tests/stage010/src
 exp=tests/stage010/expected
@@ -51,7 +52,7 @@ sh tools/build.sh stage010 > /dev/null 2>&1
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md cc10e:stage010/cc5.md; do
+for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -84,9 +85,13 @@ report $? "fixpoint: cc10c が自分自身を再生成する"
     && link tmp/s10/cc6.bin tmp/s10/cc6.o && cmp -s tmp/s10/cc6.bin "$ccd"
 report $? "fixpoint: cc10d が自分自身を再生成する"
 
-compile stage010/cc5.sc tmp/s10/cc7.o && link tmp/s10/cc7.bin tmp/s10/cc7.o \
-    && cmp -s tmp/s10/cc7.bin "$cc"
+{ cat stage010/cc5.sc; printf '\004'; } | sh tools/env.sh qemu "$cce" > tmp/s10/cc7.o \
+    && link tmp/s10/cc7.bin tmp/s10/cc7.o && cmp -s tmp/s10/cc7.bin "$cce"
 report $? "fixpoint: cc10e が自分自身を再生成する"
+
+compile stage010/cc6.sc tmp/s10/cc8.o && link tmp/s10/cc8.bin tmp/s10/cc8.o \
+    && cmp -s tmp/s10/cc8.bin "$cc"
+report $? "fixpoint: cc10f が自分自身を再生成する"
 
 # 4. 同値性 (Stage 5 の仕様スイート)
 run_case() {
@@ -137,6 +142,21 @@ featcase types
 featcase mdarr
 featcase ints
 
+# 関数ポインタと static のリンケージ。2 翻訳単位が同名の static を持つ
+compile $src/fnptr-a.c tmp/s10/fnptr-a.o \
+    && compile $src/fnptr-b.c tmp/s10/fnptr-b.o \
+    && link tmp/s10/fnptr.bin tmp/s10/fnptr-a.o tmp/s10/fnptr-b.o \
+    && sh tools/env.sh qemu tmp/s10/fnptr.bin < /dev/null > tmp/s10/fnptr.out
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s10/fnptr.out "$exp/fnptr.txt" > /dev/null
+report $? "feature: fnptr (関数ポインタ・static のリンケージ)"
+
+# static がローカルシンボルとして出ていること (verify 層)
+sh tools/env.sh run riscv64-unknown-elf-readelf -sW tmp/s10/fnptr-b.o > tmp/s10/fnptr.sym 2>&1 \
+    && grep -q 'LOCAL .*hidden' tmp/s10/fnptr.sym \
+    && grep -q 'GLOBAL .*fromother' tmp/s10/fnptr.sym
+report $? "verify: static は LOCAL，非 static は GLOBAL で出る"
+
 # 宣言の共有 (プロトタイプ・extern・ブロック内宣言)。2 翻訳単位に分ける
 compile $src/decl-a.c tmp/s10/decl-a.o \
     && compile $src/decl-b.c tmp/s10/decl-b.o \
@@ -169,5 +189,6 @@ errcase 5 'プロトタイプと定義で引数の個数が違う' 'int f(int a)
 errcase 4 '関数の多重定義' 'int f() { return 0; } int f() { return 1; } int main() { return 0; }'
 errcase 1 '局所の static 宣言は未対応' 'int main() { static int x; return 0; }'
 errcase 1 '識別子が 31 バイトを超える' 'int main() { int abcdefghijabcdefghijabcdefghijab; return 0; }'
+errcase 5 '関数でないものの間接呼出し' 'int main() { int a; a = 1; return a(1); }'
 
 summary
