@@ -14,6 +14,7 @@
 #   第 3 部の 1  初期化子                  cc10g
 #   第 3 部の 2  可変長引数                cc10h
 #   第 3 部の 3  構造体の値                cc10i
+#   第 3 部の 4  構造体の返却              cc10j
 #
 # 各部で見るもの:
 #   固定点   その世代が自分自身を再生成する (B2 == B3)
@@ -33,7 +34,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10i.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10j.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ccc=tmp/build/cc10c.bin    # 第 2 部の 2
@@ -42,6 +43,7 @@ cce=tmp/build/cc10e.bin    # 第 2 部の 4
 ccf=tmp/build/cc10f.bin    # 第 2 部の 5
 ccg=tmp/build/cc10g.bin    # 第 3 部の 1
 cch=tmp/build/cc10h.bin    # 第 3 部の 2
+cci=tmp/build/cc10i.bin    # 第 3 部の 3
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 src=tests/stage010/src
@@ -95,7 +97,7 @@ ok=0
 [ "$rc" -eq 0 ] || ok=1
 for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md \
             cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md \
-            cc10g:stage010/cc7.md cc10h:stage010/cc8.md cc10i:stage010/cc9.md; do
+            cc10g:stage010/cc7.md cc10h:stage010/cc8.md cc10i:stage010/cc9.md cc10j:stage010/cc10.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -272,11 +274,23 @@ section "第 3 部の 3: 構造体の値 (cc10i)"
 # 複写を既存の load / store へ展開するので，出す命令の種類は変わらない
 cmp -s tmp/build/cc10i0.bin tmp/build/cc10i.bin
 report $? "bootstrap: cc10i0.bin == cc10i.bin (コード生成が変わっていない)"
-fixpoint cc10i "$cc" stage010/cc9.sc
+fixpoint cc10i "$cci" stage010/cc9.sc
 featcase struct
-errcase 5 '構造体の返却は未対応' 'struct S { int a; }; struct S f() { struct S s; return s; } int main() { return 0; }'
 errcase 5 '自分自身をメンバに持つ構造体' 'struct S { struct S s; }; int main() { return 0; }'
 errcase 5 '型の違う構造体の代入' 'struct A { int a; }; struct B { int b; }; struct A x; struct B y; int main() { x = y; return 0; }'
 errcase 5 '可変長の可変部に構造体' 'struct S { int a; int b; }; int f(int n, ...); struct S s; int main() { return f(1, s); }'
+
+# ---------------------------------------------------------------------------
+section "第 3 部の 4: 構造体の返却 (cc10j)"
+
+# 返却はデータスタックで受け渡し，引取りを出力段で埋め込むだけなので
+# 既存の命令の出し方は変わらない
+cmp -s tmp/build/cc10j0.bin tmp/build/cc10j.bin
+report $? "bootstrap: cc10j0.bin == cc10j.bin (コード生成が変わっていない)"
+fixpoint cc10j "$cc" stage010/cc10.sc
+featcase sret
+errcase 5 '一時領域への代入' 'struct P { int x; }; struct P mk() { struct P p; p.x = 1; return p; } int main() { mk().x = 5; return 0; }'
+errcase 5 '返却型と違う構造体を返す' 'struct A { int a; }; struct B { int b; }; struct A f() { struct B v; return v; } int main() { return 0; }'
+errcase 5 '構造体を返す関数ポインタ' 'struct P { int x; }; typedef struct P (*FP)(); int main() { FP f; f = 0; f(); return 0; }'
 
 summary
