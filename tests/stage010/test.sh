@@ -15,6 +15,7 @@
 #   第 3 部の 2  可変長引数                cc10h
 #   第 3 部の 3  構造体の値                cc10i
 #   第 3 部の 4  構造体の返却              cc10j
+#   補遺         文字エスケープ            cc10k
 #
 # 各部で見るもの:
 #   固定点   その世代が自分自身を再生成する (B2 == B3)
@@ -34,7 +35,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10j.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10k.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ccc=tmp/build/cc10c.bin    # 第 2 部の 2
@@ -44,6 +45,7 @@ ccf=tmp/build/cc10f.bin    # 第 2 部の 5
 ccg=tmp/build/cc10g.bin    # 第 3 部の 1
 cch=tmp/build/cc10h.bin    # 第 3 部の 2
 cci=tmp/build/cc10i.bin    # 第 3 部の 3
+ccj=tmp/build/cc10j.bin    # 第 3 部の 4
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 src=tests/stage010/src
@@ -97,7 +99,7 @@ ok=0
 [ "$rc" -eq 0 ] || ok=1
 for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md \
             cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md \
-            cc10g:stage010/cc7.md cc10h:stage010/cc8.md cc10i:stage010/cc9.md cc10j:stage010/cc10.md; do
+            cc10g:stage010/cc7.md cc10h:stage010/cc8.md cc10i:stage010/cc9.md cc10j:stage010/cc10.md cc10k:stage010/cc11.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -287,10 +289,21 @@ section "第 3 部の 4: 構造体の返却 (cc10j)"
 # 既存の命令の出し方は変わらない
 cmp -s tmp/build/cc10j0.bin tmp/build/cc10j.bin
 report $? "bootstrap: cc10j0.bin == cc10j.bin (コード生成が変わっていない)"
-fixpoint cc10j "$cc" stage010/cc10.sc
+fixpoint cc10j "$ccj" stage010/cc10.sc
 featcase sret
 errcase 5 '一時領域への代入' 'struct P { int x; }; struct P mk() { struct P p; p.x = 1; return p; } int main() { mk().x = 5; return 0; }'
 errcase 5 '返却型と違う構造体を返す' 'struct A { int a; }; struct B { int b; }; struct A f() { struct B v; return v; } int main() { return 0; }'
 errcase 5 '構造体を返す関数ポインタ' 'struct P { int x; }; typedef struct P (*FP)(); int main() { FP f; f = 0; f(); return 0; }'
+
+# ---------------------------------------------------------------------------
+section "補遺: 文字エスケープ (cc10k)"
+
+# 字句を広げるだけなので，コード生成規則は変わらない
+cmp -s tmp/build/cc10k0.bin tmp/build/cc10k.bin
+report $? "bootstrap: cc10k0.bin == cc10k.bin (コード生成が変わっていない)"
+fixpoint cc10k "$cc" stage010/cc11.sc
+featcase esc
+errcase 1 '桁のない 16 進エスケープ' "int main() { return '\\x'; }"
+errcase 1 '未知のエスケープ' "int main() { return '\\q'; }"
 
 summary
