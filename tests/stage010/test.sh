@@ -1,7 +1,8 @@
 #!/bin/bash
 # Stage 10 テスト: C89 言語完成の検証 (docs/stage010-c89.md 7 章)。
 #   第 1 部 = 文と式 (cc10a)，第 2 部の 1 = 型 (cc10b)，
-#   第 2 部の 2 = 宣言 (cc10c)，第 2 部の 3 = 識別子と配列 (cc10d)
+#   第 2 部の 2 = 宣言 (cc10c)，第 2 部の 3 = 識別子と配列 (cc10d)，
+#   第 2 部の 4 = 整数型 (cc10e)
 #
 # テストの素材は用途で分ける。
 #   src/       コンパイルして実行するプログラム
@@ -27,10 +28,11 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10d.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10e.bin)
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ccc=tmp/build/cc10c.bin    # 第 2 部の 2
+ccd=tmp/build/cc10d.bin    # 第 2 部の 3
 ld=tmp/build/ld.bin
 src=tests/stage010/src
 exp=tests/stage010/expected
@@ -49,7 +51,7 @@ sh tools/build.sh stage010 > /dev/null 2>&1
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md; do
+for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md cc10d:stage010/cc4.md cc10e:stage010/cc5.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -78,9 +80,13 @@ report $? "fixpoint: cc10b が自分自身を再生成する"
     && link tmp/s10/cc5.bin tmp/s10/cc5.o && cmp -s tmp/s10/cc5.bin "$ccc"
 report $? "fixpoint: cc10c が自分自身を再生成する"
 
-compile stage010/cc4.sc tmp/s10/cc6.o && link tmp/s10/cc6.bin tmp/s10/cc6.o \
-    && cmp -s tmp/s10/cc6.bin "$cc"
+{ cat stage010/cc4.sc; printf '\004'; } | sh tools/env.sh qemu "$ccd" > tmp/s10/cc6.o \
+    && link tmp/s10/cc6.bin tmp/s10/cc6.o && cmp -s tmp/s10/cc6.bin "$ccd"
 report $? "fixpoint: cc10d が自分自身を再生成する"
+
+compile stage010/cc5.sc tmp/s10/cc7.o && link tmp/s10/cc7.bin tmp/s10/cc7.o \
+    && cmp -s tmp/s10/cc7.bin "$cc"
+report $? "fixpoint: cc10e が自分自身を再生成する"
 
 # 4. 同値性 (Stage 5 の仕様スイート)
 run_case() {
@@ -129,6 +135,7 @@ featcase feat
 featcase loops
 featcase types
 featcase mdarr
+featcase ints
 
 # 宣言の共有 (プロトタイプ・extern・ブロック内宣言)。2 翻訳単位に分ける
 compile $src/decl-a.c tmp/s10/decl-a.o \
