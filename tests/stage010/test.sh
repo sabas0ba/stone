@@ -89,7 +89,7 @@ errcase() {
 # ---------------------------------------------------------------------------
 section "共通: ビルド再現"
 
-sh tools/build.sh stage010 > /dev/null 2>&1
+ensure_build stage010
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1

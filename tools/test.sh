@@ -16,6 +16,15 @@ sh tools/env.sh run gdb-multiarch --version > /dev/null 2>&1
 report $? "env: gdb-multiarch の導入確認"
 overall_fail=$fail
 
+# ブートストラップ鎖はここで一度だけ作る。各 Stage のテストは
+# STONE_PREBUILT を見て作り直しを省く (tests/lib.sh の ensure_build)。
+# ビルド再現の検査 (生成物の SHA-256 と .md の照合) は各 Stage が従来どおり行う
+echo "== build =="
+sh tools/build.sh all > tmp/test-buildall.log 2>&1
+report $? "build: 全 Stage の生成物 (log: tmp/test-buildall.log)"
+overall_fail=$fail
+export STONE_PREBUILT=1
+
 for t in tests/stage*/test.sh; do
     echo "== $(dirname "$t") =="
     bash "$t"

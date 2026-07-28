@@ -21,7 +21,7 @@ csc() {
 }
 
 # 1. ビルド再現 (B1 と B2 は同一のはずであり，記載値は 1 つ)
-sh tools/build.sh stage006 > /dev/null 2>&1
+ensure_build stage006
 rc=$?
 recorded=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
 actual=$(sha256sum "$scc")

@@ -25,7 +25,7 @@ cstr() {
 }
 
 # 1. ビルド再現
-sh tools/build.sh stage007 > /dev/null 2>&1
+ensure_build stage007
 rc=$?
 recorded=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
 actual=$(sha256sum "$occ")

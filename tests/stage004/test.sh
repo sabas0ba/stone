@@ -18,7 +18,7 @@ sol=tmp/build/sol.bin
 doc=stage004/sol.md
 
 # 1. ビルド再現
-sh tools/build.sh stage004 > /dev/null 2>&1
+ensure_build stage004
 rc=$?
 recorded=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
 actual=$(sha256sum "$sol")

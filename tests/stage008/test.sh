@@ -30,7 +30,7 @@ link() {
 }
 
 # 1. ビルド再現
-sh tools/build.sh stage008 > /dev/null 2>&1
+ensure_build stage008
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
