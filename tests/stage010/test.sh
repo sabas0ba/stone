@@ -312,7 +312,7 @@ errcase 1 '未知のエスケープ' "int main() { return '\\q'; }"
 # ---------------------------------------------------------------------------
 section "補遺 2: 配列への単項 & (cc10l)"
 
-# 退化前の型を控えて & の型を付け替えるだけで，コード生成規則は変わらない
+# 退化前の型を保存して & の型を置き換えるだけで，コード生成規則は変わらない
 cmp -s tmp/build/cc10l0.bin tmp/build/cc10l.bin
 report $? "bootstrap: cc10l0.bin == cc10l.bin (コード生成が変わっていない)"
 fixpoint cc10l "$cc" stage010/cc12.sc
