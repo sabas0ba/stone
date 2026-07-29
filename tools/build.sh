@@ -3,11 +3,38 @@
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
 # 使用法: build.sh [stage002|...|stage010|stage011|all]
+#
+# キャッシュ (スタンプ):
+#   ビルドは決定的である (同じ入力から常に同じバイト列が生成される。
+#   各 Stage のテストが SHA-256 の照合と固定点で保証している)。したがって
+#   入力が前回と一致する Stage は作り直さなくてよい。
+#   各 Stage の tmp/build/<stage>.stamp に「入力のハッシュ」と「生成物の
+#   sha256sum」を記録し，両方が一致すればその Stage を省略する。
+#   入力に前段のスタンプを含めることで，上流の変更は下流全体へ伝播する。
+#   STONE_FORCE_BUILD=1 でスタンプを無視して作り直す (dev-notes.md 1.3)。
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 mkdir -p tmp/build
+
+# run_stage <stage> <生成物 (tmp/build/ 内の名前)...> -- <入力ファイル...>
+run_stage() {
+    name=$1; shift
+    outs=""
+    while [ "$1" != -- ]; do outs="$outs tmp/build/$1"; shift; done
+    shift
+    stamp=tmp/build/$name.stamp
+    new=$(sha256sum "$@" | sha256sum | cut -d' ' -f1)
+    if [ -z "${STONE_FORCE_BUILD:-}" ] && [ -f "$stamp" ] \
+        && [ "$(head -n 1 "$stamp")" = "$new" ] \
+        && tail -n +2 "$stamp" | sha256sum -c --status - 2>/dev/null; then
+        echo "cached $name (stamp: 入力と生成物が前回と一致)" >&2
+        return 0
+    fi
+    "build_$name"
+    { echo "$new"; sha256sum $outs; } > "$stamp"
+}
 
 build_stage002() {
     sh tools/env.sh qemu stage001/hex0.bin < stage002/hex1.hex > tmp/build/hex1.bin
@@ -224,98 +251,77 @@ build_stage011() {
         | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/ctype.i
     sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/ctype.i > tmp/build/ctype.o
     echo "built tmp/build/ctype.o" >&2
+    sh tools/bundle.sh include/stddef.h include/stdlib.h lib/stdlib.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/stdlib.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/stdlib.i > tmp/build/stdlib.o
+    echo "built tmp/build/stdlib.o" >&2
 }
 
-case "${1:-all}" in
-stage002)
-    build_stage002
-    ;;
-stage003)
-    build_stage002
-    build_stage003
-    ;;
-stage004)
-    build_stage002
-    build_stage003
-    build_stage004
-    ;;
-stage005)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    ;;
-stage006)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    build_stage006
-    ;;
-stage007)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    build_stage006
-    build_stage007
-    ;;
-stage008)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    build_stage006
-    build_stage007
-    build_stage008
-    ;;
-stage009)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    build_stage006
-    build_stage007
-    build_stage008
-    build_stage009
-    ;;
-stage010)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    build_stage006
-    build_stage007
-    build_stage008
-    build_stage009
-    build_stage010
-    ;;
-stage011)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    build_stage006
-    build_stage007
-    build_stage008
-    build_stage009
-    build_stage010
-    build_stage011
-    ;;
-all)
-    build_stage002
-    build_stage003
-    build_stage004
-    build_stage005
-    build_stage006
-    build_stage007
-    build_stage008
-    build_stage009
-    build_stage010
-    build_stage011
-    ;;
+# 各 Stage の入力 (ソースと前段のスタンプ) と生成物の宣言。
+# 生成物には後段とテストが参照するファイルをすべて挙げる (.o / .i の
+# 中間物は挙げない。スタンプはそれらの有無を保証しない)。
+# tools/build.sh 自身を入力に含めるのは，ビルド手順の変更で作り直すためである
+do_stage002() {
+    run_stage stage002 hex1.bin \
+        -- stage001/hex0.bin stage002/hex1.hex tools/build.sh
+}
+do_stage003() {
+    run_stage stage003 asm.bin \
+        -- stage003/asm.hex1 tmp/build/stage002.stamp tools/build.sh
+}
+do_stage004() {
+    run_stage stage004 sol.bin \
+        -- stage004/sol.s tmp/build/stage003.stamp tools/build.sh
+}
+do_stage005() {
+    run_stage stage005 sc.bin \
+        -- stage005/sc.sol tmp/build/stage004.stamp tools/build.sh
+}
+do_stage006() {
+    run_stage stage006 scc1.bin scc.bin \
+        -- stage006/scc.sc tmp/build/stage005.stamp tools/build.sh
+}
+do_stage007() {
+    run_stage stage007 occ1.bin occ.bin \
+        -- stage007/occ.sc tmp/build/stage006.stamp tools/build.sh
+}
+do_stage008() {
+    run_stage stage008 cc0.bin ld0.bin cc8.bin ld.bin \
+        -- stage008/cc.sc stage008/ld.sc tmp/build/stage007.stamp tools/build.sh
+}
+do_stage009() {
+    run_stage stage009 pp.bin \
+        -- stage009/pp.sc tmp/build/stage008.stamp tools/build.sh
+}
+# Stage 10 が使うのは cc8 と ld (Stage 8 の成果物) であり pp ではないので，
+# 前段のスタンプは stage008 を指す
+do_stage010() {
+    run_stage stage010 \
+        cc10a0.bin cc10a.bin cc10b.bin cc10c0.bin cc10c.bin \
+        cc10d0.bin cc10d.bin cc10e0.bin cc10e.bin cc10f0.bin cc10f.bin \
+        cc10g0.bin cc10g.bin cc10h0.bin cc10h.bin cc10i0.bin cc10i.bin \
+        cc10j0.bin cc10j.bin cc10k0.bin cc10k.bin cc10l0.bin cc10l.bin \
+        cc.bin \
+        -- stage010/*.sc tmp/build/stage008.stamp tools/build.sh
+}
+do_stage011() {
+    run_stage stage011 string.o ctype.o stdlib.o \
+        -- include/*.h lib/*.c tmp/build/stage009.stamp \
+           tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
+}
+
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011"
+target=${1:-all}
+[ "$target" = all ] && target=stage011
+case " $stages " in
+*" $target "*) ;;
 *)
     echo "usage: build.sh [stage002|...|stage010|stage011|all]" >&2
     exit 2
     ;;
 esac
+for s in $stages; do
+    "do_$s"
+    [ "$s" = "$target" ] && break
+done
+exit 0
