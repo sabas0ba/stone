@@ -1,8 +1,9 @@
 # stdlib.o 説明文書
 
-stdlib.o はフリースタンディング libc の一部で，記憶域の管理
-(C89 7.10.3) を収める。設計は
-[stage011-libc.md](../docs/stage011-libc.md) 7 章。
+stdlib.o はフリースタンディング libc の一部で，記憶域の管理・整列と探索・
+数値変換 (C89 7.10) を収める。設計は
+[stage011-libc.md](../docs/stage011-libc.md) 7 章 (記憶域) と 8 章
+(整列と探索・数値変換)。
 
 ソース [stdlib.c](stdlib.c) とヘッダ
 [../include/stdlib.h](../include/stdlib.h) /
@@ -18,17 +19,25 @@ sh tools/build.sh stage011
 # bundle(stddef.h stdlib.h stdlib.c) | pp | cc -> stdlib.o
 ```
 
-SHA-256: 809ec568887b13fb9af27799a01230547948170097396993f56f0b3f9144901b
+SHA-256: 9194ae5ab6438a0e77535e97251d42ca1500898817a25fa509de14c8272d8f44
 
-- 形式: ELF リロケータブルオブジェクト (RV32)，5008 バイト
+- 形式: ELF リロケータブルオブジェクト (RV32)，10268 バイト
 - コンパイラ: cc10l ([../stage010/cc12.md](../stage010/cc12.md))
 
 ## 収録する関数
 
-malloc, free, calloc, realloc
+| 群 | 関数 |
+|---|---|
+| 記憶域 | malloc, free, calloc, realloc |
+| 整列と探索 | qsort, bsearch |
+| 数値変換 | atoi, strtol, abs, div |
 
 割付けは K&R 型のフリーリスト first-fit で，ヒープは `.bss` 上の
 固定領域 1 MiB である。領域の供給は内部関数 morecore に集約してあり，
 Stage 12 で brk へ差し替える ([stage011-libc.md](../docs/stage011-libc.md)
-7.1)。整列は 4 バイト。qsort / bsearch / atoi / strtol などは
-第 3 部，exit / abort / atexit は Stage 12 の範囲である。
+7.1)。整列は 4 バイト。
+
+qsort の実装は Shell ソート (非再帰・追加記憶域なし。8.1)。strtol の
+溢れは LONG_MAX / LONG_MIN への飽和のみで表す (errno は Stage 12 まで
+無い)。atol / labs / ldiv (long == int の別名)・strtoul・rand は非目標，
+exit / abort / atexit は Stage 12 の範囲である。

@@ -144,7 +144,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 8 | 完了 | [stage008-elf-ld.md](stage008-elf-ld.md) |
 | 9 | 完了 | [stage009-pp.md](stage009-pp.md) |
 | 10 | 第 1 部 (文と式)・第 2 部 (型・宣言・識別子と配列・整数型・関数ポインタ)**完了** (第 1〜3 部すべて。C89 の言語仕様が揃った) | [stage010-c89.md](stage010-c89.md) |
-| 11 | 第 1 部 (土台と純粋な関数: stddef / limits / string / ctype)・第 2 部 (記憶域: malloc / free / calloc / realloc) **完了** | [stage011-libc.md](stage011-libc.md) |
+| 11 | **完了** (第 1〜3 部すべて。土台と純粋な関数・記憶域・整列と探索・数値変換) | [stage011-libc.md](stage011-libc.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言
@@ -161,5 +161,7 @@ Stage 11 の設計は [stage011-libc.md](stage011-libc.md)。着手時に文字�
 第 2 部 (記憶域: malloc / free / calloc / realloc) は，ヒープを `.bss` 上の
 固定領域に置く K&R 型のフリーリストとして完了した (7 章)。供給源は内部関数
 morecore に集約してあり，Stage 12 で brk へ差し替える。
-次は第 3 部 (整列と探索・数値変換: qsort / bsearch / atoi / strtol / abs / div)
+第 3 部 (整列と探索・数値変換: qsort / bsearch / atoi / strtol / abs / div)
+も完了し (8 章)，**Stage 11 は完了した**。OS を要さない範囲の標準ライブラリが
+揃ったので，次は Stage 12 (実行環境の移行と syscall の獲得。2.2 の案の決定)
 である。
