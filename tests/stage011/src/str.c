@@ -124,7 +124,7 @@ int main() {
   ok(strstr(p, "world") == p + 6);
   ok(strstr(p, "o w") == p + 4);
   ok(strstr(p, "xyz") == NULL);
-  ok(strstr(p, "") == p);               /* 空の針は先頭 */
+  ok(strstr(p, "") == p);               /* 空の検索文字列は先頭に一致 */
 
   /* strspn / strcspn / strpbrk */
   ok(strspn("123abc", "0123456789") == 3);
