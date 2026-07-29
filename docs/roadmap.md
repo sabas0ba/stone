@@ -144,6 +144,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 8 | 完了 | [stage008-elf-ld.md](stage008-elf-ld.md) |
 | 9 | 完了 | [stage009-pp.md](stage009-pp.md) |
 | 10 | 第 1 部 (文と式)・第 2 部 (型・宣言・識別子と配列・整数型・関数ポインタ)**完了** (第 1〜3 部すべて。C89 の言語仕様が揃った) | [stage010-c89.md](stage010-c89.md) |
+| 11 | 第 1 部 (土台と純粋な関数: stddef / limits / string / ctype) **完了** | [stage011-libc.md](stage011-libc.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言
@@ -153,4 +154,7 @@ Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 第 3 部の 4 (構造体の返却) をもって Stage 10 は完了し，**Phase A が終わった**。
 次は Phase B (Stage 11 フリースタンディング libc，Stage 12 実行環境，Stage 13 ビルド道具) である。
 Stage 11 の設計は [stage011-libc.md](stage011-libc.md)。着手時に文字エスケープの穴が
-見つかったので，Stage 10 に補遺 (19 章 / cc10k) を足してから進める。
+見つかったので，Stage 10 に補遺 (19 章 / cc10k) を足してから進めた。
+第 1 部の着手時にはさらに「配列への単項 `&`」の穴 (offsetof が配列メンバに
+使えない) が見つかり，補遺 2 (20 章 / cc10l) を足した。第 1 部はその上で完了。
+次は第 2 部 (記憶域: malloc / free / calloc / realloc) である。
