@@ -16,6 +16,7 @@
 #   第 3 部の 3  構造体の値                cc10i
 #   第 3 部の 4  構造体の返却              cc10j
 #   補遺         文字エスケープ            cc10k
+#   補遺 2       配列への単項 &            cc10l
 #
 # 各部で見るもの:
 #   固定点   その世代が自分自身を再生成する (B2 == B3)
@@ -35,7 +36,8 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
 
-cc=tmp/build/cc.bin        # 最新世代 (= cc10k.bin)
+cc=tmp/build/cc.bin        # 最新世代 (= cc10l.bin)
+cck=tmp/build/cc10k.bin    # 補遺
 cca=tmp/build/cc10a.bin    # 第 1 部
 ccb=tmp/build/cc10b.bin    # 第 2 部の 1
 ccc=tmp/build/cc10c.bin    # 第 2 部の 2
@@ -99,7 +101,8 @@ ok=0
 [ "$rc" -eq 0 ] || ok=1
 for pair in cc10a:stage010/cc.md cc10b:stage010/cc2.md cc10c:stage010/cc3.md \
             cc10d:stage010/cc4.md cc10e:stage010/cc5.md cc10f:stage010/cc6.md \
-            cc10g:stage010/cc7.md cc10h:stage010/cc8.md cc10i:stage010/cc9.md cc10j:stage010/cc10.md cc10k:stage010/cc11.md; do
+            cc10g:stage010/cc7.md cc10h:stage010/cc8.md cc10i:stage010/cc9.md cc10j:stage010/cc10.md cc10k:stage010/cc11.md \
+            cc10l:stage010/cc12.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -301,9 +304,19 @@ section "補遺: 文字エスケープ (cc10k)"
 # 字句を広げるだけなので，コード生成規則は変わらない
 cmp -s tmp/build/cc10k0.bin tmp/build/cc10k.bin
 report $? "bootstrap: cc10k0.bin == cc10k.bin (コード生成が変わっていない)"
-fixpoint cc10k "$cc" stage010/cc11.sc
+fixpoint cc10k "$cck" stage010/cc11.sc
 featcase esc
 errcase 1 '桁のない 16 進エスケープ' "int main() { return '\\x'; }"
 errcase 1 '未知のエスケープ' "int main() { return '\\q'; }"
+
+# ---------------------------------------------------------------------------
+section "補遺 2: 配列への単項 & (cc10l)"
+
+# 退化前の型を控えて & の型を付け替えるだけで，コード生成規則は変わらない
+cmp -s tmp/build/cc10l0.bin tmp/build/cc10l.bin
+report $? "bootstrap: cc10l0.bin == cc10l.bin (コード生成が変わっていない)"
+fixpoint cc10l "$cc" stage010/cc12.sc
+featcase aptr
+errcase 5 '左辺値でも配列でもない式への &' 'int main() { int x; return &(x + 1) != 0; }'
 
 summary
