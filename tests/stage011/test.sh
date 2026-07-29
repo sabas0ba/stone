@@ -1,8 +1,8 @@
 #!/bin/bash
-# Stage 11 テスト: フリースタンディング libc 第 1 部の検証
-# (docs/stage011-libc.md 5 章)。
+# Stage 11 テスト: フリースタンディング libc 第 1 部・第 2 部の検証
+# (docs/stage011-libc.md 5 章・7.5)。
 #
-#   ビルド再現   string.o / ctype.o の SHA-256 が各 .md 記載値と一致する
+#   ビルド再現   string.o / ctype.o / stdlib.o の SHA-256 が各 .md 記載値と一致する
 #   値の照合     各関数を境界込みで呼び，結果を出力して照合する
 #   リンクの単位 使わない翻訳単位を並べなくてもリンクが通ること
 #                (str は string.o のみ，cty は ctype.o のみ，def はどちらも無し)
@@ -31,7 +31,7 @@ runcase() {
     name=$1
     shift
     sh tools/bundle.sh include/stddef.h include/limits.h \
-        include/string.h include/ctype.h "$src/$name.c" \
+        include/string.h include/ctype.h include/stdlib.h "$src/$name.c" \
         | sh tools/env.sh qemu "$pp" > "tmp/s11/$name.i" \
         && sh tools/env.sh qemu "$cc" < "tmp/s11/$name.i" > "tmp/s11/$name.o" \
         && { cat "tmp/s11/$name.o" "$@"; printf '\0'; } \
@@ -49,7 +49,7 @@ ensure_build stage011
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in string:lib/string.md ctype:lib/ctype.md; do
+for pair in string:lib/string.md ctype:lib/ctype.md stdlib:lib/stdlib.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -57,16 +57,18 @@ for pair in string:lib/string.md ctype:lib/ctype.md; do
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: string.o / ctype.o の SHA-256 が各 .md 記載値と一致"
+report $? "build: string.o / ctype.o / stdlib.o の SHA-256 が各 .md 記載値と一致"
 
 # ---------------------------------------------------------------------------
 section "値の照合とリンクの単位"
 
 # def はヘッダだけで完結する (オブジェクトを 1 個も並べない)
 runcase def
-# str は string.o だけ，cty は ctype.o だけでリンクが通る
+# str は string.o だけ，cty は ctype.o だけ，mal は stdlib.o だけで
+# リンクが通る
 runcase str tmp/build/string.o
 runcase cty tmp/build/ctype.o
+runcase mal tmp/build/stdlib.o
 
 # ---------------------------------------------------------------------------
 section "自己適用"

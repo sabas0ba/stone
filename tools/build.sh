@@ -224,6 +224,10 @@ build_stage011() {
         | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/ctype.i
     sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/ctype.i > tmp/build/ctype.o
     echo "built tmp/build/ctype.o" >&2
+    sh tools/bundle.sh include/stddef.h include/stdlib.h lib/stdlib.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/stdlib.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/stdlib.i > tmp/build/stdlib.o
+    echo "built tmp/build/stdlib.o" >&2
 }
 
 case "${1:-all}" in
