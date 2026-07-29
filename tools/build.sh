@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|...|stage009|stage010|all]
+# 使用法: build.sh [stage002|...|stage010|stage011|all]
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -197,9 +197,33 @@ build_stage010() {
     { cat tmp/build/cc10k.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10k.bin
     echo "built tmp/build/cc10k.bin" >&2
+    { cat stage010/cc12.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10k.bin > tmp/build/cc10l0.o
+    { cat tmp/build/cc10l0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10l0.bin
+    echo "built tmp/build/cc10l0.bin (bootstrap)" >&2
+    { cat stage010/cc12.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc10l0.bin > tmp/build/cc10l.o
+    { cat tmp/build/cc10l.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10l.bin
+    echo "built tmp/build/cc10l.bin" >&2
     # cc.bin は常に最新世代を指す別名
-    cp tmp/build/cc10k.bin tmp/build/cc.bin
-    echo "built tmp/build/cc.bin (= cc10k.bin)" >&2
+    cp tmp/build/cc10l.bin tmp/build/cc.bin
+    echo "built tmp/build/cc.bin (= cc10l.bin)" >&2
+}
+
+# Stage 11 は Stage 10 の成果物 (pp + cc) でビルドする。libc はリンク済みの
+# 実行像ではなくオブジェクトのまま置き，利用者が必要なものだけ ld へ並べる
+# (docs/stage011-libc.md 2.2)。ヘッダは束ねで pp へ渡す (docs/stage009-pp.md 2.2)
+build_stage011() {
+    sh tools/bundle.sh include/stddef.h include/string.h lib/string.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/string.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/string.i > tmp/build/string.o
+    echo "built tmp/build/string.o" >&2
+    sh tools/bundle.sh include/ctype.h lib/ctype.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/ctype.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/ctype.i > tmp/build/ctype.o
+    echo "built tmp/build/ctype.o" >&2
 }
 
 case "${1:-all}" in
@@ -266,6 +290,18 @@ stage010)
     build_stage009
     build_stage010
     ;;
+stage011)
+    build_stage002
+    build_stage003
+    build_stage004
+    build_stage005
+    build_stage006
+    build_stage007
+    build_stage008
+    build_stage009
+    build_stage010
+    build_stage011
+    ;;
 all)
     build_stage002
     build_stage003
@@ -276,9 +312,10 @@ all)
     build_stage008
     build_stage009
     build_stage010
+    build_stage011
     ;;
 *)
-    echo "usage: build.sh [stage002|...|stage009|stage010|all]" >&2
+    echo "usage: build.sh [stage002|...|stage010|stage011|all]" >&2
     exit 2
     ;;
 esac
