@@ -2,12 +2,25 @@
 # リグレッションテスト (ローカル・CI 共用)。
 # 環境の検証を行った後，各 Stage のテスト (tests/stage*/test.sh) を実行する。
 # 各 Stage のテスト実体は当該ディレクトリ配下に置き，本スクリプトには追加しない。
+#
+# 使用法: test.sh [stageNNN ...]
+#   引数なしなら全 Stage。引数を与えるとその Stage のテストだけを実行する。
+#   ビルドは常に全段を対象にするが，スタンプ (tools/build.sh) により
+#   変更の無い段は作り直されない (docs/dev-notes.md 1.3)。
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp
+
+targets="$*"
+for s in $targets; do
+    if [ ! -f "tests/$s/test.sh" ]; then
+        echo "error: tests/$s/test.sh が無い" >&2
+        exit 2
+    fi
+done
 
 echo "== env =="
 sh tools/env.sh build > tmp/test-build.log 2>&1
@@ -26,6 +39,13 @@ overall_fail=$fail
 export STONE_PREBUILT=1
 
 for t in tests/stage*/test.sh; do
+    s=$(basename "$(dirname "$t")")
+    if [ -n "$targets" ]; then
+        case " $targets " in
+        *" $s "*) ;;
+        *) continue ;;
+        esac
+    fi
     echo "== $(dirname "$t") =="
     bash "$t"
     overall_fail=$((overall_fail + $?))
