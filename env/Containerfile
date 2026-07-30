@@ -1,6 +1,13 @@
 # stone 開発環境
 # base: debian:bookworm-slim (linux/amd64), digest 固定 (2026-07-13 ビルド)
-FROM docker.io/library/debian@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
+#
+# 取得元 (registry) は BASE_REPO で差し替えられる。digest で固定してあるので
+# どの registry から取っても中身は同一であり，再現性は損なわれない。
+# docker.io は無認証での取得に回数制限があり，CI の像再ビルドが
+# これで失敗することがあるため，tools/env.sh がミラーへ回れるようにしてある
+# (docs/dev-notes.md 4 章)。
+ARG BASE_REPO=docker.io/library/debian
+FROM ${BASE_REPO}@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
 
 # パッケージ取得先を base image 作成日時点の snapshot に固定する
 RUN rm /etc/apt/sources.list.d/debian.sources && printf '%s\n' \

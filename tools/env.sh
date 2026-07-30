@@ -52,6 +52,32 @@ installed_packages() {
 env_stamp() {
     sha256sum "$repo_root/env/Containerfile" | cut -d' ' -f1
 }
+
+# base image の取得元。digest は Containerfile で固定してあるので，どこから
+# 取っても中身は同一である。公式 (docker.io) を先に試し，無認証取得の
+# 回数制限で拒否された場合にミラーへ回る (docs/dev-notes.md 4 章)
+base_repos=${STONE_BASE_REPOS:-"docker.io/library/debian mirror.gcr.io/library/debian public.ecr.aws/docker/library/debian"}
+
+# 像をビルドする。各取得元につき 2 回まで試し，最初に成功したものを採る。
+# 1 回目と 2 回目の間を空けるのは，一過性の拒否 (瞬間的な混雑) を拾うためである
+build_image() {
+    _stamp=$1
+    for _repo in $base_repos; do
+        _n=0
+        while [ "$_n" -lt 2 ]; do
+            _n=$((_n + 1))
+            if "$engine" build -t "$image" --label "stone.env=$_stamp" \
+                    --build-arg "BASE_REPO=$_repo" \
+                    -f "$host_root/env/Containerfile" "$host_root/env"; then
+                echo "built image from $_repo" >&2
+                return 0
+            fi
+            echo "image build failed ($_repo, 試行 $_n/2)" >&2
+            if [ "$_n" -lt 2 ]; then sleep 30; fi
+        done
+    done
+    return 1
+}
 image_stamp() {
     "$engine" inspect --format '{{ index .Config.Labels "stone.env" }}' "$image" 2>/dev/null || true
 }
@@ -67,19 +93,11 @@ build)
     # packages.lock の照合は像を作ったかどうかに関わらず必ず行う
     stamp=$(env_stamp)
     if [ -n "${STONE_REBUILD:-}" ] || [ "$(image_stamp)" != "$stamp" ]; then
-        # base image の取得は registry の一時的な拒否 (rate limit) で
-        # 失敗することがあるため，間を置いて 3 回まで試す
-        n=1
-        until "$engine" build -t "$image" --label "stone.env=$stamp" \
-                -f "$host_root/env/Containerfile" "$host_root/env"; do
-            if [ "$n" -ge 3 ]; then
-                echo "error: image build failed after $n attempts" >&2
-                exit 1
-            fi
-            n=$((n + 1))
-            echo "image build failed; retrying ($n/3) in 30s" >&2
-            sleep 30
-        done
+        if ! build_image "$stamp"; then
+            echo "error: どの取得元でも像をビルドできなかった" >&2
+            echo "       試した取得元: $base_repos" >&2
+            exit 1
+        fi
     else
         echo "image $image is up to date (stone.env=$stamp)" >&2
     fi

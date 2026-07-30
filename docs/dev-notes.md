@@ -289,13 +289,19 @@ sol (`stage005/sc.sol`) はコメントが `#` なので `sed 's|#.*||'` に読�
 - **CI の runner は実行系の版が混在する。** コンテナ像キャッシュの鍵に
   podman / crun の版を含めたことで，版の違う runner に当たるとキャッシュ
   ミスになり像を作り直す。このとき base image の取得が docker.io の
-  無認証 rate limit で即座に失敗することがある (`requested access to the
-  resource is denied`)。`env.sh build` は間を置いて 3 回まで試し，
-  `tools/test.sh` は環境が用意できなければログを表示して早期に中止する
-  (像なしで続行すると qemu を使う全テストが連鎖失敗し，原因が読めなくなる)。
-  それでも失敗が続く場合は，base image の取得元をミラー
-  (mirror.gcr.io など。digest は同一) へ切り替えるか registry への認証を
-  検討する。
+  無認証 rate limit で失敗することがある (`requested access to the
+  resource is denied`)。**キャッシュがヒットするかどうかは runner 次第
+  なので，この失敗は「たまに落ちる」形で現れる** (同じ HEAD でも
+  ヒットすれば緑になる)。対策は 3 つ:
+  - `env/Containerfile` の base image は `ARG BASE_REPO` で取得元を
+    差し替えられる。**digest は固定したままなので，どの registry から
+    取っても中身は同一**であり再現性は損なわれない
+  - `env.sh build` は取得元を順に試す (docker.io → mirror.gcr.io →
+    public.ecr.aws)。各取得元につき 2 回，間を 30 秒空ける。
+    `STONE_BASE_REPOS` で上書きできる
+  - `tools/test.sh` は環境が用意できなければ `tmp/test-build.log` を
+    表示して早期に中止する。像なしで続行すると qemu を使う全テストが
+    連鎖失敗し (170 件以上)，本当の原因が埋もれるためである
 - **キャッシュしたコンテナ像の tar は，実行系の更新で使えなくなることがある。**
   CI が保存した `stone-env.tar` を runner 側の podman / crun の更新後に
   復元すると，`podman run` が一律に
