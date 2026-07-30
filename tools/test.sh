@@ -24,7 +24,16 @@ done
 
 echo "== env =="
 sh tools/env.sh build > tmp/test-build.log 2>&1
-report $? "env: イメージビルドと packages.lock の照合 (log: tmp/test-build.log)"
+rc=$?
+report $rc "env: イメージビルドと packages.lock の照合 (log: tmp/test-build.log)"
+if [ "$rc" -ne 0 ]; then
+    # 環境が用意できなければ以降は全滅する。ログを出して早期に中止する
+    echo "---- tmp/test-build.log (末尾 40 行) ----"
+    tail -n 40 tmp/test-build.log
+    echo "----------------------------------------"
+    echo "result: environment unavailable"
+    exit 1
+fi
 sh tools/env.sh run gdb-multiarch --version > /dev/null 2>&1
 report $? "env: gdb-multiarch の導入確認"
 overall_fail=$fail
