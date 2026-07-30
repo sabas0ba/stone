@@ -1,6 +1,6 @@
-/* stdlib.c --- 記憶域の管理 (C89 7.10.3)
+/* stdlib.c --- 記憶域の管理・整列と探索・数値変換 (C89 7.10)
  *
- * 設計は docs/stage011-libc.md 7 章。要点:
+ * 記憶域の設計は docs/stage011-libc.md 7 章。要点:
  *   - ヒープは .bss 上の固定領域 (1 MiB)。供給は morecore だけが行い，
  *     Stage 12 で brk へ差し替える境界をこの 1 関数に集める
  *   - 割付けは K&R 型のフリーリスト first-fit。各ブロックは 8 バイトの
@@ -153,4 +153,140 @@ void *realloc(void *ap, size_t n)
   for (i = 0; i < old; i++) q[i] = s[i];        /* old < n が保証されている */
   free(ap);
   return (void *)q;
+}
+
+/* ---- 整列と探索 (C89 7.10.5)。設計は docs/stage011-libc.md 8 章 ---- */
+
+static void swapb(char *a, char *b, size_t size)
+{
+  size_t i;
+  char t;
+
+  for (i = 0; i < size; i++) { t = a[i]; a[i] = b[i]; b[i] = t; }
+}
+
+/* qsort の名前は API のものであり，実装は Shell ソートである
+ * (非再帰・追加記憶域なし。8.1)。安定性は要求されない (C89 どおり) */
+void qsort(void *b, size_t nmemb, size_t size, int (*cmp)(void *, void *))
+{
+  size_t gap;
+  size_t i;
+  size_t j;
+  char *p;
+
+  p = (char *)b;
+  for (gap = nmemb / 2; gap > 0; gap = gap / 2)
+    for (i = gap; i < nmemb; i++)
+      for (j = i; j >= gap && cmp(p + (j - gap) * size, p + j * size) > 0;
+           j = j - gap)
+        swapb(p + (j - gap) * size, p + j * size, size);
+}
+
+/* 比較関数の第 1 引数がキー，第 2 引数が配列要素 (C89 どおり) */
+void *bsearch(void *key, void *b, size_t nmemb, size_t size,
+              int (*cmp)(void *, void *))
+{
+  size_t lo;
+  size_t hi;
+  size_t mid;
+  int c;
+  char *p;
+
+  lo = 0;
+  hi = nmemb;
+  while (lo < hi) {
+    mid = lo + (hi - lo) / 2;
+    p = (char *)b + mid * size;
+    c = cmp(key, (void *)p);
+    if (c == 0) return (void *)p;
+    if (c > 0) lo = mid + 1;
+    else hi = mid;
+  }
+  return NULL;
+}
+
+/* ---- 数値変換 (C89 7.10.1)。設計は docs/stage011-libc.md 8.3 ---- */
+
+static int digval(int c)
+{
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+  return -1;
+}
+
+/* 溢れは LONG_MAX / LONG_MIN への飽和のみで表す (errno は Stage 12 まで
+ * 無い)。蓄積は unsigned で行う。負のときの上限 2147483648 は long に
+ * 収まらないためである */
+long strtol(char *s, char **endptr, int base)
+{
+  char *p;
+  int neg;
+  int d;
+  int any;
+  int over;
+  unsigned acc;
+  unsigned lim;
+  unsigned cut;
+  unsigned cutd;
+
+  if (endptr) *endptr = s;
+  if (base < 0 || base == 1 || base > 36) return 0;
+  p = s;
+  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\v'
+         || *p == '\f' || *p == '\r')
+    p++;
+  neg = 0;
+  if (*p == '+') p++;
+  else if (*p == '-') { neg = 1; p++; }
+  if ((base == 0 || base == 16) && p[0] == '0'
+      && (p[1] == 'x' || p[1] == 'X')
+      && digval(p[2]) >= 0 && digval(p[2]) < 16) {
+    p = p + 2;
+    base = 16;
+  } else if (base == 0) {
+    if (*p == '0') base = 8;
+    else base = 10;
+  }
+  lim = 0x7fffffff;
+  if (neg) lim = lim + 1;               /* 2147483648 (unsigned) */
+  cut = lim / (unsigned)base;
+  cutd = lim % (unsigned)base;
+  acc = 0;
+  any = 0;
+  over = 0;
+  while ((d = digval(*p)) >= 0 && d < base) {
+    if (over || acc > cut || (acc == cut && (unsigned)d > cutd)) over = 1;
+    else acc = acc * (unsigned)base + (unsigned)d;
+    any = 1;
+    p++;
+  }
+  if (!any) return 0;                   /* *endptr は先頭のまま (C89 どおり) */
+  if (endptr) *endptr = p;
+  if (over) acc = lim;
+  if (neg) return (long)(0 - acc);      /* 2147483648 を含めて型変換だけで済む */
+  return (long)acc;
+}
+
+int atoi(char *s)
+{
+  return (int)strtol(s, NULL, 10);
+}
+
+/* abs(INT_MIN) は未定義 (C89 どおり) */
+int abs(int n)
+{
+  if (n < 0) return -n;
+  return n;
+}
+
+/* RV32M の div / rem は 0 方向への切捨てで，C89 の要求
+ * (quot * denom + rem == numer) と一致する */
+div_t div(int numer, int denom)
+{
+  div_t r;
+
+  r.quot = numer / denom;
+  r.rem = numer % denom;
+  return r;
 }

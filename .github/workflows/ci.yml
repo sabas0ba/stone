@@ -30,12 +30,23 @@ jobs:
       # そのハッシュを鍵にすれば，像をそのまま持ち回してよい。
       # 復元できれば tools/env.sh build がビルドを省くので，毎回の apt-get が
       # 丸ごと消える。復元できなければ従来どおりビルドして次回のために保存する。
+      #
+      # 鍵には実行系 (podman / OCI ランタイム) の版も含める。runner の更新で
+      # 実行系が変わると，古い版で保存した tar の像が
+      # "crun: unknown version specified" で実行できなくなることがある
+      # (docs/dev-notes.md 4 章)。版が変われば鍵が変わり，像を作り直す
+      - name: Container runtime version (for cache key)
+        id: rt
+        run: |
+          ver=$( { podman --version; podman info --format '{{.Host.OCIRuntime.Version}}' 2>/dev/null | head -n 1; } | tr -cd 'A-Za-z0-9._-' )
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+
       - name: Restore container image
         id: image
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tmp/stone-env.tar
-          key: stone-env-${{ hashFiles('env/Containerfile') }}
+          key: stone-env-${{ steps.rt.outputs.ver }}-${{ hashFiles('env/Containerfile') }}
 
       - name: Load container image
         if: steps.image.outputs.cache-hit == 'true'

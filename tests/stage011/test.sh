@@ -1,6 +1,6 @@
 #!/bin/bash
-# Stage 11 テスト: フリースタンディング libc 第 1 部・第 2 部の検証
-# (docs/stage011-libc.md 5 章・7.5)。
+# Stage 11 テスト: フリースタンディング libc 第 1〜3 部の検証
+# (docs/stage011-libc.md 5 章・7.5・8.5)。
 #
 #   ビルド再現   string.o / ctype.o / stdlib.o の SHA-256 が各 .md 記載値と一致する
 #   値の照合     各関数を境界込みで呼び，結果を出力して照合する
@@ -64,11 +64,13 @@ section "値の照合とリンクの単位"
 
 # def はヘッダだけで完結する (オブジェクトを 1 個も並べない)
 runcase def
-# str は string.o だけ，cty は ctype.o だけ，mal は stdlib.o だけで
-# リンクが通る
+# str は string.o だけ，cty は ctype.o だけ，mal / srt / num は
+# stdlib.o だけでリンクが通る
 runcase str tmp/build/string.o
 runcase cty tmp/build/ctype.o
 runcase mal tmp/build/stdlib.o
+runcase srt tmp/build/stdlib.o
+runcase num tmp/build/stdlib.o
 
 # ---------------------------------------------------------------------------
 section "自己適用"
