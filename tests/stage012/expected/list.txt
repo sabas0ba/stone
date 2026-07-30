@@ -1,0 +1,4 @@
+8 bin.dat
+10 dir/in.txt
+0 empty.txt
+4 top.txt

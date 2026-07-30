@@ -150,7 +150,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 9 | 完了 | [stage009-pp.md](stage009-pp.md) |
 | 10 | 第 1 部 (文と式)・第 2 部 (型・宣言・識別子と配列・整数型・関数ポインタ)**完了** (第 1〜3 部すべて。C89 の言語仕様が揃った) | [stage010-c89.md](stage010-c89.md) |
 | 11 | **完了** (第 1〜3 部すべて。土台と純粋な関数・記憶域・整列と探索・数値変換) | [stage011-libc.md](stage011-libc.md) |
-| 12 | 設計完了 (案 Y = 自作の簡易 OS + POSIX 風環境に決定。実装は第 1 部から) | [stage012-os.md](stage012-os.md) |
+| 12 | 第 1 部 (共有領域と sfs) **完了** (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言
@@ -176,4 +176,8 @@ Stage 12 は設計を終えた ([stage012-os.md](stage012-os.md))。実行環境
 互換。ホストとのファイル交換は memory-backend-file による sfs イメージの
 注入で行う。cc と言語・ABI は変えず，特権命令と ecall の実体はリンカの
 新世代 (ld12) の前置部に閉じる。libc は純粋部と環境部に分ける。
-次は第 1 部 (共有領域と sfs) の実装である。
+第 1 部 (共有領域と sfs) は完了した: sfs のバイト配置を確定し
+(stage012-os.md 4.3)，ホスト側の変換道具 (tools/sfs.sh) と
+memory-backend-file による注入・回収 (tools/run-qemu.sh の
+STONE_QEMU_RAMFILE) を実装，ベアメタルのゲストプログラムによる
+読み書きまで検証した。次は第 2 部 (ld12 とカーネル) である。

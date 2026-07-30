@@ -89,7 +89,7 @@ qemu)
     exec "$engine" run --rm -i -v "$host_root:/work" \
         ${STONE_CONTAINER_NAME:+--name "$STONE_CONTAINER_NAME"} \
         ${STONE_QEMU_GDB:+-p "127.0.0.1:$STONE_QEMU_GDB:$STONE_QEMU_GDB" -e STONE_QEMU_GDB} \
-        -e STONE_QEMU_TRACE \
+        -e STONE_QEMU_TRACE -e STONE_QEMU_RAMFILE \
         "$image" sh tools/run-qemu.sh "$@"
     ;;
 *)
