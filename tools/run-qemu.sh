@@ -14,6 +14,11 @@
 #                     レジスタ値も必要な場合は追加オプションで -d in_asm,cpu,int を渡す
 #   STONE_QEMU_GDB    GDB stub の待受け TCP ポート。指定時は最初の命令を実行する前に
 #                     停止し (-S)，デバッガの接続を待つ
+#   STONE_QEMU_RAMFILE
+#                     RAM (128 MiB) 全体を裏づけるホスト側ファイル (share=on)。
+#                     ゲストの書込みがそのままファイルへ現れるので，共有領域
+#                     (sfs イメージ) の注入と回収に使う (docs/stage012-os.md 4 章)。
+#                     こちらは観測専用ではなく，ファイル交換の正規の経路である
 set -eu
 
 bios="$1"
@@ -26,6 +31,12 @@ set -- \
     -monitor none \
     -serial stdio \
     "$@"
+
+if [ -n "${STONE_QEMU_RAMFILE:-}" ]; then
+    set -- "$@" -m 128M \
+        -object memory-backend-file,id=stone-ram,size=128M,mem-path="$STONE_QEMU_RAMFILE",share=on \
+        -machine memory-backend=stone-ram
+fi
 
 if [ -n "${STONE_QEMU_TRACE:-}" ]; then
     set -- "$@" -singlestep -d in_asm,int -D "$STONE_QEMU_TRACE"
