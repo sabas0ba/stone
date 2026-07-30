@@ -286,6 +286,16 @@ sol (`stage005/sc.sol`) はコメントが `#` なので `sed 's|#.*||'` に読�
   (`mk().x`)。しかしその実体は一時領域なので代入先にはできない。
   `elv` (左辺値) だけで判定すると `mk().x = 5` が黙って通り，捨てられる
   領域へ書くだけになる。一時領域であることを別の印 (`erv`) で持つ。
+- **CI の runner は実行系の版が混在する。** コンテナ像キャッシュの鍵に
+  podman / crun の版を含めたことで，版の違う runner に当たるとキャッシュ
+  ミスになり像を作り直す。このとき base image の取得が docker.io の
+  無認証 rate limit で即座に失敗することがある (`requested access to the
+  resource is denied`)。`env.sh build` は間を置いて 3 回まで試し，
+  `tools/test.sh` は環境が用意できなければログを表示して早期に中止する
+  (像なしで続行すると qemu を使う全テストが連鎖失敗し，原因が読めなくなる)。
+  それでも失敗が続く場合は，base image の取得元をミラー
+  (mirror.gcr.io など。digest は同一) へ切り替えるか registry への認証を
+  検討する。
 - **キャッシュしたコンテナ像の tar は，実行系の更新で使えなくなることがある。**
   CI が保存した `stone-env.tar` を runner 側の podman / crun の更新後に
   復元すると，`podman run` が一律に

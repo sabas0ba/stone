@@ -67,8 +67,19 @@ build)
     # packages.lock の照合は像を作ったかどうかに関わらず必ず行う
     stamp=$(env_stamp)
     if [ -n "${STONE_REBUILD:-}" ] || [ "$(image_stamp)" != "$stamp" ]; then
-        "$engine" build -t "$image" --label "stone.env=$stamp" \
-            -f "$host_root/env/Containerfile" "$host_root/env"
+        # base image の取得は registry の一時的な拒否 (rate limit) で
+        # 失敗することがあるため，間を置いて 3 回まで試す
+        n=1
+        until "$engine" build -t "$image" --label "stone.env=$stamp" \
+                -f "$host_root/env/Containerfile" "$host_root/env"; do
+            if [ "$n" -ge 3 ]; then
+                echo "error: image build failed after $n attempts" >&2
+                exit 1
+            fi
+            n=$((n + 1))
+            echo "image build failed; retrying ($n/3) in 30s" >&2
+            sleep 30
+        done
     else
         echo "image $image is up to date (stone.env=$stamp)" >&2
     fi
