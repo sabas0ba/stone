@@ -325,7 +325,7 @@ do_stage010() {
         cc10g0.bin cc10g.bin cc10h0.bin cc10h.bin cc10i0.bin cc10i.bin \
         cc10j0.bin cc10j.bin cc10k0.bin cc10k.bin cc10l0.bin cc10l.bin \
         cc.bin \
-        -- stage010/*.sc tmp/build/stage008.stamp tools/build.sh
+        -- stage010/*.sc stage010/include/*.h tmp/build/stage008.stamp tools/build.sh
 }
 do_stage011() {
     run_stage stage011 l11_string.o l11_ctype.o l11_stdlib.o \
