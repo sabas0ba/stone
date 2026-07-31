@@ -243,24 +243,15 @@ build_stage010() {
 # 実行像ではなくオブジェクトのまま置き，利用者が必要なものだけ ld へ並べる
 # (docs/stage011-libc.md 2.2)。ヘッダは束ねで pp へ渡す (docs/stage009-pp.md 2.2)
 build_stage011() {
-    sh tools/bundle.sh include/stddef.h include/string.h lib/string.c \
-        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/string.i
-    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/string.i > tmp/build/string.o
-    echo "built tmp/build/string.o" >&2
-    sh tools/bundle.sh include/ctype.h lib/ctype.c \
-        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/ctype.i
-    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/ctype.i > tmp/build/ctype.o
-    echo "built tmp/build/ctype.o" >&2
-    sh tools/bundle.sh include/stddef.h include/stdlib.h lib/stdlib.c \
-        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/stdlib.i
-    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/stdlib.i > tmp/build/stdlib.o
-    echo "built tmp/build/stdlib.o" >&2
-    # malloc の供給源。ベアメタル用の固定領域版はここで作る
-    # (OS 用の brk 版は Stage 12。docs/stage012-os.md 6.2)
-    sh tools/bundle.sh include/stddef.h lib/morecore.c \
-        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/morecore.i
-    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/morecore.i > tmp/build/morecore.o
-    echo "built tmp/build/morecore.o" >&2
+    # 第 11 世代の libc (フリースタンディングのみ)。stage011/libc/ に凍結して
+    # あり，後の世代が触ることはない (docs/roadmap.md 4.1)。
+    # 生成物は世代の番号を前置して呼ぶ
+    for f in string ctype stdlib; do
+        sh tools/bundle.sh stage011/libc/include/*.h "stage011/libc/src/$f.c" \
+            | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l11_$f.i"
+        sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/l11_$f.i" > "tmp/build/l11_$f.o"
+        echo "built tmp/build/l11_$f.o" >&2
+    done
 }
 
 # Stage 12 は Stage 8 の ld でリンカの新世代 (ld12) を作り，pp + cc で
@@ -279,12 +270,13 @@ build_stage012() {
     { printf 'K'; cat tmp/build/kernel.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld12.bin > tmp/build/kernel.bin
     echo "built tmp/build/kernel.bin" >&2
-    # libc の環境部 (第 3 部)。syscall の包みと brk 版 morecore
-    for f in sys morecore stdio; do
-        sh tools/bundle.sh include/*.h "lib/posix/$f.c" \
-            | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/p_$f.i"
-        sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/p_$f.i" > "tmp/build/p_$f.o"
-        echo "built tmp/build/p_$f.o" >&2
+    # 第 12 世代の libc。純粋部 (src) と環境部 (posix) を持つ
+    for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio; do
+        n=$(echo "$f" | tr / _)
+        sh tools/bundle.sh stage012/libc/include/*.h "stage012/libc/$f.c" \
+            | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l12_$n.i"
+        sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/l12_$n.i" > "tmp/build/l12_$n.o"
+        echo "built tmp/build/l12_$n.o" >&2
     done
 }
 
@@ -336,13 +328,17 @@ do_stage010() {
         -- stage010/*.sc tmp/build/stage008.stamp tools/build.sh
 }
 do_stage011() {
-    run_stage stage011 string.o ctype.o stdlib.o morecore.o \
-        -- include/*.h lib/*.c tmp/build/stage009.stamp \
-           tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
+    run_stage stage011 l11_string.o l11_ctype.o l11_stdlib.o \
+        -- stage011/libc/include/*.h stage011/libc/src/*.c \
+           tmp/build/stage009.stamp tmp/build/stage010.stamp \
+           tools/build.sh tools/bundle.sh
 }
 do_stage012() {
-    run_stage stage012 ld12.bin kernel.bin p_sys.o p_morecore.o p_stdio.o \
-        -- stage012/ld12.sc stage012/kernel.c include/*.h lib/posix/*.c tmp/build/stage008.stamp \
+    run_stage stage012 ld12.bin kernel.bin l12_src_string.o l12_src_ctype.o \
+        l12_src_stdlib.o l12_src_morecore.o l12_posix_sys.o l12_posix_morecore.o \
+        l12_posix_stdio.o \
+        -- stage012/ld12.sc stage012/kernel.c stage012/libc/include/*.h \
+           stage012/libc/src/*.c stage012/libc/posix/*.c tmp/build/stage008.stamp \
            tmp/build/stage009.stamp tmp/build/stage010.stamp \
            tmp/build/stage011.stamp tools/build.sh tools/bundle.sh
 }

@@ -1,4 +1,4 @@
-# morecore.o 説明文書
+# morecore.o 説明文書 (第 12 世代)
 
 morecore.o は malloc の供給源 (固定領域版) である。ヒープを `.bss` 上の
 1 MiB に置く。設計は [stage011-libc.md](../docs/stage011-libc.md) 7.1。

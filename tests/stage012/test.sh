@@ -34,7 +34,7 @@ IMGSIZE=4194304          # 4 MiB
 builduser() {
     name=$1
     shift
-    sh tools/bundle.sh include/*.h "$usr/$name.c" \
+    sh tools/bundle.sh stage012/libc/include/*.h "$usr/$name.c" \
         | sh tools/env.sh qemu "$pp" > "tmp/s12/$name.i" \
         && sh tools/env.sh qemu "$cc" < "tmp/s12/$name.i" > "tmp/s12/$name.o" \
         && { printf 'E'; cat "tmp/s12/$name.o" "$@"; printf '\0'; } \
@@ -168,8 +168,8 @@ report $? "run: io が作った new.txt がホストへ届く"
 # ---------------------------------------------------------------------------
 section "libc: 純粋部と環境部を OS の上で動かす (第 3 部)"
 
-builduser libc tmp/build/string.o tmp/build/stdlib.o \
-    tmp/build/p_sys.o tmp/build/p_morecore.o
+builduser libc tmp/build/l12_src_string.o tmp/build/l12_src_stdlib.o \
+    tmp/build/l12_posix_sys.o tmp/build/l12_posix_morecore.o
 report $? "build: libc (純粋部 string / stdlib + 環境部 sys / morecore)"
 
 rm -rf tmp/s12/root
@@ -189,8 +189,8 @@ report $? "run: POSIX の write で作った out.txt がホストへ届く"
 # ---------------------------------------------------------------------------
 section "stdio: FILE と printf (第 4 部)"
 
-builduser sio tmp/build/string.o tmp/build/stdlib.o tmp/build/p_sys.o \
-    tmp/build/p_morecore.o tmp/build/p_stdio.o
+builduser sio tmp/build/l12_src_string.o tmp/build/l12_src_stdlib.o tmp/build/l12_posix_sys.o \
+    tmp/build/l12_posix_morecore.o tmp/build/l12_posix_stdio.o
 report $? "build: sio (stdio を並べる)"
 
 rm -rf tmp/s12/root

@@ -30,8 +30,7 @@ exp=tests/stage011/expected
 runcase() {
     name=$1
     shift
-    sh tools/bundle.sh include/stddef.h include/limits.h \
-        include/string.h include/ctype.h include/stdlib.h "$src/$name.c" \
+    sh tools/bundle.sh stage011/libc/include/*.h "$src/$name.c" \
         | sh tools/env.sh qemu "$pp" > "tmp/s11/$name.i" \
         && sh tools/env.sh qemu "$cc" < "tmp/s11/$name.i" > "tmp/s11/$name.o" \
         && { cat "tmp/s11/$name.o" "$@"; printf '\0'; } \
@@ -49,7 +48,7 @@ ensure_build stage011
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in string:lib/string.md ctype:lib/ctype.md stdlib:lib/stdlib.md morecore:lib/morecore.md; do
+for pair in l11_string:stage011/libc/src/string.md l11_ctype:stage011/libc/src/ctype.md l11_stdlib:stage011/libc/src/stdlib.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -66,16 +65,16 @@ section "値の照合とリンクの単位"
 runcase def
 # str は string.o だけ，cty は ctype.o だけ，mal / srt / num は
 # stdlib.o だけでリンクが通る
-runcase str tmp/build/string.o
-runcase cty tmp/build/ctype.o
-runcase mal tmp/build/stdlib.o tmp/build/morecore.o
-runcase srt tmp/build/stdlib.o tmp/build/morecore.o
-runcase num tmp/build/stdlib.o tmp/build/morecore.o
+runcase str tmp/build/l11_string.o
+runcase cty tmp/build/l11_ctype.o
+runcase mal tmp/build/l11_stdlib.o
+runcase srt tmp/build/l11_stdlib.o
+runcase num tmp/build/l11_stdlib.o
 
 # ---------------------------------------------------------------------------
 section "自己適用"
 
 # string.o と ctype.o の両方を使う
-runcase word tmp/build/string.o tmp/build/ctype.o
+runcase word tmp/build/l11_string.o tmp/build/l11_ctype.o
 
 summary
