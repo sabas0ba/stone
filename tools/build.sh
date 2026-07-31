@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|...|stage010|stage011|all]
+# 使用法: build.sh [stage002|...|stage011|stage012|all]
 #
 # キャッシュ (スタンプ):
 #   ビルドは決定的である (同じ入力から常に同じバイト列が生成される。
@@ -257,6 +257,24 @@ build_stage011() {
     echo "built tmp/build/stdlib.o" >&2
 }
 
+# Stage 12 は Stage 8 の ld でリンカの新世代 (ld12) を作り，pp + cc で
+# カーネルを作る。カーネルは 'K' 形式 (フラット + カーネル前置部) で，
+# ユーザプログラムは 'E' 形式 (ELF 実行形式) でリンクする
+# (docs/stage012-os.md 5.3)
+build_stage012() {
+    { cat stage012/ld12.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/ld12.o
+    { cat tmp/build/ld12.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld12.bin
+    echo "built tmp/build/ld12.bin" >&2
+    sh tools/bundle.sh stage012/kernel.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/kernel.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/kernel.i > tmp/build/kernel.o
+    { printf 'K'; cat tmp/build/kernel.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld12.bin > tmp/build/kernel.bin
+    echo "built tmp/build/kernel.bin" >&2
+}
+
 # 各 Stage の入力 (ソースと前段のスタンプ) と生成物の宣言。
 # 生成物には後段とテストが参照するファイルをすべて挙げる (.o / .i の
 # 中間物は挙げない。スタンプはそれらの有無を保証しない)。
@@ -309,14 +327,20 @@ do_stage011() {
         -- include/*.h lib/*.c tmp/build/stage009.stamp \
            tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
 }
+do_stage012() {
+    run_stage stage012 ld12.bin kernel.bin \
+        -- stage012/ld12.sc stage012/kernel.c tmp/build/stage008.stamp \
+           tmp/build/stage009.stamp tmp/build/stage010.stamp \
+           tools/build.sh tools/bundle.sh
+}
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011"
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012"
 target=${1:-all}
-[ "$target" = all ] && target=stage011
+[ "$target" = all ] && target=stage012
 case " $stages " in
 *" $target "*) ;;
 *)
-    echo "usage: build.sh [stage002|...|stage010|stage011|all]" >&2
+    echo "usage: build.sh [stage002|...|stage011|stage012|all]" >&2
     exit 2
     ;;
 esac

@@ -150,7 +150,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 9 | 完了 | [stage009-pp.md](stage009-pp.md) |
 | 10 | 第 1 部 (文と式)・第 2 部 (型・宣言・識別子と配列・整数型・関数ポインタ)**完了** (第 1〜3 部すべて。C89 の言語仕様が揃った) | [stage010-c89.md](stage010-c89.md) |
 | 11 | **完了** (第 1〜3 部すべて。土台と純粋な関数・記憶域・整列と探索・数値変換) | [stage011-libc.md](stage011-libc.md) |
-| 12 | 第 1 部 (共有領域と sfs) **完了** (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
+| 12 | 第 1 部 (共有領域と sfs)・第 2 部 (ld12 とカーネル) **完了** (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言
@@ -180,4 +180,9 @@ Stage 12 は設計を終えた ([stage012-os.md](stage012-os.md))。実行環境
 (stage012-os.md 4.3)，ホスト側の変換道具 (tools/sfs.sh) と
 memory-backend-file による注入・回収 (tools/run-qemu.sh の
 STONE_QEMU_RAMFILE) を実装，ベアメタルのゲストプログラムによる
-読み書きまで検証した。次は第 2 部 (ld12 とカーネル) である。
+読み書きまで検証した。
+第 2 部 (ld12 とカーネル) も完了した: リンカの新世代 ld12 が 'F' (従来)・
+'K' (カーネル)・'E' (ELF 実行形式) の 3 形式を出し，自作 C で書いた
+カーネルが sfs から ELF を読んで U モードで走らせ，syscall を処理する。
+'F' の出力は stage008 の ld とバイト一致し，既存 Stage は影響を受けない。
+次は第 3 部 (libc 環境部: open 系・errno・brk 版 morecore) である。
