@@ -150,7 +150,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 9 | 完了 | [stage009-pp.md](stage009-pp.md) |
 | 10 | 第 1 部 (文と式)・第 2 部 (型・宣言・識別子と配列・整数型・関数ポインタ)**完了** (第 1〜3 部すべて。C89 の言語仕様が揃った) | [stage010-c89.md](stage010-c89.md) |
 | 11 | **完了** (第 1〜3 部すべて。土台と純粋な関数・記憶域・整列と探索・数値変換) | [stage011-libc.md](stage011-libc.md) |
-| 12 | 第 1〜3 部 (共有領域と sfs・ld12 とカーネル・libc 環境部) **完了** (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
+| 12 | **完了** (第 1〜4 部すべて。共有領域と sfs・ld12 とカーネル・libc 環境部・stdio) (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言
@@ -189,4 +189,8 @@ STONE_QEMU_RAMFILE) を実装，ベアメタルのゲストプログラムによ
 名前で包んで errno を導入し，malloc の供給源 (morecore) を翻訳単位ごと
 差し替えられるようにした。OS の上で純粋部 (string / stdlib) が無改変で
 動き，malloc がベアメタルの固定領域 1 MiB を超えて 3 MB を確保できる。
-次は第 4 部 (stdio: FILE / fopen 系 / printf 最小) である。
+第 4 部 (stdio) も完了し，**Stage 12 は完了した**。無バッファの FILE と
+printf / fgets / ungetc が OS の上で動く。ファイルを開き，読み書きし，
+引数を受け取り，終了コードを返すコマンドが書けるようになった。
+次は Stage 13 (ビルド道具立て: spawn とシェル相当・テキストエディタ・
+cc / ld / pp の OS 側への移住) である。

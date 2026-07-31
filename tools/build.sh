@@ -280,9 +280,8 @@ build_stage012() {
         | sh tools/env.sh qemu tmp/build/ld12.bin > tmp/build/kernel.bin
     echo "built tmp/build/kernel.bin" >&2
     # libc の環境部 (第 3 部)。syscall の包みと brk 版 morecore
-    for f in sys morecore; do
-        sh tools/bundle.sh include/stddef.h include/errno.h include/fcntl.h \
-            include/unistd.h "lib/posix/$f.c" \
+    for f in sys morecore stdio; do
+        sh tools/bundle.sh include/*.h "lib/posix/$f.c" \
             | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/p_$f.i"
         sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/p_$f.i" > "tmp/build/p_$f.o"
         echo "built tmp/build/p_$f.o" >&2
@@ -342,7 +341,7 @@ do_stage011() {
            tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
 }
 do_stage012() {
-    run_stage stage012 ld12.bin kernel.bin p_sys.o p_morecore.o \
+    run_stage stage012 ld12.bin kernel.bin p_sys.o p_morecore.o p_stdio.o \
         -- stage012/ld12.sc stage012/kernel.c include/*.h lib/posix/*.c tmp/build/stage008.stamp \
            tmp/build/stage009.stamp tmp/build/stage010.stamp \
            tmp/build/stage011.stamp tools/build.sh tools/bundle.sh
