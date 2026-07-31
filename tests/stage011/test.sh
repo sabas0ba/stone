@@ -49,7 +49,7 @@ ensure_build stage011
 rc=$?
 ok=0
 [ "$rc" -eq 0 ] || ok=1
-for pair in string:lib/string.md ctype:lib/ctype.md stdlib:lib/stdlib.md; do
+for pair in string:lib/string.md ctype:lib/ctype.md stdlib:lib/stdlib.md morecore:lib/morecore.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -68,9 +68,9 @@ runcase def
 # stdlib.o だけでリンクが通る
 runcase str tmp/build/string.o
 runcase cty tmp/build/ctype.o
-runcase mal tmp/build/stdlib.o
-runcase srt tmp/build/stdlib.o
-runcase num tmp/build/stdlib.o
+runcase mal tmp/build/stdlib.o tmp/build/morecore.o
+runcase srt tmp/build/stdlib.o tmp/build/morecore.o
+runcase num tmp/build/stdlib.o tmp/build/morecore.o
 
 # ---------------------------------------------------------------------------
 section "自己適用"

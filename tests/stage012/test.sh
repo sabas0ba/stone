@@ -29,12 +29,16 @@ RAMSIZE=134217728        # 128 MiB
 SFSOFF=67108864          # 0x0400_0000 (ゲスト物理 0x8400_0000)
 IMGSIZE=4194304          # 4 MiB
 
-# ユーザプログラムを ELF 実行形式でビルドする
+# ユーザプログラムを ELF 実行形式でビルドする。2 個目以降の引数は
+# 一緒に並べるオブジェクト (libc)
 builduser() {
-    sh tools/bundle.sh "$usr/$1.c" | sh tools/env.sh qemu "$pp" > "tmp/s12/$1.i" \
-        && sh tools/env.sh qemu "$cc" < "tmp/s12/$1.i" > "tmp/s12/$1.o" \
-        && { printf 'E'; cat "tmp/s12/$1.o"; printf '\0'; } \
-            | sh tools/env.sh qemu "$ld12" > "tmp/s12/$1"
+    name=$1
+    shift
+    sh tools/bundle.sh include/*.h "$usr/$name.c" \
+        | sh tools/env.sh qemu "$pp" > "tmp/s12/$name.i" \
+        && sh tools/env.sh qemu "$cc" < "tmp/s12/$name.i" > "tmp/s12/$name.o" \
+        && { printf 'E'; cat "tmp/s12/$name.o" "$@"; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld12" > "tmp/s12/$name"
 }
 
 # root/ をイメージにして RAM ファイルへ埋め，カーネルを起動する
@@ -160,5 +164,26 @@ report $? "run: io が read / openat / close / brk を通す (ENOENT / EBADF 含
 harvest
 printf 'made\n' | diff -q - tmp/s12/out2/new.txt > /dev/null
 report $? "run: io が作った new.txt がホストへ届く"
+
+# ---------------------------------------------------------------------------
+section "libc: 純粋部と環境部を OS の上で動かす (第 3 部)"
+
+builduser libc tmp/build/string.o tmp/build/stdlib.o \
+    tmp/build/p_sys.o tmp/build/p_morecore.o
+report $? "build: libc (純粋部 string / stdlib + 環境部 sys / morecore)"
+
+rm -rf tmp/s12/root
+mkdir -p tmp/s12/root
+cp tmp/s12/libc tmp/s12/root/libc
+printf 'libc\n' > tmp/s12/root/boot
+printf 'abc\n' > tmp/s12/root/data.txt
+runos libc
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s12/libc.out "$exp/libc.txt" > /dev/null
+report $? "run: 純粋部が無改変で動き，malloc が 1 MiB を超え，errno が立つ"
+
+harvest
+printf 'ok\n' | diff -q - tmp/s12/out2/out.txt > /dev/null
+report $? "run: POSIX の write で作った out.txt がホストへ届く"
 
 summary

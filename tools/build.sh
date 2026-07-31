@@ -255,6 +255,12 @@ build_stage011() {
         | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/stdlib.i
     sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/stdlib.i > tmp/build/stdlib.o
     echo "built tmp/build/stdlib.o" >&2
+    # malloc の供給源。ベアメタル用の固定領域版はここで作る
+    # (OS 用の brk 版は Stage 12。docs/stage012-os.md 6.2)
+    sh tools/bundle.sh include/stddef.h lib/morecore.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/morecore.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/morecore.i > tmp/build/morecore.o
+    echo "built tmp/build/morecore.o" >&2
 }
 
 # Stage 12 は Stage 8 の ld でリンカの新世代 (ld12) を作り，pp + cc で
@@ -273,6 +279,14 @@ build_stage012() {
     { printf 'K'; cat tmp/build/kernel.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld12.bin > tmp/build/kernel.bin
     echo "built tmp/build/kernel.bin" >&2
+    # libc の環境部 (第 3 部)。syscall の包みと brk 版 morecore
+    for f in sys morecore; do
+        sh tools/bundle.sh include/stddef.h include/errno.h include/fcntl.h \
+            include/unistd.h "lib/posix/$f.c" \
+            | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/p_$f.i"
+        sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/p_$f.i" > "tmp/build/p_$f.o"
+        echo "built tmp/build/p_$f.o" >&2
+    done
 }
 
 # 各 Stage の入力 (ソースと前段のスタンプ) と生成物の宣言。
@@ -323,15 +337,15 @@ do_stage010() {
         -- stage010/*.sc tmp/build/stage008.stamp tools/build.sh
 }
 do_stage011() {
-    run_stage stage011 string.o ctype.o stdlib.o \
+    run_stage stage011 string.o ctype.o stdlib.o morecore.o \
         -- include/*.h lib/*.c tmp/build/stage009.stamp \
            tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
 }
 do_stage012() {
-    run_stage stage012 ld12.bin kernel.bin \
-        -- stage012/ld12.sc stage012/kernel.c tmp/build/stage008.stamp \
+    run_stage stage012 ld12.bin kernel.bin p_sys.o p_morecore.o \
+        -- stage012/ld12.sc stage012/kernel.c include/*.h lib/posix/*.c tmp/build/stage008.stamp \
            tmp/build/stage009.stamp tmp/build/stage010.stamp \
-           tools/build.sh tools/bundle.sh
+           tmp/build/stage011.stamp tools/build.sh tools/bundle.sh
 }
 
 stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012"

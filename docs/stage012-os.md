@@ -256,6 +256,25 @@ lib/posix/      環境部 (POSIX 風 syscall の上に立つ)
 syscall ABI が Linux 互換 (2.1) なので，環境部は「自作 OS 用」と
 「実 Linux 用」を分ける必要がない。1 種類で両方に通じる。
 
+### 6.3 生の syscall と POSIX の名前を分ける
+
+前置部が提供するスタブは **生の名前** (`sys_read` / `sys_write` /
+`sys_openat` / `sys_close` / `sys_brk`) とし，戻り値は -errno のままに
+する。POSIX の名前 (`read` / `write` / `open` / `close` / `sbrk`) は
+環境部が定義し，負値を `errno` へ写して -1 を返す。
+
+分ける理由は 2 つある。
+
+- 前置部のシンボルと libc のシンボルが同名だと多重定義になる
+  (リンカがエラー 3 で止まる)
+- 「errno を持たない生の層」と「C の慣例に従う層」を分けておくと，
+  errno を使わないプログラム (カーネル・前置部の試験) が環境部を
+  リンクせずに済む
+
+`open` は `openat(AT_FDCWD, ...)` の包みである (RV32 に旧形式の open は
+無い)。`brk` が「新しいブレーク」を返す Linux 生の仕様なので，`sbrk` は
+差分を取って包む。
+
 ### 6.2 malloc の下回りの差し替え
 
 Stage 11 第 2 部の設計どおり，差し替えるのは `morecore` 1 関数である
@@ -303,7 +322,7 @@ Stage 2〜11 の生成物・テスト・SHA-256 は一切変えない。ブー�
 |---|---|---|
 | 第 1 部 | 共有領域と sfs: イメージ形式，ホスト側変換道具，ベアメタルのテストプログラムによる読み書き | ディレクトリ → イメージ → ディレクトリの往復が同一。ゲストからの読取り・書込み・追加がホスト側で見える |
 | 第 2 部 **(完了)** | ld12 ('K' / 'E') とカーネル: trap・syscall・ELF ローダ・単一プロセス | hello が U モードで動き argv と終了コードが返る。readelf で ET_EXEC / entry / PT_LOAD を検査。'F' の出力が stage008 の ld とバイト一致。io が openat / read / write / close / brk を通し，ENOENT と EBADF を返す |
-| 第 3 部 | libc 環境部: open/read/write/close の包み，errno，brk 版 morecore | ファイルの読み書きと内容照合。存在しないファイルで errno = ENOENT。malloc が 1 MiB を超えて確保できる。Stage 11 の libc テスト (str/cty/mal/srt/num/word) を OS 上でも実行して同値 |
+| 第 3 部 **(完了)** | libc 環境部: open/read/write/close の包み，errno，brk 版 morecore | 純粋部 (string / stdlib) が無改変で OS 上でも動く。malloc が 3 MB (ベアメタルの固定領域 1 MiB の 3 倍) を確保できる。存在しないファイルで errno = ENOENT。POSIX の write で作ったファイルがホストへ届く |
 | 第 4 部 | stdio (FILE / fopen 系 / printf 最小) | 書式の境界 (0, 負数, INT_MIN, %x, 幅)。ファイル経由の往復。cat 相当・wc 相当の自己適用 |
 
 各部とも従来どおり: 設計は本書へ追記し，生成物の SHA-256 を記録し，
@@ -320,6 +339,12 @@ tests/stage012 で照合する。
    スタブが `a3` / `a7` を保存せずに壊していたため，呼出しを跨いで
    生きている変数が壊れた。症状は「ユーザプログラムがストア例外で
    落ちる」で，原因の場所からは遠い。
+
+### 8.2 第 3 部で判明したこと
+
+3. **cc は宣言子の中で定数式を畳まない。** `char heap[HEAPUNITS * UNIT];`
+   は通らず，`char heap[1048576];` と数値で書く必要がある。配列の大きさは
+   数値で書き，由来をコメントに残す。
 
 ## 9. Stage 13 への接続
 

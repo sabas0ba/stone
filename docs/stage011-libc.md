@@ -158,7 +158,7 @@ C89 に `restrict` は無い (C99)。`const` は Stage 10 第 2 部の 1 で
 - `include/stddef.h` `include/limits.h` `include/string.h` `include/ctype.h`
 - `lib/string.c` `lib/ctype.c`
 - `tmp/build/string.o` `tmp/build/ctype.o` (ビルド生成物)
-- 第 2 部: `include/stdlib.h` `lib/stdlib.c` `tmp/build/stdlib.o` (7 章)
+- 第 2 部: `include/stdlib.h` `lib/stdlib.c` `lib/morecore.c` `tmp/build/stdlib.o` `tmp/build/morecore.o` (7 章)
 - 第 3 部: 同上へ追加 (8 章)
 
 ## 5. 検証計画 (tests/stage011)

@@ -19,9 +19,9 @@ sh tools/build.sh stage011
 # bundle(stddef.h stdlib.h stdlib.c) | pp | cc -> stdlib.o
 ```
 
-SHA-256: 9194ae5ab6438a0e77535e97251d42ca1500898817a25fa509de14c8272d8f44
+SHA-256: 74d02bcdd54bb606c56a38a1c2ae0be25c01f53fa292dc673a3dd43126e7e225
 
-- 形式: ELF リロケータブルオブジェクト (RV32)，10268 バイト
+- 形式: ELF リロケータブルオブジェクト (RV32)，9696 バイト
 - コンパイラ: cc10l ([../stage010/cc12.md](../stage010/cc12.md))
 
 ## 収録する関数
