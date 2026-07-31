@@ -298,7 +298,10 @@ Stage 11 で保留した `strtol` の ERANGE もここで導入できる。
 - 第 1 弾: `fopen` `fclose` `fgetc` `fputc` `fread` `fwrite` `fgets`
   `fputs` `feof` `ferror` `fflush` (無バッファなので何もしない)
 - `printf` / `fprintf` は `%d` `%u` `%x` `%c` `%s` `%%` と最小の幅指定
-  だけを実装する (可変長引数は実装済み)
+  (0 詰めを含む) だけを実装する (可変長引数は実装済み)
+- **`stdin` / `stdout` / `stderr` は関数を呼ぶマクロにする。** 初期値つきの
+  大域構造体を避けるためである (C89 はこれらがマクロでもよいと定める)。
+  実体は `.bss` 上の表に置き，最初の呼出しで fd 0 / 1 / 2 を結ぶ
 
 ## 7. 既存資産との関係
 
@@ -323,7 +326,7 @@ Stage 2〜11 の生成物・テスト・SHA-256 は一切変えない。ブー�
 | 第 1 部 | 共有領域と sfs: イメージ形式，ホスト側変換道具，ベアメタルのテストプログラムによる読み書き | ディレクトリ → イメージ → ディレクトリの往復が同一。ゲストからの読取り・書込み・追加がホスト側で見える |
 | 第 2 部 **(完了)** | ld12 ('K' / 'E') とカーネル: trap・syscall・ELF ローダ・単一プロセス | hello が U モードで動き argv と終了コードが返る。readelf で ET_EXEC / entry / PT_LOAD を検査。'F' の出力が stage008 の ld とバイト一致。io が openat / read / write / close / brk を通し，ENOENT と EBADF を返す |
 | 第 3 部 **(完了)** | libc 環境部: open/read/write/close の包み，errno，brk 版 morecore | 純粋部 (string / stdlib) が無改変で OS 上でも動く。malloc が 3 MB (ベアメタルの固定領域 1 MiB の 3 倍) を確保できる。存在しないファイルで errno = ENOENT。POSIX の write で作ったファイルがホストへ届く |
-| 第 4 部 | stdio (FILE / fopen 系 / printf 最小) | 書式の境界 (0, 負数, INT_MIN, %x, 幅)。ファイル経由の往復。cat 相当・wc 相当の自己適用 |
+| 第 4 部 **(完了)** | stdio (FILE / fopen 系 / printf 最小) | 書式の境界 (0, 負数, INT_MIN, %x, 幅, 0 詰め)。fopen("w") で書いて fgets で読み戻す往復。ungetc と feof。書いたファイルがホストへ届く |
 
 各部とも従来どおり: 設計は本書へ追記し，生成物の SHA-256 を記録し，
 tests/stage012 で照合する。

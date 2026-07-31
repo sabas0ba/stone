@@ -186,4 +186,24 @@ harvest
 printf 'ok\n' | diff -q - tmp/s12/out2/out.txt > /dev/null
 report $? "run: POSIX の write で作った out.txt がホストへ届く"
 
+# ---------------------------------------------------------------------------
+section "stdio: FILE と printf (第 4 部)"
+
+builduser sio tmp/build/string.o tmp/build/stdlib.o tmp/build/p_sys.o \
+    tmp/build/p_morecore.o tmp/build/p_stdio.o
+report $? "build: sio (stdio を並べる)"
+
+rm -rf tmp/s12/root
+mkdir -p tmp/s12/root
+cp tmp/s12/sio tmp/s12/root/sio
+printf 'sio\n' > tmp/s12/root/boot
+runos sio
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s12/sio.out "$exp/sio.txt" > /dev/null
+report $? "run: printf の書式 (INT_MIN・幅・0 詰め) と FILE の往復・ungetc"
+
+harvest
+printf 'line1 5\nline2\n' | diff -q - tmp/s12/out2/sio.txt > /dev/null
+report $? "run: fopen(\"w\") で書いたファイルがホストへ届く"
+
 summary
