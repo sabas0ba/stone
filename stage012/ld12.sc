@@ -10,6 +10,11 @@
 ///   'K'  カーネル: フラット + カーネル前置部 (mtvec・trap 入口・urun)
 ///   'E'  ELF 実行形式 (ET_EXEC + プログラムヘッダ 1 本) + ユーザ前置部
 ///
+/// 'E' が提供する syscall スタブは生の名前 (sys_read / sys_write /
+/// sys_openat / sys_close / sys_brk) で，戻り値は -errno のままである。
+/// POSIX の名前 (read / open / sbrk など) は libc の環境部が errno へ
+/// 写して提供する (docs/stage012-os.md 6.3)。
+///
 ///   { printf 'K'; cat kernel.o; printf '\0'; } | ld12 > kernel.bin
 ///
 /// @section addr アドレスの扱い
@@ -763,11 +768,11 @@ int main() {
     gaddlit("getc", ehsz + 324);
     gaddlit("putc", ehsz + 396);
     gaddlit("exit", ehsz + 36);
-    gaddlit("read", ehsz + 56);
-    gaddlit("write", ehsz + 112);
-    gaddlit("openat", ehsz + 168);
-    gaddlit("close", ehsz + 228);
-    gaddlit("brk", ehsz + 276);
+    gaddlit("sys_read", ehsz + 56);
+    gaddlit("sys_write", ehsz + 112);
+    gaddlit("sys_openat", ehsz + 168);
+    gaddlit("sys_close", ehsz + 228);
+    gaddlit("sys_brk", ehsz + 276);
   } else if (fmt == 'K') {
     gaddlit("getc", 108);
     gaddlit("putc", 136);

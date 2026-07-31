@@ -1,8 +1,10 @@
 /* stdlib.c --- 記憶域の管理・整列と探索・数値変換 (C89 7.10)
  *
  * 記憶域の設計は docs/stage011-libc.md 7 章。要点:
- *   - ヒープは .bss 上の固定領域 (1 MiB)。供給は morecore だけが行い，
- *     Stage 12 で brk へ差し替える境界をこの 1 関数に集める
+ *   - ヒープの供給は morecore だけが行う。**morecore は別の翻訳単位に
+ *     置き，環境ごとに差し替える** (ベアメタルは lib/morecore.c の
+ *     固定領域版，OS の上では lib/posix/morecore.c の brk 版。
+ *     docs/stage012-os.md 6.2)
  *   - 割付けは K&R 型のフリーリスト first-fit。各ブロックは 8 バイトの
  *     ヘッダ (次のフリーブロック，ヘッダ込みの大きさ) を持ち，free で
  *     隣接ブロックと併合する。大きさの単位はヘッダの大きさ (8 バイト)
@@ -18,39 +20,20 @@ struct hdr {
   size_t size;                  /* ヘッダ込みの大きさ (単位数) */
 };
 
-#define HEAPUNITS 131072        /* ヒープ全量: 131072 単位 * 8 バイト = 1 MiB */
-#define NALLOC 512              /* morecore の最小供給量 (単位数) */
-
-static struct hdr heap[HEAPUNITS];      /* 固定領域 (.bss なので初期値 0) */
-static size_t heapused;                 /* 配り済みの単位数 */
-
 static struct hdr base;         /* フリーリストの起点 (大きさ 0 の番兵) */
 static struct hdr *freep;       /* 探索の開始点。0 なら未初期化 */
 
-/* 供給源。固定領域から nu 単位以上を切り出してフリーリストへ足す。
- * 残量が最小供給量に満たなければ要求量ちょうどまで縮めて試みる。
- * Stage 12 で brk 版に差し替えるのはこの関数だけである */
-static struct hdr *morecore(size_t nu)
-{
-  struct hdr *up;
-  size_t req;
-
-  req = nu;
-  if (req < NALLOC) req = NALLOC;
-  if (heapused + req > HEAPUNITS) req = nu;
-  if (heapused + req > HEAPUNITS) return NULL;
-  up = heap + heapused;
-  heapused = heapused + req;
-  up->size = req;
-  free((void *)(up + 1));
-  return freep;
-}
+/* 供給源。nu 単位以上の領域を確保して先頭を返し，実際に確保した単位数を
+ * *got へ返す。失敗なら NULL。実装は環境ごとに差し替える (6.2) */
+void *morecore(size_t nu, size_t *got);
 
 void *malloc(size_t n)
 {
   struct hdr *p;
   struct hdr *prev;
+  struct hdr *up;
   size_t nunits;
+  size_t got;
 
   if (n == 0) return NULL;
   nunits = (n + sizeof(struct hdr) - 1) / sizeof(struct hdr) + 1;
@@ -75,8 +58,11 @@ void *malloc(size_t n)
       return (void *)(p + 1);
     }
     if (p == freep) {           /* 一周した: 補充する */
-      p = morecore(nunits);
-      if (p == NULL) return NULL;
+      up = (struct hdr *)morecore(nunits, &got);
+      if (up == NULL) return NULL;
+      up->size = got;
+      free((void *)(up + 1));   /* フリーリストへ繋ぎ，隣と併合させる */
+      p = freep;
     }
     prev = p;
     p = p->next;
