@@ -257,9 +257,9 @@ section "第 3 部の 2: 可変長引数 (cc10h)"
 
 fixpoint cc10h "$cch" stage010/cc8.sc
 
-# va_list / va_start / va_arg は include/stdarg.h のマクロなので，
+# va_list / va_start / va_arg は stage010/include/stdarg.h のマクロなので，
 # pp を通してからコンパイルする
-sh tools/bundle.sh include/stdarg.h $src/varg.c | sh tools/env.sh qemu "$pp" > tmp/s10/varg.i \
+sh tools/bundle.sh stage010/include/stdarg.h $src/varg.c | sh tools/env.sh qemu "$pp" > tmp/s10/varg.i \
     && sh tools/env.sh qemu "$cc" < tmp/s10/varg.i > tmp/s10/varg.o \
     && link tmp/s10/varg.bin tmp/s10/varg.o \
     && sh tools/env.sh qemu tmp/s10/varg.bin < /dev/null > tmp/s10/varg.out
