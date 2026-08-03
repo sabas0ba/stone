@@ -1,0 +1,14 @@
+1,$n
+2a
+inserted
+.
+1,$n
+2d
+$=
+1s/one/ONE/g
+1p
+
+zz
+w out.txt
+q
+q
