@@ -1,0 +1,8 @@
+echo hello world
+
+args a b
+upfilt < in.txt > up.txt
+mem
+sh < script2.txt
+nosuch
+exit 5

@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|...|stage011|stage012|all]
+# 使用法: build.sh [stage002|...|stage012|stage013|all]
 #
 # キャッシュ (スタンプ):
 #   ビルドは決定的である (同じ入力から常に同じバイト列が生成される。
@@ -280,6 +280,41 @@ build_stage012() {
     done
 }
 
+# Stage 13 はリンカの新世代 (ld13 = ld12 + sys_ecall) を Stage 8 の ld で，
+# カーネル (kernel13 = spawn とつなぎ替え) とシェル (sh13) を pp + cc +
+# ld13 で作る (docs/stage013-tools.md 3 章)。libc は第 13 世代
+# (stage013/libc。spawn の包みを足した) をオブジェクトのまま置く
+build_stage013() {
+    { cat stage013/ld13.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/ld13.o
+    { cat tmp/build/ld13.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld13.bin
+    echo "built tmp/build/ld13.bin" >&2
+    sh tools/bundle.sh stage013/kernel.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/kernel13.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/kernel13.i > tmp/build/kernel13.o
+    { printf 'K'; cat tmp/build/kernel13.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld13.bin > tmp/build/kernel13.bin
+    echo "built tmp/build/kernel13.bin" >&2
+    # 第 13 世代の libc
+    for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio; do
+        n=$(echo "$f" | tr / _)
+        sh tools/bundle.sh stage013/libc/include/*.h "stage013/libc/$f.c" \
+            | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l13_$n.i"
+        sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/l13_$n.i" > "tmp/build/l13_$n.o"
+        echo "built tmp/build/l13_$n.o" >&2
+    done
+    # シェル (ELF 実行形式)
+    sh tools/bundle.sh stage013/libc/include/*.h stage013/sh.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/sh13.i
+    sh tools/env.sh qemu tmp/build/cc.bin < tmp/build/sh13.i > tmp/build/sh13.o
+    { printf 'E'; cat tmp/build/sh13.o tmp/build/l13_src_string.o \
+        tmp/build/l13_src_stdlib.o tmp/build/l13_posix_sys.o \
+        tmp/build/l13_posix_morecore.o tmp/build/l13_posix_stdio.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld13.bin > tmp/build/sh13
+    echo "built tmp/build/sh13" >&2
+}
+
 # 各 Stage の入力 (ソースと前段のスタンプ) と生成物の宣言。
 # 生成物には後段とテストが参照するファイルをすべて挙げる (.o / .i の
 # 中間物は挙げない。スタンプはそれらの有無を保証しない)。
@@ -342,14 +377,24 @@ do_stage012() {
            tmp/build/stage009.stamp tmp/build/stage010.stamp \
            tmp/build/stage011.stamp tools/build.sh tools/bundle.sh
 }
+do_stage013() {
+    run_stage stage013 ld13.bin kernel13.bin l13_src_string.o l13_src_ctype.o \
+        l13_src_stdlib.o l13_src_morecore.o l13_posix_sys.o l13_posix_morecore.o \
+        l13_posix_stdio.o sh13 \
+        -- stage013/ld13.sc stage013/kernel.c stage013/sh.c \
+           stage013/libc/include/*.h stage013/libc/src/*.c \
+           stage013/libc/posix/*.c tmp/build/stage008.stamp \
+           tmp/build/stage009.stamp tmp/build/stage010.stamp \
+           tools/build.sh tools/bundle.sh
+}
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012"
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013"
 target=${1:-all}
-[ "$target" = all ] && target=stage012
+[ "$target" = all ] && target=stage013
 case " $stages " in
 *" $target "*) ;;
 *)
-    echo "usage: build.sh [stage002|...|stage011|stage012|all]" >&2
+    echo "usage: build.sh [stage002|...|stage012|stage013|all]" >&2
     exit 2
     ;;
 esac

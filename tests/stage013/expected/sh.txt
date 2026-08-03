@@ -1,0 +1,14 @@
+$ hello world
+$ $ args
+a
+b
+? 3
+$ $ args
+deep
+child 2
+fd Hell
+enoent ok
+mem ok
+$ $ nested
+$ $ sh: nosuch: errno 2
+$ 
