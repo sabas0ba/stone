@@ -1,0 +1,7 @@
+bundle hi.c > hi.b
+pp < hi.b > hi.i
+cc < hi.i > hi.o
+ldin E hi.o > hi.ld
+ld < hi.ld > hi
+hi
+exit 0

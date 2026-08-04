@@ -17,6 +17,11 @@
 #               不正コマンド・w・q の警告) と，書いたファイルのホストへの到達
 #   同居        シェルから ed を起動し，ed が同じ UART 入力の続きを読み，
 #               終了後にシェルがさらに続きを読む
+#   移住        ゲスト内で bundle -> pp -> cc -> ldin -> ld を順に走らせ，
+#               出来た実行形式をその場で起動する。各段の生成物が
+#               ホスト経路の同じ段の生成物とバイト一致する
+#   自己再生成  ゲスト内で cc 自身のソースを通し，出来た cc10l.bin が
+#               チェーンの成果物とバイト一致する
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -84,7 +89,9 @@ section "ビルド再現"
 ok=0
 [ "$buildrc" -eq 0 ] || ok=1
 for pair in ld13.bin:stage013/ld13.md kernel13.bin:stage013/kernel.md \
-        sh13:stage013/sh.md ed13:stage013/ed.md; do
+        sh13:stage013/sh.md ed13:stage013/ed.md \
+        bundle13:stage013/bundle.md ldin13:stage013/ldin.md \
+        eot13:stage013/eot.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -92,7 +99,17 @@ for pair in ld13.bin:stage013/ld13.md kernel13.bin:stage013/kernel.md \
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: ld13.bin / kernel13.bin / sh13 / ed13 の SHA-256 が各 .md 記載値と一致"
+report $? "build: ld13.bin / kernel13.bin / sh13 / ed13 / bundle13 / ldin13 の SHA-256 が各 .md 記載値と一致"
+
+# pp / cc / ld のコマンド版は素材が凍結された .o なので 1 つの .md にまとめてある
+ok=0
+[ "$buildrc" -eq 0 ] || ok=1
+for n in pp13cmd cc13cmd ld13cmd; do
+    got=$(sha256sum "tmp/build/$n"); got=${got%% *}
+    grep -q "$got" stage013/cmds.md || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "build: pp / cc / ld (コマンド版) の SHA-256 が cmds.md 記載値と一致"
 
 # sh13 が ELF 実行形式として妥当であることを readelf で確かめる (verify 層)
 sh tools/env.sh run riscv64-unknown-elf-readelf -h -l tmp/build/sh13 > tmp/s13/sh13.readelf 2>&1
@@ -221,5 +238,72 @@ report $? "run: シェルから起動した ed が入力の続きを読み，戻
 harvest
 printf 'alpha\nbeta\n' | diff -q - tmp/s13/out2/made.txt > /dev/null
 report $? "run: ed が作ったファイルがホストへ届く"
+
+# ---------------------------------------------------------------------------
+section "移住: ゲスト内でのビルド (第 3 部)"
+
+rm -rf tmp/s13/root
+mkdir -p tmp/s13/root
+cp tmp/build/sh13 tmp/s13/root/sh
+cp tmp/build/bundle13 tmp/s13/root/bundle
+cp tmp/build/ldin13 tmp/s13/root/ldin
+cp tmp/build/pp13cmd tmp/s13/root/pp
+cp tmp/build/cc13cmd tmp/s13/root/cc
+cp tmp/build/ld13cmd tmp/s13/root/ld
+cp "$fix/hi.c" tmp/s13/root/hi.c
+printf 'sh\n' > tmp/s13/root/boot
+runos gb "$fix/guestbuild.txt"
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s13/gb.out "$exp/gb.txt" > /dev/null
+report $? "run: bundle -> pp -> cc -> ldin -> ld を通し，出来た像がその場で動く"
+
+harvest
+
+# 同じソースをホスト経路に通し，各段の生成物を突き合わせる。
+# 移したのが同じ処理系であることの機械的な証明である (8 章)
+sh tools/bundle.sh "$fix/hi.c" > tmp/s13/host.b
+sh tools/env.sh qemu "$pp" < tmp/s13/host.b > tmp/s13/host.i
+sh tools/env.sh qemu "$cc" < tmp/s13/host.i > tmp/s13/host.o
+{ printf 'E'; cat tmp/s13/host.o; printf '\0'; } > tmp/s13/host.ld
+sh tools/env.sh qemu "$ld13" < tmp/s13/host.ld > tmp/s13/host.bin
+
+ok=0
+for pair in host.b:hi.b host.i:hi.i host.o:hi.o host.ld:hi.ld host.bin:hi; do
+    cmp -s "tmp/s13/${pair%%:*}" "tmp/s13/out2/${pair##*:}" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "same: 各段の生成物 (束ね / .i / .o / ld 入力 / 実行形式) がホスト経路とバイト一致"
+
+# 出来た実行形式が ELF として妥当であることを確かめる (verify 層)
+cp tmp/s13/out2/hi tmp/s13/guest-hi
+sh tools/env.sh run riscv64-unknown-elf-readelf -h tmp/s13/guest-hi > tmp/s13/hi.readelf 2>&1
+grep -q 'EXEC (Executable file)' tmp/s13/hi.readelf \
+    && grep -q 'RISC-V' tmp/s13/hi.readelf \
+    && grep -q '0x86000054' tmp/s13/hi.readelf
+report $? "elf: ゲストが作った像が ET_EXEC / RISC-V / entry 0x86000054"
+
+# ---------------------------------------------------------------------------
+section "自己再生成: 処理系が OS の上で自分自身を作り直す (第 3 部)"
+
+# cc 自身のソースは指令を含まないので束ねを通さない。EOT を足すのが eot。
+# 出来上がりはチェーンの成果物そのもの (docs/stage013-tools.md 7.4)
+rm -rf tmp/s13/root
+mkdir -p tmp/s13/root
+cp tmp/build/sh13 tmp/s13/root/sh
+cp tmp/build/eot13 tmp/s13/root/eot
+cp tmp/build/ldin13 tmp/s13/root/ldin
+cp tmp/build/cc13cmd tmp/s13/root/cc
+cp tmp/build/ld13cmd tmp/s13/root/ld
+cp stage010/cc12.sc tmp/s13/root/cc12.sc
+printf 'sh\n' > tmp/s13/root/boot
+runos self "$fix/selfbuild.txt"
+report $? "run: eot -> cc -> ldin -> ld が cc12.sc を通る"
+
+harvest
+cmp -s tmp/s13/out2/cc10l.bin tmp/build/cc10l.bin
+report $? "same: ゲストが作った cc10l.bin がチェーンの成果物とバイト一致"
+
+cmp -s tmp/s13/out2/cc12.o tmp/build/cc10l.o
+report $? "same: 途中の cc12.o もホスト経路の cc10l.o とバイト一致"
 
 summary

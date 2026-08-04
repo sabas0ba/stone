@@ -305,7 +305,7 @@ build_stage013() {
         echo "built tmp/build/l13_$n.o" >&2
     done
     # OS 上の道具 (ELF 実行形式)。どれも libc の第 13 世代を並べる
-    for t in sh ed; do
+    for t in sh ed bundle ldin eot; do
         sh tools/bundle.sh stage013/libc/include/*.h "stage013/$t.c" \
             | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/${t}13.i"
         sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/${t}13.i" > "tmp/build/${t}13.o"
@@ -314,6 +314,17 @@ build_stage013() {
             tmp/build/l13_posix_morecore.o tmp/build/l13_posix_stdio.o; printf '\0'; } \
             | sh tools/env.sh qemu tmp/build/ld13.bin > "tmp/build/${t}13"
         echo "built tmp/build/${t}13" >&2
+    done
+    # 処理系そのものを OS 上のコマンドへ移す (docs/stage013-tools.md 7 章)。
+    # ソースは無く，既にある .o を 'E' でリンクし直すだけである。
+    # 'E' 前置部の getc / putc が read(0) / write(1) の 1 バイト版なので，
+    # 「標準入力を読み標準出力へ書くフィルタ」という姿がそのまま通じる
+    for pair in pp:pp cc:cc10l ld:ld13; do
+        t=${pair%%:*}
+        o=${pair##*:}
+        { printf 'E'; cat "tmp/build/$o.o"; printf '\0'; } \
+            | sh tools/env.sh qemu tmp/build/ld13.bin > "tmp/build/${t}13cmd"
+        echo "built tmp/build/${t}13cmd" >&2
     done
 }
 
@@ -382,8 +393,10 @@ do_stage012() {
 do_stage013() {
     run_stage stage013 ld13.bin kernel13.bin l13_src_string.o l13_src_ctype.o \
         l13_src_stdlib.o l13_src_morecore.o l13_posix_sys.o l13_posix_morecore.o \
-        l13_posix_stdio.o sh13 ed13 \
+        l13_posix_stdio.o sh13 ed13 bundle13 ldin13 eot13 \
+        pp13cmd cc13cmd ld13cmd \
         -- stage013/ld13.sc stage013/kernel.c stage013/sh.c stage013/ed.c \
+           stage013/bundle.c stage013/ldin.c stage013/eot.c \
            stage013/libc/include/*.h stage013/libc/src/*.c \
            stage013/libc/posix/*.c tmp/build/stage008.stamp \
            tmp/build/stage009.stamp tmp/build/stage010.stamp \
