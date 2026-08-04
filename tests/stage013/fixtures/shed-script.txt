@@ -1,0 +1,10 @@
+echo before
+ed
+a
+alpha
+beta
+.
+w made.txt
+Q
+echo after
+exit 0

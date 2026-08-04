@@ -1,8 +1,9 @@
 #!/bin/bash
-# Stage 13 テスト: 第 1 部 (spawn とシェル) の検証
-# (docs/stage013-tools.md 4 章)。
+# Stage 13 テスト: 第 1 部 (spawn とシェル)・第 2 部 (ed) の検証
+# (docs/stage013-tools.md 4 章・6 章)。
 #
-#   ビルド再現  ld13.bin / kernel13.bin / sh13 の SHA-256 が各 .md 記載値と一致
+#   ビルド再現  ld13.bin / kernel13.bin / sh13 / ed13 の SHA-256 が
+#               各 .md 記載値と一致
 #   退行        'F' / 'K' の出力が ld12 とバイト一致する ('E' への追加が
 #               他形式に影響していないことの証明)
 #   互換        ld12 でリンクした Stage 12 のユーザプログラム (hello) が
@@ -12,6 +13,10 @@
 #               子の実行を挟んで保存される。入れ子 (sh -> mem -> args)
 #   シェル      スクリプトを UART から流し，echo・つなぎ替え・`? N`・
 #               エラー表示・exit の終了コードを照合する
+#   ed          既存ファイルの編集 (n / a / d / = / s///g / p・アドレスのみ・
+#               不正コマンド・w・q の警告) と，書いたファイルのホストへの到達
+#   同居        シェルから ed を起動し，ed が同じ UART 入力の続きを読み，
+#               終了後にシェルがさらに続きを読む
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -79,7 +84,7 @@ section "ビルド再現"
 ok=0
 [ "$buildrc" -eq 0 ] || ok=1
 for pair in ld13.bin:stage013/ld13.md kernel13.bin:stage013/kernel.md \
-        sh13:stage013/sh.md; do
+        sh13:stage013/sh.md ed13:stage013/ed.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -87,7 +92,7 @@ for pair in ld13.bin:stage013/ld13.md kernel13.bin:stage013/kernel.md \
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: ld13.bin / kernel13.bin / sh13 の SHA-256 が各 .md 記載値と一致"
+report $? "build: ld13.bin / kernel13.bin / sh13 / ed13 の SHA-256 が各 .md 記載値と一致"
 
 # sh13 が ELF 実行形式として妥当であることを readelf で確かめる (verify 層)
 sh tools/env.sh run riscv64-unknown-elf-readelf -h -l tmp/build/sh13 > tmp/s13/sh13.readelf 2>&1
@@ -179,5 +184,42 @@ report $? "run: 'upfilt < in.txt > up.txt' の結果がホストへ届く"
 
 diff -q "$fix/in.txt" tmp/s13/out2/in.txt > /dev/null
 report $? "run: 入力側のファイルが変わっていない"
+
+# ---------------------------------------------------------------------------
+section "ed: 行エディタ (第 2 部)"
+
+rm -rf tmp/s13/root
+mkdir -p tmp/s13/root
+cp tmp/build/ed13 tmp/s13/root/ed
+cp "$fix/notes.txt" tmp/s13/root/notes.txt
+printf 'ed notes.txt\n' > tmp/s13/root/boot
+runos ed "$fix/ed-script.txt"
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s13/ed.out "$exp/ed.txt" > /dev/null
+report $? "run: 編集の一連 (n / a / d / = / s///g / p / 不正 / w / q の警告)"
+
+harvest
+printf 'ONE two ONE\ninserted\nline three\n' | diff -q - tmp/s13/out2/out.txt > /dev/null
+report $? "run: w で書いたファイルがホストへ届く"
+
+diff -q "$fix/notes.txt" tmp/s13/out2/notes.txt > /dev/null
+report $? "run: 開いただけのファイルは変わっていない"
+
+# ---------------------------------------------------------------------------
+section "ed とシェルの同居"
+
+rm -rf tmp/s13/root
+mkdir -p tmp/s13/root
+cp tmp/build/sh13 tmp/s13/root/sh
+cp tmp/build/ed13 tmp/s13/root/ed
+printf 'sh\n' > tmp/s13/root/boot
+runos shed "$fix/shed-script.txt"
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s13/shed.out "$exp/shed.txt" > /dev/null
+report $? "run: シェルから起動した ed が入力の続きを読み，戻るとシェルが続きを読む"
+
+harvest
+printf 'alpha\nbeta\n' | diff -q - tmp/s13/out2/made.txt > /dev/null
+report $? "run: ed が作ったファイルがホストへ届く"
 
 summary

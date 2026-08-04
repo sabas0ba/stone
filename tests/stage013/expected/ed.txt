@@ -1,0 +1,14 @@
+32
+1	one two one
+2	line two
+3	line three
+1	one two one
+2	line two
+3	inserted
+4	line three
+3
+ONE two ONE
+inserted
+?
+32
+?
