@@ -22,6 +22,8 @@
 #               ホスト経路の同じ段の生成物とバイト一致する
 #   自己再生成  ゲスト内で cc 自身のソースを通し，出来た cc10l.bin が
 #               チェーンの成果物とバイト一致する
+#   ビルド記述  mk が依存の順に命令を実行し，pp / cc / ld を作り直す。
+#               記録済みの成果物とバイト一致し，固定点も成り立つ
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -91,7 +93,7 @@ ok=0
 for pair in ld13.bin:stage013/ld13.md kernel13.bin:stage013/kernel.md \
         sh13:stage013/sh.md ed13:stage013/ed.md \
         bundle13:stage013/bundle.md ldin13:stage013/ldin.md \
-        eot13:stage013/eot.md; do
+        eot13:stage013/eot.md mk13:stage013/mk.md; do
     n=${pair%%:*}
     doc=${pair##*:}
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
@@ -305,5 +307,41 @@ report $? "same: ゲストが作った cc10l.bin がチェーンの成果物と�
 
 cmp -s tmp/s13/out2/cc12.o tmp/build/cc10l.o
 report $? "same: 途中の cc12.o もホスト経路の cc10l.o とバイト一致"
+
+# ---------------------------------------------------------------------------
+section "ビルド記述: mk がゲスト内で処理系を作り直す (第 4 部)"
+
+# 持ち込むのは cc8.o だけ (鎖の境目。docs/stage013-tools.md 9.1 / 9.5)。
+# そこから上の pp / cc / ld をゲスト内で作り直す。
+# 中間物が増えるのでイメージを広げる (以降の検査はこの節で終わり)
+IMGSIZE=16777216
+rm -rf tmp/s13/root
+mkdir -p tmp/s13/root
+cp tmp/build/sh13 tmp/s13/root/sh
+cp tmp/build/mk13 tmp/s13/root/mk
+cp tmp/build/eot13 tmp/s13/root/eot
+cp tmp/build/ldin13 tmp/s13/root/ldin
+cp tmp/build/cc13cmd tmp/s13/root/cc
+cp tmp/build/ld13cmd tmp/s13/root/ld
+cp tmp/build/cc8.o tmp/s13/root/cc8.o
+cp stage009/pp.sc stage010/cc12.sc stage013/ld13.sc tmp/s13/root/
+cp "$fix/mkfile" tmp/s13/root/mkfile
+printf 'sh\n' > tmp/s13/root/boot
+printf 'mk -f mkfile all\nexit 0\n' > tmp/s13/mkrun.txt
+runos mk tmp/s13/mkrun.txt
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s13/mk.out "$exp/mk.txt" > /dev/null
+report $? "run: mk が依存の順に命令を実行し，実行行を出す"
+
+harvest
+ok=0
+for pair in pp.bin:pp.bin cc10l.bin:cc10l.bin ld13.bin:ld13.bin; do
+    cmp -s "tmp/s13/out2/${pair%%:*}" "tmp/build/${pair##*:}" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "same: ゲストが作り直した pp.bin / cc10l.bin / ld13.bin がチェーンの成果物とバイト一致"
+
+cmp -s tmp/s13/out2/ccB.o tmp/s13/out2/cc12.o
+report $? "fix: ゲスト内で作り直した cc が作る .o が元の cc の .o と一致 (固定点)"
 
 summary
