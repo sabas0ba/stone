@@ -1,0 +1,5 @@
+eot < cc12.sc > cc12.in
+cc < cc12.in > cc12.o
+ldin F cc12.o > cc12.ld
+ld < cc12.ld > cc10l.bin
+exit 0
