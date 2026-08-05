@@ -1,0 +1,20 @@
+$ ldin E cc8.o > cc8.eld
+ld < cc8.eld > cc8
+eot < pp.sc > pp.in
+cc8 < pp.in > pp.o
+ldin F pp.o > pp.fld
+ld < pp.fld > pp.bin
+eot < cc12.sc > cc12.in
+cc < cc12.in > cc12.o
+ldin F cc12.o > cc12.fld
+ld < cc12.fld > cc10l.bin
+ldin E cc12.o > cc12.eld
+ld < cc12.eld > ccA
+eot < ld13.sc > ld13.in
+cc < ld13.in > ld13.o
+ldin F ld13.o > ld13.fld
+ld < ld13.fld > ld13.bin
+ccA < cc12.in > ccB.o
+echo rebuilt
+rebuilt
+$ 
