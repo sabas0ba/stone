@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stone — bootstrap の系譜</title>
+<meta name="description"
+      content="人手エンコードした 256 バイトの seed から，C コンパイラと自作 OS までを積み上げるブートストラップ。各世代の成果物をブラウザ内の RV32 エミュレータで実行できる。">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23282433'/%3E%3Ctext x='8' y='12' font-size='10' text-anchor='middle' fill='%23e8b04b' font-family='monospace'%3E石%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <h1>stone</h1>
+    <p class="lede">人手エンコードした <strong>256 バイト</strong>の seed から，
+      アセンブラ・C コンパイラ・libc・自作 OS までを一段ずつ積み上げる。
+      各段は<strong>前段の成果物のみ</strong>でビルドされ，全過程がビット再現される。</p>
+    <p class="lede sub">このページの成果物はすべて本物のチェーン生成物であり，
+      ブラウザ内の RV32 エミュレータでその場で実行できる。</p>
+    <nav class="site-links">
+      <a id="repo-link" href="#" rel="noopener">リポジトリ</a>
+      <span id="build-info"></span>
+    </nav>
+  </div>
+</header>
+
+<nav class="timeline wrap" aria-label="世代の選択">
+  <div class="tl-phases" id="tl-phases"></div>
+  <div class="tl-nodes" id="tl-nodes"></div>
+  <div class="tl-slider">
+    <button id="tl-prev" title="前の世代 (←)">←</button>
+    <input type="range" id="tl-range" min="1" max="14" value="1" step="1"
+           aria-label="Stage">
+    <button id="tl-next" title="次の世代 (→)">→</button>
+  </div>
+</nav>
+
+<main class="wrap" id="main">
+  <section class="stage-head">
+    <div class="stage-num" id="st-num"></div>
+    <div>
+      <h2 id="st-title"></h2>
+      <p class="tagline" id="st-tagline"></p>
+      <div class="meta-chips" id="st-meta"></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <article class="col-main">
+      <h3>仕様の要約</h3>
+      <div class="md" id="st-summary"></div>
+      <h3>この世代で出来るようになったこと</h3>
+      <ul class="caps" id="st-caps"></ul>
+      <div id="st-trivia-box" hidden>
+        <h3>逸話</h3>
+        <p class="trivia" id="st-trivia"></p>
+      </div>
+    </article>
+
+    <aside class="col-side">
+      <h3>成果物</h3>
+      <table class="artifacts" id="st-artifacts"></table>
+      <h3>ソース (凍結)</h3>
+      <ul class="sources" id="st-sources"></ul>
+      <h3>設計文書</h3>
+      <ul class="docs" id="st-docs"></ul>
+    </aside>
+  </div>
+
+  <section class="evolution">
+    <h3>成果物サイズの推移</h3>
+    <div id="evo-chart"></div>
+  </section>
+
+  <section class="playground" id="playground">
+    <h3>プレイグラウンド</h3>
+    <p class="pg-note" id="pg-note"></p>
+    <div id="pg-body">
+      <label class="pg-label" id="pg-input-label" for="pg-input"></label>
+      <textarea id="pg-input" spellcheck="false" rows="14"></textarea>
+      <details id="pg-stdin-box">
+        <summary>実行時入力 (出来たプログラムの stdin)</summary>
+        <textarea id="pg-stdin" spellcheck="false" rows="2"></textarea>
+      </details>
+      <div class="pg-run-row">
+        <button id="pg-run">実行</button>
+        <span class="pg-steps" id="pg-steps"></span>
+      </div>
+      <div id="pg-result" hidden>
+        <div class="pg-out-head" id="pg-out-head"></div>
+        <pre class="pg-out" id="pg-out"></pre>
+        <div id="pg-ran" hidden>
+          <div class="pg-out-head" id="pg-ran-head"></div>
+          <pre class="pg-out" id="pg-ran-out"></pre>
+        </div>
+      </div>
+    </div>
+    <p id="pg-none" hidden></p>
+  </section>
+</main>
+
+<dialog id="src-dialog">
+  <div class="dlg-head">
+    <span id="src-name"></span>
+    <button id="src-close">閉じる</button>
+  </div>
+  <pre id="src-body"></pre>
+</dialog>
+
+<footer class="wrap site-foot">
+  <p>成果物は CI がコンテナ上でシードから再ビルドし，SHA-256 を各設計文書の記載値と照合したもの。
+     エミュレータは展示専用であり，検証の基準は QEMU + コンテナにある。</p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,823 @@
+{
+ "stages": [
+  {
+   "id": "stage001",
+   "num": 1,
+   "name": "hex0",
+   "title": "hex0 — 信頼根",
+   "tagline": "人手エンコードされた 64 命令 256 バイトの seed。鎖のすべてがここから生える",
+   "phase": "seed",
+   "lang_in": "hex0 言語 (hex ペア + コメント + '.' 終端)",
+   "lang_impl": "人手エンコード (RV32I 機械語)",
+   "built_by": "人手 (生バイナリを直接 git 管理。変換ツールは介在させない)",
+   "summary_md": "hex0 は hex テキストをバイナリへ変換するフィルタである。人手で管理する生バイナリを hex0 自身の 1 個で打ち止めにし，以降のプログラムを diff 可能なソースとして管理できるようにする。\n\n**文法**: 16 進数字 2 桁 (小文字のみ) で 1 バイトを即時出力。`#` から行末はコメント，空白は SP/TAB/CR/LF，`.` で正常終了。\n\n**エラー**: 許可されない文字 = 1，16 進数字 1 桁の状態で終端 = 2。検出時は即時異常終了する。\n\n**実行モデル**: フラットバイナリを QEMU virt (RV32IM) の 0x8000_0000 へ `-bios` で配置。UART (16550 互換 @ 0x1000_0000) の RBR/THR/LSR だけを使い，終了は test finisher @ 0x0010_0000 への書込み (正常 0x5555 / 異常 (code<<16)|0x3333)。この「UART から読み UART へ書くフィルタ」という姿は以降の全 Stage が継承する。\n\n**実装**: RV32I のみ。サブルーチンもスタックも使わず，状態はレジスタだけで保持する単一ループ。16 進数字の値化は範囲比較 2 回で，変換表を持たない。\n\nhex0.bin は完成後凍結し，機能追加はすべて後継 Stage が担う。検証は自己再生成 (hex0(hex0.hex) == hex0.bin) と，仕様書から独立に書き起こした参照実装 (verify/audit) による再導出。",
+   "new_capabilities": [
+    "hex テキスト → バイナリの機械変換 (バイナリの直接管理はここで打ち止め)",
+    "コメント付き・diff 可能なソース形式での開発",
+    "自己再生成による転記誤りの機械的検出",
+    "以降の全 Stage が継承するフィルタ実行モデル (UART 入出力 + test finisher) の確立"
+   ],
+   "artifacts": [
+    {
+     "file": "hex0.bin",
+     "desc": "人手エンコードの生バイナリ (256 バイト)。唯一ビルドで作られない実行成果物"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage001/hex0.hex",
+     "desc": "全命令の注釈付き listing。hex0 言語で書いた hex0 自身のソース表現 (検証入力)"
+    },
+    {
+     "path": "stage001/hex0.bin",
+     "desc": "git 管理される生バイナリ本体 (SHA-256 を hex0.md に記録)"
+    }
+   ],
+   "docs": [
+    "docs/stage001-hex0.md",
+    "stage001/hex0.md"
+   ],
+   "trivia": "ラベルもアドレス計算もないため分岐オフセットは全部手計算で，64 命令はその実用上の上限に近い。listing とバイナリの整合は「自分の listing を食わせると自分自身が出てくる」自己再生成テストで固定されている。"
+  },
+  {
+   "id": "stage002",
+   "num": 2,
+   "name": "hex1",
+   "title": "hex1 — ラベルの導入",
+   "tagline": "ラベル定義・参照で分岐オフセットの手計算を廃止。手計算は hex1 自身のソースが最後",
+   "phase": "plan",
+   "lang_in": "hex1 言語 (hex0 上位互換 + ラベル)",
+   "lang_impl": "hex0 言語",
+   "built_by": "hex0.bin",
+   "summary_md": "hex0 言語には分岐先の表現がなく，命令の挿入・削除のたびにオフセットを手計算し直すことになる。hex1 はラベルでこれを廃止する。\n\n**文法追加** (hex0 の完全上位互換):\n\n- `:name` — 現在の出力アドレスに name を束縛 (name は `a-z0-9_` 1..15 バイト)\n- `!name tmpl` — B-type 参照。imm を 0 にした 4 バイトのテンプレートへ imm[12:1] を合成\n- `$name tmpl` — J-type 参照。同様に imm[20:1] を合成\n- `&name` — ラベルの絶対アドレスを LE 4 バイトで出力\n\n**エラー追加**: 未定義ラベル = 3，重複定義 = 4，オフセット範囲外 (B: ±4KiB, J: ±1MiB) または奇数 = 5。\n\n**実装**: UART 入力は巻き戻せないため，入力全体を RAM へ蓄えてから 2 回走査する (pass 1 = アドレス計算とシンボル表登録，pass 2 = 出力と参照合成)。両パスは「出力の有無」だけが違う同一の走査で，実装を共有する。シンボル表は 20 バイト/エントリの線形探索。lui/addi 対の合成やリンカ的な再配置は導入しない (非目標)。",
+   "new_capabilities": [
+    "ラベルによる分岐・ジャンプ先の記述 (前方参照も可)",
+    "B-type / J-type オフセットの自動計算と範囲検査",
+    "ラベル絶対アドレスのデータ語出力 (&)",
+    "命令の挿入・削除に耐えるソース保守 (Stage 3 規模の記述が可能に)"
+   ],
+   "artifacts": [
+    {
+     "file": "hex1.bin",
+     "desc": "hex0 でビルドされるラベル対応フィルタ (git 管理せず SHA-256 で固定)"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage002/hex1.hex",
+     "desc": "hex1 のソース (hex0 言語)。注釈付き listing を兼ねる"
+    }
+   ],
+   "docs": [
+    "docs/stage002-hex1.md",
+    "stage002/hex1.md"
+   ],
+   "trivia": "hex1 自身は hex0 言語で書くため，そのオフセットは最後の手計算になる。負担を抑えるため機能単位の小ブロックに分割し，未使用領域を 00 で埋めてアドレスを切りのよい値に揃える配置を採った。ビルドスクリプト tools/build.sh もこの Stage で導入された。"
+  },
+  {
+   "id": "stage003",
+   "num": 3,
+   "name": "asm",
+   "title": "asm — アセンブラ",
+   "tagline": "RV32IM 全命令をニーモニックとオペランドで。手エンコードは asm 自身のソースが最後",
+   "phase": "plan",
+   "lang_in": "asm 言語 (RV32IM ニーモニック + 疑似命令)",
+   "lang_impl": "hex1 言語",
+   "built_by": "hex1.bin",
+   "summary_md": "レジスタ番号や即値を 1 bit 単位でフィールドへ詰める手エンコードを廃止する。RV32IM 全 48 命令をニーモニックで記述できる 2 パスアセンブラである。\n\n**字句**: 自由形式で行の概念を持たない。レジスタは `x0..x31` のみ (ABI 名なし)，`,` は空白と同一，16 進は小文字のみ。ラベル定義は `name:`。\n\n**命令形式**: R / I / SH / LD / S / B / U / J / FX の 9 形式。分岐・ジャンプ先はラベルのみで，数値オフセットは書けない。\n\n**疑似命令**: nop, mv, li, la, j, call, jr, ret, beqz, bnez。li/la は即値の大小によらず常に lui+addi の 8 バイト固定 — パス間でサイズ判断を変えないための固定化である。\n\n**ディレクティブ**: word / byte (`.` 前置なし。`.` は終端記号のため)。整列の自動化はせず書き手の責任とする。\n\n**エラー**: 不正構文 = 1，未知ニーモニック = 2，未定義ラベル = 3，重複定義 = 4，オフセット範囲外 = 5，即値範囲外 = 6，不正レジスタ = 7。\n\n**実装**: hex1 と同じ骨格の 2 パス。命令の諸元は本体末尾のニーモニック表 (24 バイト/エントリ: 名前 + base word + ハンドラアドレス) に置き，ハンドラアドレスは hex1 の `&` で記述するため表の再配置に人手の追随が要らない。",
+   "new_capabilities": [
+    "RV32IM 全 48 命令のニーモニック記述 (bit 詰めの手作業が消える)",
+    "疑似命令 (li/la/call/ret など) による定型パターンの短縮",
+    "即値・レジスタの範囲検査 (エラーコード 6/7)",
+    "word/byte ディレクティブによるデータ埋め込み"
+   ],
+   "artifacts": [
+    {
+     "file": "asm.bin",
+     "desc": "hex1 でビルドされる 2 パスアセンブラ"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage003/asm.hex1",
+     "desc": "asm のソース (hex1 言語)。全行に asm 言語の転記コメント #: を持つ"
+    }
+   ],
+   "docs": [
+    "docs/stage003-asm.md",
+    "stage003/asm.md"
+   ],
+   "trivia": "全コード行に `#:` で asm 言語の転記コメントを付け，それを機械抽出すると「asm 言語で書いた asm 自身」になる。これを asm に通した出力が asm.bin 自身とビット一致することで，手エンコードとアセンブラのエンコードが相互検証される。"
+  },
+  {
+   "id": "stage004",
+   "num": 4,
+   "name": "sol",
+   "title": "sol — スタック指向言語",
+   "tagline": "レジスタ管理と命令選択が書き手の仕事でなくなる。構造化制御・関数・大域変数を持つ小言語",
+   "phase": "plan",
+   "lang_in": "sol 言語 (スタック指向・後置記法)",
+   "lang_impl": "asm 言語",
+   "built_by": "asm.bin",
+   "summary_md": "sol (stack-oriented language) は Forth 風のスタック指向小言語のコンパイラである。アセンブリの手書きは sol コンパイラ自身のソースをもって最後とする。\n\n**定義** (トップレベルのみ): `const name n` / `var name` / `buf name n` / `fn name ... end`。関数は前方参照可，var/buf/const の前方参照はエラー (パス間でサイズ判断が変わるため)。\n\n**プリミティブ語**: スタック操作 (dup drop swap over rot)，算術 (+ - * / %)，ビット (& | ^ << >>)，比較 (= <> < > <= >= u< u>=)，メモリ (@ ! c@ c!)，I/O (getc putc)，exit。制御構造は `if/else/then`，`begin/until`，`begin/while/repeat`。\n\n**実行モデル**: 型なし，全セル 32 bit。データスタック x9・リターンスタック x2 の 2 本立て。真偽は 0 = 偽 / 非 0 = 真。`main` 必須で，返ると終了コード 0。\n\n**実装**: 2 パス + fixup 表。全トークンの生成サイズはオペランド値に依存しない (リテラル push は 4 語固定など) ためパス間でアドレスがずれない。前方分岐は分岐系トークンへ両パス共通の連番を振って解決する。各語は固定テンプレートの命令列へ展開し，最適化はしない。",
+   "new_capabilities": [
+    "構造化制御 (if/else・2 種のループ) — 分岐の組立てが言語機能になる",
+    "名前付き関数とサブルーチン呼出し (再帰可)",
+    "大域変数・バッファ・定数の名前管理",
+    "文字列リテラルの埋め込み",
+    "レジスタ割当からの解放 (レジスタもスタックも書き手から見えない)"
+   ],
+   "artifacts": [
+    {
+     "file": "sol.bin",
+     "desc": "asm でビルドされる sol コンパイラ (出力はフラットバイナリ)"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage004/sol.s",
+     "desc": "sol コンパイラのソース (asm 言語)"
+    }
+   ],
+   "docs": [
+    "docs/stage004-sol.md",
+    "stage004/sol.md"
+   ],
+   "trivia": "sol は行コメントが `#` のため，文書化コメントには `#/` を使う独自規約を持つ。スタック指向で名前付き引数がないため @param の代わりにスタック効果を `@stack ( 引数 -- 結果 )` で記す。"
+  },
+  {
+   "id": "stage005",
+   "num": 5,
+   "name": "sc",
+   "title": "sc — C サブセット",
+   "tagline": "関数・ポインタ・構造体を備えた small C。自分自身を記述できる言語がここで手に入る",
+   "phase": "plan",
+   "lang_in": "sc 言語 (C サブセット。終端は EOT 0x04)",
+   "lang_impl": "sol 言語",
+   "built_by": "sol.bin",
+   "summary_md": "sc (small C) は C サブセットの定義とそのコンパイラである。設計文書が言語仕様書を兼ね，Stage 6 のセルフホストで自分自身を記述するための言語になる。\n\n**言語**: 予約語は `int` `char` `struct` `if` `else` `while` `return` の 7 個。値はすべて 32 bit セルで，`char` の記憶域アクセスのみ 1 バイト。ポインタは任意深，配列は 1 次元のみ (式中でポインタへ退化)。構造体の変数は大域のみで，値渡し・値代入はしない (ポインタ経由)。識別子は英小文字 1..15 バイト。\n\n**式**: 優先順位 11 段の中置演算子 (代入・短絡 &&/||・ビット・比較・シフト・算術)，単項 `- ! * &`，後置 `[] () . ->`。ポインタ演算は指し先サイズでスケールする。\n\n**組込み**: getc / putc / exit の 3 つだけ。`main` の返却値が終了コードになる。\n\n**エラー**: 構文 = 1，未定義 = 2，main 未定義 = 3，重複 = 4，型 = 5，容量超過 = 6。\n\n**実装**: sol と違いメモリ操作が自由なので，出力バッファへの単一パス生成 + バックパッチ (前方分岐・前方呼出し) へ移行。再帰下降構文解析で，式の評価結果は「値」か「アドレス (左辺値，ロード遅延)」かをフラグで区別する。入力終端は `.` から EOT (0x04) に変わった (C ソースに `.` が頻出するため)。",
+   "new_capabilities": [
+    "中置演算子の式と優先順位・括弧 (後置記法とスタック操作が消える)",
+    "名前付き引数とローカル変数を持つ関数・return による値返却",
+    "ポインタ・1 次元配列・構造体という型の概念",
+    "ポインタ演算の指し先サイズによるスケーリング",
+    "単一パス + バックパッチというコンパイラ構成 (2 パス走査から転換)"
+   ],
+   "artifacts": [
+    {
+     "file": "sc.bin",
+     "desc": "sol でビルドされる sc コンパイラ"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage005/sc.sol",
+     "desc": "sc コンパイラのソース (sol 言語)"
+    }
+   ],
+   "docs": [
+    "docs/stage005-sc.md",
+    "stage005/sc.md"
+   ],
+   "trivia": "sc.sol のデバッグでは，各 `exit` 箇所へ機械変換で互いに異なる終了コードを振ったデバッグ版を作り，「どの検査で落ちたか」を終了コードから直接読む手法で引数個数の検査漏れを特定した (dev-notes.md 2.1)。"
+  },
+  {
+   "id": "stage006",
+   "num": 6,
+   "name": "scc",
+   "title": "scc — セルフホスト",
+   "tagline": "sc コンパイラを sc 言語で再記述。固定点 B2 == B3 がセルフホストを機械的に証明する",
+   "phase": "plan",
+   "lang_in": "sc 言語 (仕様は Stage 5 と同一)",
+   "lang_impl": "sc 言語",
+   "built_by": "sc.bin (bootstrap 1 段目) → 自分自身 (scc1 → scc)",
+   "summary_md": "scc (self-hosted sc compiler) は sc コンパイラを sc 言語自身で再記述したものである。以降のビルドチェーンは下位言語 (sol 以下) に依存しない。\n\n**固定点検証** (完了条件): scc.sc を S，Stage 5 のコンパイラを C0 として\n\n```\nB1 = C0(S)   # 下位チェーンで bootstrap した scc\nB2 = B1(S)   # scc が自分自身をコンパイルしたもの\nB3 = B2(S)\n```\n\nB2 == B3 のビット一致が完了条件。コード生成テンプレートを C0 と同一に保つため B1 == B2 も成立し，追加の一致検査とする。この「固定点の維持」は以降すべての世代交代で守られる作法になる。\n\n**sc の制約に合わせた再構成**: 構造体の配列が書けないため記号表は並行配列 (char 配列 + int 配列群) で表す。定数構文がないためトークン種別は `init()` で大域変数へ設定する。break/continue がないため探索ループは関数化して return で脱出する。\n\n**同値性**: Stage 5 の仕様テストスイートを B2 でコンパイル・実行し，Stage 5 と同じ出力・終了コードになることも確認する。言語仕様の拡張は行わない。",
+   "new_capabilities": [
+    "セルフホスト: sc 言語だけで sc 処理系を維持できる",
+    "固定点検証 (B2 == B3) という健全性の機械的証明の確立",
+    "以降の開発が scc.sc の改訂のみで進む体制"
+   ],
+   "artifacts": [
+    {
+     "file": "scc1.bin",
+     "desc": "B1 = sc(scc.sc)。下位チェーンによる bootstrap 1 段目"
+    },
+    {
+     "file": "scc.bin",
+     "desc": "B2 = scc1(scc.sc)。以降の正本"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage006/scc.sc",
+     "desc": "scc のソース (sc 言語)。以降の正本"
+    }
+   ],
+   "docs": [
+    "docs/stage006-scc.md",
+    "stage006/scc.md"
+   ],
+   "trivia": "ビルドは同じソースを 2 回通す。1 回目 (scc1) は sol 製コンパイラの生成物，2 回目 (scc) は scc 自身の生成物で，両者が一致することがコード生成の同一性の証明になる。"
+  },
+  {
+   "id": "stage007",
+   "num": 7,
+   "name": "occ",
+   "title": "occ — 現代化 (IR と最適化)",
+   "tagline": "IR (φ なし SSA)・定数畳み込み・DCE・レジスタ割付。テンプレート展開の時代が終わる",
+   "phase": "plan",
+   "lang_in": "sc 言語 (仕様は Stage 5 と同一)",
+   "lang_impl": "sc 言語",
+   "built_by": "scc.bin (bootstrap 1 段目) → 自分自身 (occ1 → occ)",
+   "summary_md": "occ (optimizing sc compiler) はコンパイラの内部構造を現代的な多段構成 — 構文解析が IR を構築し，最適化パスが IR を書き換え，レジスタ割付けを経て出力する — に再設計したものである。言語仕様は変えない。\n\n**IR**: 関数単位の 3 番地コード列。各命令は高々 1 個の値を定義し，値は命令番号で参照される。式の一時値は一度しか定義されないため φ 関数を持たない SSA になる。変数は LOAD/STORE のままメモリに残す (mem2reg は非目標)。命令は CONST / LADDR / GADDR / LOADW / STOREW / BIN / NEG / ARG / CALL / RET / LABEL / JMP / BZ など。\n\n**レジスタ割付け**: 対象は x13..x27 の 15 本。すべて callee-saved とし，使った分だけプロローグで退避する。空きがなければ最終使用が最も遠い値をスピルする。\n\n**最適化パス**: fold (定数畳み込み。除数 0 は畳まない) → dce (使用されない純粋な値の削除)。\n\n**出力改良**: -2048..2047 の定数は addi 1 語。条件分岐は「逆条件で 1 語跳び越え + jal」の 2 語とし，従来実装が範囲検査なしに beq を発行して 4KiB 超の if/while 本体を silent に誤コンパイルする潜在バグを除去した。\n\n関数間 ABI (データスタック渡し・前置部 32 語) は scc と同一に保つ。コード生成が変わるため B1 == B2 は成立せず，B2 == B3 の固定点だけを完了条件とする。",
+   "new_capabilities": [
+    "SSA 風 IR を介した多段構成 (構文直結テンプレートからの脱却)",
+    "定数畳み込み (fold) と不要コード削除 (dce)",
+    "式の一時値のレジスタ割付け (15 本 + スピル)",
+    "生成コードのサイズ・速度の大幅な改善",
+    "条件分岐の ±4KiB 制限の除去 (jal 経由の 2 語出力)"
+   ],
+   "artifacts": [
+    {
+     "file": "occ1.bin",
+     "desc": "B1 = scc(occ.sc)。旧コード生成による bootstrap"
+    },
+    {
+     "file": "occ.bin",
+     "desc": "B2 = occ1(occ.sc)。以降の正本。plan.md の段階計画はここで完了"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage007/occ.sc",
+     "desc": "occ のソース (sc 言語)。scc の字句・構文解析を継承し IR・最適化・割付けを新設"
+    }
+   ],
+   "docs": [
+    "docs/stage007-occ.md",
+    "stage007/occ.md"
+   ],
+   "trivia": "scc の「B-type 分岐 ±4KiB の silent 誤コンパイル」は本 Stage の開発中に QEMU の実行トレースから PC の周回を数えて発見した。occ.sc 自身は bootstrap 1 段目が旧コード生成を通るため，大きなループ本体を関数 (fold に対する foldins) へ分割して 4KiB 制限を回避している。"
+  },
+  {
+   "id": "stage008",
+   "num": 8,
+   "name": "cc + ld",
+   "title": "cc + ld — ELF と分割コンパイル",
+   "tagline": "コンパイラはリロケータブルオブジェクトを吐き，リンカが結合する。以降すべての前提",
+   "phase": "phase-a",
+   "lang_in": "sc 言語 (cc) / 連結した ELF オブジェクト列 (ld)",
+   "lang_impl": "sc 言語",
+   "built_by": "occ.bin (bootstrap: cc0/ld0) → cc0 + ld0 → 自分自身 (cc8.bin / ld.bin)",
+   "summary_md": "翻訳単位を分割できるようにする。cc は occ に ELF リロケータブルオブジェクト出力を加えたもの，ld は新規である。\n\n**ELF 部分集合** (ET_REL, EM_RISCV, LE): セクションは .text / .bss / .symtab / .strtab / .rela.text / .shstrtab の 7 本 (NULL 含む)。セクションシンボルは作らず，関数も大域変数も固有のシンボルとして登録する — リンカ側で「セクション + オフセット」を解く処理が不要になる。\n\n**再配置は 4 種だけ**: R_RISCV_32 (データ語), R_RISCV_JAL (jal 変位), R_RISCV_HI20 / R_RISCV_LO12_I (lui/addi 対)。文字列リテラルは .text 内の内部シンボル (.L.str.N, LOCAL) への自己参照とする。\n\n**前置部の移動**: occ が生成物先頭に置いていた 32 語のランタイムは，どの翻訳単位が先頭に来るか決まらないためリンカが出力する (crt0 相当)。getc/putc/exit は固定アドレスから「リンカが提供する外部シンボル」へ変わる。\n\n**入力の与え方**: 実行環境は UART のみでファイルを開けないため，リンカへはオブジェクトを連結して標準入力から与える (`cat a.o b.o | ld`)。ELF ヘッダから全体長を算出して順に切り出す。\n\n**エラー** (ld): 非 ELF = 1，未定義シンボル = 2，多重定義 = 3，再配置範囲超過 = 4，main 未定義 = 5，容量超過 = 6。",
+   "new_capabilities": [
+    "分割コンパイル (翻訳単位ごとの .o とリンクによる結合)",
+    "ELF リロケータブルオブジェクトの生成 (verify 層の readelf/objdump で機械検査可能)",
+    "シンボル解決と 4 種の再配置",
+    "ランタイム前置部の crt0 化 (getc/putc/exit の外部シンボル化)",
+    "ライブラリ的な結合の下地 (Stage 11 の libc はオブジェクトを並べるだけで使える)"
+   ],
+   "artifacts": [
+    {
+     "file": "cc0.bin",
+     "desc": "occ(cc.sc)。フラット出力の bootstrap コンパイラ"
+    },
+    {
+     "file": "ld0.bin",
+     "desc": "occ(ld.sc)。bootstrap リンカ"
+    },
+    {
+     "file": "cc8.bin",
+     "desc": "cc0 + ld0 で作った正本コンパイラ (当時の cc.bin。Stage 10 以降この名で呼ぶ)"
+    },
+    {
+     "file": "ld.bin",
+     "desc": "正本リンカ。Stage 12 の ld12 まで全世代のリンクを担う"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage008/cc.sc",
+     "desc": "ELF オブジェクトを出力する C サブセットコンパイラ"
+    },
+    {
+     "path": "stage008/ld.sc",
+     "desc": "リンカ (前置部 32 語 + .text 連結 + .bss 配置 + 再配置適用)"
+    }
+   ],
+   "docs": [
+    "docs/stage008-elf-ld.md",
+    "stage008/cc.md",
+    "stage008/ld.md"
+   ],
+   "trivia": "独自形式のほうが実装は小さいが，長期目標 (GCC・Linux) が ELF 前提なので最初から ELF を採った。生成物が cc8.bin という名になったのは Stage 10 で後継が出たためで，「cc.bin は常に最新世代を指す」という命名の約束がここから始まる。"
+  },
+  {
+   "id": "stage009",
+   "num": 9,
+   "name": "pp",
+   "title": "pp — プリプロセッサ",
+   "tagline": "独立したテキスト変換器 pp。#include は「束ね」で，ファイルのない世界にヘッダ共有を持ち込む",
+   "phase": "phase-a",
+   "lang_in": "束ね (bundle) 形式の C ソース (#include / #define / #if 系)",
+   "lang_impl": "sc 言語 (自身は指令を含まないため pp を通さずコンパイルできる)",
+   "built_by": "cc8.bin + ld.bin (Stage 8 の成果物)",
+   "summary_md": "翻訳単位のあいだで宣言を共有するためのプリプロセッサ。コンパイラへ組み込まず独立した実行像とする — 入出力がテキスト同士なので単体で検証でき，cc.bin を変更せずに済み，古典的なツールチェイン構成に一致する。\n\n**束ね (bundle)**: 実行環境に「名前でファイルを開く」手段がないため，ソース群を `#!stone-bundle` マジックと `@name size` ヘッダで名前つき連結して標準入力から与える。最後のメンバが翻訳対象で，他は `#include` の探索先。tools/bundle.sh が生成する。\n\n**指令**: `#define` (オブジェクト形式・関数形式・可変長 `__VA_ARGS__`)，`#undef`，`#include \"n\"` / `<n>` (探索先は同じ)，`#if` / `#ifdef` / `#ifndef` / `#elif` / `#else` / `#endif`，`#error`。`#pragma` / `#line` / `#warning` は読み飛ばす。\n\n**マクロ展開**: C89 準拠。引数の事前展開，文字列化 `#`，連結 `##`，再帰の抑止 (積みの中の印で判定)。関数形式は `(` が続く場合のみ展開。定義済みマクロは __STDC__ / __STONE__ / __FILE__ / __LINE__。\n\n**#if の定数式**: defined → マクロ展開 → 評価の順。32 bit 符号つき。`||` `&&` `?:` は短絡しない割切りとし，代わりに 0 除算の結果を 0 と定める。\n\n**実装**: 中核は「文字を 1 個ずつ引き出すフレームの積み」。底が翻訳単位で，#include はファイルの，マクロ展開は置換結果のフレームを積む。置換テキストはスタック割付けのアリーナ 2 本 (xb / eb) で管理する。出力は EOT 終端で，そのまま `pp | cc` と繋がる。",
+   "new_capabilities": [
+    "#include によるヘッダ共有 (束ね形式で複数ソースを 1 本の入力に)",
+    "オブジェクト形式・関数形式・可変長マクロと # / ## 演算子",
+    "#if 系による条件コンパイル",
+    "/* */ ブロックコメント (cc は // しか解さないので副次的な成果)",
+    "行連結 (\\ + 改行) と __FILE__ / __LINE__"
+   ],
+   "artifacts": [
+    {
+     "file": "pp.bin",
+     "desc": "プリプロセッサ本体。以降どの世代でも cc8 でビルドされ SHA-256 が変わらない"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage009/pp.sc",
+     "desc": "プリプロセッサ本体 (sc 言語)"
+    },
+    {
+     "path": "tools/bundle.sh",
+     "desc": "ソース群を束ね形式へ変換するホスト側補助"
+    }
+   ],
+   "docs": [
+    "docs/stage009-pp.md",
+    "stage009/pp.md"
+   ],
+   "trivia": "名前を cpp にしなかったのは，.cpp が C++ の拡張子として広く使われており，将来 C++ サブセット処理系を作る可能性 (GCC ビルドの案 A) のためにその名前を空けておく判断から。1 文字先読みの押し戻しをフレームごとに区切らないと `return A;` が `return ;1` になる，という落とし穴が dev-notes に残っている。"
+  },
+  {
+   "id": "stage010",
+   "num": 10,
+   "name": "cc10",
+   "title": "cc10 — C89 言語完成",
+   "tagline": "12 世代の積み上げで sc を C89 へ。各世代が次の世代を書きやすくする",
+   "phase": "phase-a",
+   "lang_in": "C89 (世代を追うごとに受理範囲が拡大)",
+   "lang_impl": "各世代の 1 つ前のコンパイラが受ける言語 (cc.sc は sc 言語，以降は実装済み機能を使って記述)",
+   "built_by": "cc8.bin (1 段目) → 各世代が次の世代をビルド (ソースは世代ごとに凍結)",
+   "summary_md": "cc8 が受けるのは sc 言語だけである。Stage 10 はこれを C89 の言語仕様まで引き上げる。作業は 1 つの変更に収まらないため世代に分け，各世代のソースを凍結し，次の世代は 1 つ前のコンパイラでビルドする — 第 2 部のソースは第 1 部で入れた for / switch / ++ を使って書ける。\n\n| 世代 | ソース | 入ったもの |\n|---|---|---|\n| cc10a | cc.sc | 第 1 部 (文と式): for / do / switch / break / continue / goto，?:，複合代入，++/--，カンマ，sizeof，キャスト |\n| cc10b | cc2.sc | 型: typedef / enum / union / const / volatile / void，識別子の大文字 |\n| cc10c | cc3.sc | 宣言: 関数プロトタイプ / extern / static (受理) / ブロック内宣言 |\n| cc10d | cc4.sc | 識別子長 31，多次元配列 |\n| cc10e | cc5.sc | 整数型: unsigned / signed / short / long — コード生成規則が変わる最初の段 |\n| cc10f | cc6.sc | 関数ポインタ，static のリンケージ |\n| cc10g | cc7.sc | 初期化子 (初期値つき大域を .text に置く) |\n| cc10h | cc8.sc | 可変長引数 (stdarg.h の va_start / va_arg) |\n| cc10i | cc9.sc | 構造体の値渡し・値代入 |\n| cc10j | cc10.sc | 構造体の返却 — ここで Phase A 完了 |\n| cc10k | cc11.sc | 補遺: 文字エスケープの取りこぼし (Stage 11 着手時に発覚) |\n| cc10l | cc12.sc | 補遺 2: 配列への単項 & (offsetof を配列メンバに使えるように) |\n\n構文だけを足した世代は bootstrap 1 段目と正本がバイト一致し (cc10x0 == cc10x)，コード生成を変えた世代 (cc10e など) は固定点 B2 == B3 で健全性を確かめる。`cc.bin` は最新世代 cc10l の別名。非目標は浮動小数点・ビットフィールド・volatile の意味論・C99 以降。",
+   "new_capabilities": [
+    "C89 の文と式ほぼ全部 (for / switch / goto / ?: / 複合代入 / ++ / sizeof / キャスト)",
+    "typedef / enum / union / 関数プロトタイプ / extern / ブロック内宣言",
+    "unsigned / short / long の幅と符号 (ロード・除算・比較の符号選択)",
+    "関数ポインタと static リンケージ",
+    "初期化子・可変長引数・構造体の値渡しと返却",
+    "ヘッダが「宣言を共有する場所」になる (extern + プロトタイプ)"
+   ],
+   "artifacts": [
+    {
+     "file": "cc10a.bin",
+     "desc": "第 1 部 (文と式)"
+    },
+    {
+     "file": "cc10b.bin",
+     "desc": "第 2 部の 1 (型)"
+    },
+    {
+     "file": "cc10c.bin",
+     "desc": "第 2 部の 2 (宣言)"
+    },
+    {
+     "file": "cc10d.bin",
+     "desc": "第 2 部の 3 (識別子と配列)"
+    },
+    {
+     "file": "cc10e.bin",
+     "desc": "第 2 部の 4 (整数型)"
+    },
+    {
+     "file": "cc10f.bin",
+     "desc": "第 2 部の 5 (関数ポインタと static)"
+    },
+    {
+     "file": "cc10g.bin",
+     "desc": "第 3 部の 1 (初期化子)"
+    },
+    {
+     "file": "cc10h.bin",
+     "desc": "第 3 部の 2 (可変長引数)"
+    },
+    {
+     "file": "cc10i.bin",
+     "desc": "第 3 部の 3 (構造体の値)"
+    },
+    {
+     "file": "cc10j.bin",
+     "desc": "第 3 部の 4 (構造体の返却)"
+    },
+    {
+     "file": "cc10k.bin",
+     "desc": "補遺 (文字エスケープ)"
+    },
+    {
+     "file": "cc10l.bin",
+     "desc": "補遺 2 (配列への単項 &)。現行の正本"
+    },
+    {
+     "file": "cc.bin",
+     "desc": "最新世代 (= cc10l.bin) の別名。各世代の bootstrap 中間物 cc10a0〜cc10l0 も生成される"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage010/cc.sc",
+     "desc": "第 1 部のソース (sc 言語で記述)"
+    },
+    {
+     "path": "stage010/cc2.sc",
+     "desc": "第 2 部の 1 (cc10a の言語で記述)"
+    },
+    {
+     "path": "stage010/cc3.sc",
+     "desc": "第 2 部の 2"
+    },
+    {
+     "path": "stage010/cc4.sc",
+     "desc": "第 2 部の 3"
+    },
+    {
+     "path": "stage010/cc5.sc",
+     "desc": "第 2 部の 4"
+    },
+    {
+     "path": "stage010/cc6.sc",
+     "desc": "第 2 部の 5"
+    },
+    {
+     "path": "stage010/cc7.sc",
+     "desc": "第 3 部の 1"
+    },
+    {
+     "path": "stage010/cc8.sc",
+     "desc": "第 3 部の 2"
+    },
+    {
+     "path": "stage010/cc9.sc",
+     "desc": "第 3 部の 3"
+    },
+    {
+     "path": "stage010/cc10.sc",
+     "desc": "第 3 部の 4"
+    },
+    {
+     "path": "stage010/cc11.sc",
+     "desc": "補遺"
+    },
+    {
+     "path": "stage010/cc12.sc",
+     "desc": "補遺 2。現行 cc の正本ソース (151636 バイト)"
+    },
+    {
+     "path": "stage010/include/stdarg.h",
+     "desc": "va_start / va_arg / va_end (隠しローカル __va_ptr を包むマクロ)"
+    }
+   ],
+   "docs": [
+    "docs/stage010-c89.md"
+   ],
+   "trivia": "「仕様が揃った」と判断した後に，Stage 11 で isspace を書いた瞬間に文字エスケープの実装漏れ (\\f \\r \\v) が発覚し，補遺の cc10k が生まれた。実装漏れは最初の実際の利用で顕在化する — この経験が Stage 14 の適合台帳 (未対応を明示して数える) の設計につながっている。"
+  },
+  {
+   "id": "stage011",
+   "num": 11,
+   "name": "libc",
+   "title": "libc — フリースタンディング標準ライブラリ",
+   "tagline": "自作の C で書く string / ctype / stdlib。OS を要さない範囲の標準ライブラリが揃う",
+   "phase": "phase-b",
+   "lang_in": "C89 (利用者はヘッダを #include してリンクするだけ)",
+   "lang_impl": "C89 (自作 cc の範囲)",
+   "built_by": "pp.bin + cc.bin (= cc10l)。オブジェクトのまま置き，利用者が必要な分だけ ld へ並べる",
+   "summary_md": "C のプログラムは言語だけでは書けない。Stage 11 は標準ライブラリの中核を自作の C で用意する。実行環境はまだベアメタルなので，C89 のフリースタンディング処理系を名乗り，OS を要さない範囲だけを実装する。stdio は Stage 12 の課題。\n\n**第 1 部 (純粋な関数)**: stddef.h (size_t / NULL / offsetof)，limits.h，string.h (memcpy / memmove / strcmp / strstr / strspn など)，ctype.h。比較は C89 の要求どおり unsigned char で行う。ctype は 256 バイトの表を持たず範囲比較で書く (使わなくても .bss を消費しないため)。\n\n**第 2 部 (記憶域)**: K&R 型フリーリストの first-fit で malloc / free / calloc / realloc。ヒープは .bss 上の固定 1 MiB で，供給源は内部関数 morecore に集約 — Stage 12 で brk へ差し替えるのはこの 1 関数だけになる。realloc の複写は memcpy を呼ばない (呼ぶと string.o のリンクが強制されるため)。\n\n**第 3 部 (整列と探索・数値変換)**: qsort (Shell ソート。非再帰・追加記憶域なし) / bsearch / atoi / strtol (基数 0 の自動判定・LONG_MAX への飽和) / abs / div (構造体返却 — cc10j の成果がここで使われる)。\n\n**リンクの単位**: アーカイブ (.a) はまだ無く，必要なオブジェクトだけを ld へ並べる。使わない関数は最初からリンクされない。libc は世代ごとに凍結される (後の世代が OS 上の道具の入力になるため)。",
+   "new_capabilities": [
+    "string.h / ctype.h の純粋関数群 (手書き走査からの解放)",
+    "malloc / free / calloc / realloc (K&R 型フリーリスト + 併合)",
+    "qsort / bsearch / strtol / atoi / abs / div",
+    "morecore 境界の設計 (OS 移行時に 1 関数の差し替えで済む)",
+    "「必要なオブジェクトだけ並べる」リンク単位の作法"
+   ],
+   "artifacts": [
+    {
+     "file": "l11_string.o",
+     "desc": "string.h の実装 (第 11 世代)"
+    },
+    {
+     "file": "l11_ctype.o",
+     "desc": "ctype.h の実装"
+    },
+    {
+     "file": "l11_stdlib.o",
+     "desc": "malloc 系 + qsort / bsearch / strtol など"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage011/libc/include",
+     "desc": "ヘッダ 6 本 (stddef / limits / stdarg / string / ctype / stdlib)"
+    },
+    {
+     "path": "stage011/libc/src/string.c",
+     "desc": "string.h の実装"
+    },
+    {
+     "path": "stage011/libc/src/ctype.c",
+     "desc": "ctype.h の実装 (表を持たない範囲比較)"
+    },
+    {
+     "path": "stage011/libc/src/stdlib.c",
+     "desc": "malloc 系と第 3 部の関数"
+    }
+   ],
+   "docs": [
+    "docs/stage011-libc.md"
+   ],
+   "trivia": "着手した途端に処理系の穴が 2 つ見つかった: 文字エスケープの取りこぼしと，offsetof が要求する「配列への単項 &」の未実装である。どちらも Stage 10 に補遺世代 (cc10k / cc10l) を足してから進めた。qsort の中身がクイックソートでないのは，C89 がアルゴリズムを規定しないため。"
+  },
+  {
+   "id": "stage012",
+   "num": 12,
+   "name": "OS",
+   "title": "OS — 自作カーネルと POSIX 風環境",
+   "tagline": "案 Y に決定: 自作の簡易 OS。syscall ABI は RV32 Linux 互換，ファイルは sfs イメージで注入",
+   "phase": "phase-b",
+   "lang_in": "ld12: 形式指定 1 バイト ('F'/'K'/'E') + オブジェクト列 / カーネル: sfs イメージと boot 行",
+   "lang_impl": "ld12 は sc 言語，カーネルと libc 環境部は C89 (自作 cc)。特権命令は ld12 の前置部 (機械語) に閉じる",
+   "built_by": "ld12: cc.bin + ld.bin (stage008) / カーネル・libc: pp.bin + cc.bin + ld12.bin",
+   "summary_md": "UART しかないベアメタルでは「複数の入力を開く」ことすらできない。Stage 12 は自作の簡易 OS を作り，その上に POSIX 風の実行環境を用意する。roadmap の分岐点は案 Y (自作 OS) に決定 — 外部の実行系をビルド経路に混ぜず，全世代成果物を自作の鎖の上に保つ。\n\n**syscall ABI は RV32 Linux 互換**: a7 に番号，a0..a5 に引数，ecall，戻り値は a0 (負値は -errno)。実装するのは read(63) / write(64) / openat(56) / close(57) / brk(214) / exit(93) で，他は -ENOSYS。番号表は仕様であって実装ではないので純度ポリシーに反せず，libc とユーザプログラムは将来そのまま実 Linux でも動く。\n\n**sfs**: 「名前と長さを並べるだけ」の自作 FS。スーパーブロック 32 バイト (マジック 'sfs1') + 64 バイト/件のファイル表 (パス文字列 51 バイトまで) + 追記割付けのデータ。QEMU の memory-backend-file でゲスト物理 0x8400_0000 (最大 32 MiB) へマップし，入力の注入と成果物の回収が 1 枚のイメージで済む。\n\n**カーネル**: M モードで動き，sfs から ELF 実行形式を読んで U モードへ mret する。アドレス変換なし (物理直)。プロセスは一度に 1 つ。C で書けないブート入口と trap 入口は ld12 の「カーネル前置部」が機械語で持ち，cc に inline asm を足さない。\n\n**ld12**: 入力の先頭 1 バイトで 'F' (従来のフラット) / 'K' (カーネル) / 'E' (ET_EXEC + プログラムヘッダ 1 本) を選ぶ。'F' の出力は stage008 の ld とバイト一致し，既存 Stage は影響を受けない。\n\n**libc の再編**: 純粋部 (string / stdlib) と環境部 (posix/) に分割。前置部の生スタブ (sys_*, -errno を返す) を POSIX の名前 (read / write / open / sbrk) で包んで errno を導入。morecore を brk 版へ差し替えると malloc がベアメタルの 1 MiB を超えられる。stdio は無バッファの FILE で，printf / fgets / ungetc まで。",
+   "new_capabilities": [
+    "ファイル I/O (open / read / write / close) と sfs によるホストとのファイル交換",
+    "brk による動的な記憶域要求 (malloc の 1 MiB 上限が外れる)",
+    "argc / argv と終了コード (プログラムが「コマンド」になる)",
+    "U モードのユーザプロセスと ELF 実行形式のロード",
+    "errno と stdio (fopen / printf / fgets / ungetc。無バッファ)",
+    "Linux 互換 syscall ABI (将来の実 Linux 互換経路を確保)"
+   ],
+   "artifacts": [
+    {
+     "file": "ld12.bin",
+     "desc": "リンカの新世代 ('F'/'K'/'E' の 3 形式)"
+    },
+    {
+     "file": "kernel.bin",
+     "desc": "'K' 形式のカーネル (trap / syscall / ELF ローダ)"
+    },
+    {
+     "file": "l12_src_string.o",
+     "desc": "libc 純粋部 (第 12 世代)"
+    },
+    {
+     "file": "l12_src_ctype.o",
+     "desc": "同上"
+    },
+    {
+     "file": "l12_src_stdlib.o",
+     "desc": "同上"
+    },
+    {
+     "file": "l12_src_morecore.o",
+     "desc": "morecore の固定領域版 (ベアメタル用)"
+    },
+    {
+     "file": "l12_posix_sys.o",
+     "desc": "環境部: syscall の POSIX 包みと errno"
+    },
+    {
+     "file": "l12_posix_morecore.o",
+     "desc": "morecore の brk 版"
+    },
+    {
+     "file": "l12_posix_stdio.o",
+     "desc": "無バッファの FILE と printf / fgets 系"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage012/ld12.sc",
+     "desc": "リンカ新世代のソース"
+    },
+    {
+     "path": "stage012/kernel.c",
+     "desc": "カーネル本体 (自作 cc の C89)"
+    },
+    {
+     "path": "stage012/libc",
+     "desc": "libc 第 12 世代 (include / src / posix)"
+    }
+   ],
+   "docs": [
+    "docs/stage012-os.md",
+    "stage012/ld12.md",
+    "stage012/kernel.md"
+   ],
+   "trivia": "PMP を 1 つも設定しないと U モードは全アクセス拒否になり，mret が不正命令として撥ねられる — 原因が mret 自体に見えて紛らわしい。もう 1 つ，syscall スタブが callee-saved の a3/a7 を退避せず壊し，「呼出しを跨いで生きている変数が静かに壊れて無関係なストアで例外」という遠隔の症状を出した。"
+  },
+  {
+   "id": "stage013",
+   "num": 13,
+   "name": "tools",
+   "title": "tools — ビルド道具立てとゲスト内開発",
+   "tagline": "spawn・sh・ed・mk が揃い，処理系は自分で作った OS の上で自分自身を作り直す",
+   "phase": "phase-b",
+   "lang_in": "sh: コマンド行 (< > リダイレクト) / ed: 行エディタコマンド / mk: ビルド記述 (make 風)",
+   "lang_impl": "C89 + libc 第 13 世代 (自作 cc)。cc / pp / ld のコマンド版はソースなし ('E' 再リンクのみ)",
+   "built_by": "ld13: cc.bin + ld.bin / 他: pp.bin + cc.bin + ld13.bin",
+   "summary_md": "Stage 12 でコマンドが書けるようになったが，起動する手段が boot 行の 1 本しかない。Stage 13 はゲスト内で開発が完結する道具立てを揃える。Phase B の最終段である。\n\n**sys_ecall**: ld13 の 'E' 前置部に汎用 syscall スタブを 1 本だけ足す。以降の syscall 増設は libc (C の層) が包むだけで済み，前置部 (機械語) は二度と変えなくてよい。\n\n**spawn** (syscall 500): path の ELF を起動し，子の終わりを待って終了コードを返す逐次実行。アドレス変換がないため親の像は退避領域へ複写して守る (入れ子 8 段まで)。Linux に「起動して待つ」syscall は無いので，Linux が使わない 500 番に置いて互換を守る。リダイレクトは spawn の引数で子の fd 0 / fd 1 の結び先を渡す形にし，dup2 を持ち込まない。\n\n**sh**: 行指向の最小シェル。空白で分割，`< in > out`，組込みは exit / echo のみ。**ed**: ed 風の行エディタ。端末の能力 (エスケープ列) を何も仮定せず UART の素の文字流で動き，対話でもスクリプトでも同じに動く。置換は正規表現ではなく文字列そのままの一致。\n\n**cc / pp / ld の移住**: 3 つとも「標準入力を読み標準出力へ書くフィルタ」なので，凍結済みオブジェクトを 'E' でリンクし直すだけで OS 上のコマンドになる — ソースは 1 行も変えない。実際に足りなかったのは入力を組み立てる側で，bundle / eot / ldin をゲスト版として書いた。\n\n**mk**: ビルド記述を読んで実行する。sfs が時刻を持たないので「古さの判定」はせず順序づけだけを行う。ゲスト内で pp / cc / ld を作り直し，記録済み成果物とバイト一致・固定点も OS 上で成立。鎖の境目も確定した: Stage 1〜7 のフラットバイナリは OS 上で動かせず，ゲスト内で作り直せるのは Stage 8 以降。持ち込みは cc8.o ただ 1 つ。",
+   "new_capabilities": [
+    "プログラムからのプログラム起動 (spawn。逐次・親の像を退避して保護)",
+    "シェルによるコマンド実行と入出力のつなぎ替え",
+    "ゲスト内でのソース編集 (ed)",
+    "cc / pp / ld が OS 上のコマンドになる (ソース無改変の 'E' 再リンク)",
+    "mk によるビルド記述の実行とゲスト内でのチェーン再生成 (Stage 8 以降)",
+    "OS 上での固定点検証 (作り直した cc の .o が元と一致)"
+   ],
+   "artifacts": [
+    {
+     "file": "ld13.bin",
+     "desc": "リンカ新世代 ('E' 前置部に汎用スタブ sys_ecall)"
+    },
+    {
+     "file": "kernel13.bin",
+     "desc": "spawn / つなぎ替え / fd 0 ブロッキング read / boot 行引数"
+    },
+    {
+     "file": "l13_src_string.o",
+     "desc": "libc 第 13 世代 (純粋部。以下同)"
+    },
+    {
+     "file": "l13_src_ctype.o",
+     "desc": ""
+    },
+    {
+     "file": "l13_src_stdlib.o",
+     "desc": ""
+    },
+    {
+     "file": "l13_src_morecore.o",
+     "desc": ""
+    },
+    {
+     "file": "l13_posix_sys.o",
+     "desc": "環境部 (spawn の包みを追加)"
+    },
+    {
+     "file": "l13_posix_morecore.o",
+     "desc": ""
+    },
+    {
+     "file": "l13_posix_stdio.o",
+     "desc": ""
+    },
+    {
+     "file": "sh13",
+     "desc": "行指向の最小シェル"
+    },
+    {
+     "file": "ed13",
+     "desc": "ed 風の行エディタ"
+    },
+    {
+     "file": "bundle13",
+     "desc": "束ねを作るゲスト版"
+    },
+    {
+     "file": "ldin13",
+     "desc": "リンカ入力 (形式 1 バイト + オブジェクト列) の組み立て"
+    },
+    {
+     "file": "eot13",
+     "desc": "標準入力を写して末尾へ EOT を置くフィルタ"
+    },
+    {
+     "file": "mk13",
+     "desc": "ビルド記述の実行 (make 相当。順序づけのみ)"
+    },
+    {
+     "file": "pp13cmd",
+     "desc": "pp の OS コマンド版 (pp.o を 'E' で再リンク)"
+    },
+    {
+     "file": "cc13cmd",
+     "desc": "cc の OS コマンド版 (cc10l.o を 'E' で再リンク)"
+    },
+    {
+     "file": "ld13cmd",
+     "desc": "ld の OS コマンド版 (ld13.o を 'E' で再リンク)"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage013/ld13.sc",
+     "desc": "リンカ新世代のソース"
+    },
+    {
+     "path": "stage013/kernel.c",
+     "desc": "カーネル新世代 (spawn / 退避と復帰)"
+    },
+    {
+     "path": "stage013/sh.c",
+     "desc": "シェル"
+    },
+    {
+     "path": "stage013/ed.c",
+     "desc": "行エディタ"
+    },
+    {
+     "path": "stage013/bundle.c",
+     "desc": "束ねの組み立て"
+    },
+    {
+     "path": "stage013/ldin.c",
+     "desc": "リンカ入力の組み立て"
+    },
+    {
+     "path": "stage013/eot.c",
+     "desc": "EOT 付加フィルタ"
+    },
+    {
+     "path": "stage013/mk.c",
+     "desc": "ビルド記述の実行"
+    },
+    {
+     "path": "stage013/libc",
+     "desc": "libc 第 13 世代 (spawn の包みを追加)"
+    }
+   ],
+   "docs": [
+    "docs/stage013-tools.md",
+    "stage013/kernel.md",
+    "stage013/sh.md",
+    "stage013/ed.md",
+    "stage013/mk.md",
+    "stage013/cmds.md"
+   ],
+   "trivia": "cc 自身のソース 151636 バイトをゲスト内で通し，出来た cc10l.bin がチェーンの成果物とバイト一致した (QEMU 上で 3.5 秒)。一方，最初に書いた mk 記述は pp を最新の cc で作ってしまい「動く物は出来るが SHA-256 が合わない」— 世代の規律はゲスト内のビルド記述にもそのまま現れる。"
+  },
+  {
+   "id": "stage014",
+   "num": 14,
+   "name": "external",
+   "title": "external — 他人の C を読む",
+   "tagline": "入力が「他人の C」になる。適合台帳が ok / gap / bad を数え，静かな誤りを許さない",
+   "phase": "phase-c",
+   "lang_in": "C89 + 現実の C の書き方 (複数宣言子・文字列連結・接尾辞・入れ子初期化子など)",
+   "lang_impl": "C89 (cc10l が受ける範囲。拡張子は .sc のまま)",
+   "built_by": "cc.bin (= cc10l。1 段目) → 自分自身 (固定点)。cc14b は cc14a がビルド",
+   "summary_md": "これまでの入力はすべて自分たちが書いた C だった。自作コードだけを入力にしてきた処理系は，自分が使わない書き方を実装しないまま通ってしまう。Stage 14 は入力を「他人の C」へ切り替える Phase C の入口である。外部ソースは repo に取り込まず，取得して SHA-256 で固定する。\n\n**適合台帳** (第 1 部): 現実の C の書き方を 1 つずつ切り出した検査 26 本を書き，実測を台帳 (tests/stage014/ledger.txt) に記録して毎回照合する。状態は 3 つ:\n\n- `ok` — 通って期待どおりの出力になる\n- `gap` — cc がその終了コードで拒む (未対応。拒むこと自体は正しい)\n- `bad` — 通ってしまうが結果が誤っている (いちばん悪い状態)\n\n台帳と実測が食い違えば検査は失敗する。「直したのに表がそのまま」も「壊したのに気づかない」も等しく捕まえる。初回の実測は 13 ok / 12 gap / 1 bad — 唯一の bad は long long が 32 bit として静かに扱われることだった。\n\n**cc14a** (第 2 部): 最優先の複数宣言子 (`int a, b;`)・隣接文字列リテラルの連結・整数定数の接尾辞 (U/L)・register を通し，long long は「通して 32 bit」をやめて拒むようにした。台帳は 17 ok / 9 gap / 0 bad へ。\n\n**cc14b** (第 3 部): 入れ子の初期化子 (`{{1,2},{3,4}}`)。nestinit と fptab は同じ原因 (ginit1 が `{` を受けない) に見えたが，直すと fptab の残りは構造体メンバの関数ポインタだと判明した。台帳は現在 18 ok / 8 gap / 0 bad。\n\n**cc.bin は差し替えない**: 最新世代へ向けると Stage 11 以降の凍結済み成果物がすべて別のバイト列になるため，cc14 系は別名で置き，適合台帳の計測だけに使う。残る gap は関数内 static・K&R 形式・ビットフィールド・浮動小数点など。",
+   "new_capabilities": [
+    "適合台帳による「未対応の見える化」と回帰の機械的検出",
+    "1 つの宣言に複数の宣言子 (int a, b;) — 現実の C のほぼ全ファイルに現れる",
+    "隣接する文字列リテラルの連結と整数定数の接尾辞 (U / L)",
+    "入れ子の初期化子 (静的な表が書ける)",
+    "long long の silent な誤コンパイルの排除 (bad 0 件)"
+   ],
+   "artifacts": [
+    {
+     "file": "cc14a0.bin",
+     "desc": "cc10l による bootstrap 1 段目"
+    },
+    {
+     "file": "cc14a.bin",
+     "desc": "第 2 部 (宣言と字句の幅) の正本"
+    },
+    {
+     "file": "cc14b0.bin",
+     "desc": "cc14a による bootstrap 1 段目"
+    },
+    {
+     "file": "cc14b.bin",
+     "desc": "第 3 部 (入れ子の初期化子) の正本。台帳の計測に使う最前線の世代"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage014/cc14.sc",
+     "desc": "cc14a のソース (cc10l から複製して拡張)"
+    },
+    {
+     "path": "stage014/cc14b.sc",
+     "desc": "cc14b のソース (cc14.sc から複製して拡張)"
+    },
+    {
+     "path": "tests/stage014/ledger.txt",
+     "desc": "適合台帳 (1 行 1 検査: 名前・状態・期待・説明)"
+    },
+    {
+     "path": "tests/stage014/probe",
+     "desc": "現実の C の書き方を 1 つずつ切り出した検査プログラム群"
+    }
+   ],
+   "docs": [
+    "docs/stage014-external.md",
+    "stage014/cc14.md",
+    "stage014/cc14b.md"
+   ],
+   "trivia": "第 3 部の作業で最初，凍結済みの cc14.sc をその場で編集してしまった。凍結の規則 (記録済み SHA-256 の入力は書き換えない) に気づいて差分を新世代 cc14b.sc へ移した — 世代を足すときは必ず複製から始める。台帳の項目名は「症状」で付けるため，2 件が 1 つの原因だったり，1 件に 2 つの原因が潜んでいたりする。"
+  }
+ ]
+}
