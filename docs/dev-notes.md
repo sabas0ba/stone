@@ -195,6 +195,19 @@ diff <(strip tmp/old.sc) <(strip stage007/occ.sc) && echo "code identical"
 sol (`stage005/sc.sol`) はコメントが `#` なので `sed 's|#.*||'` に読み替える。
 併せて全チェーンを再ビルドし，各 `.md` の SHA-256 と一致することを確認する。
 
+### 3.3 信頼根の独立監査 (Stage 1〜3)
+
+seed・hex1・asm を，仕様書から独立に書き起こした参照実装 (Python) で
+再導出し，記録 SHA-256・ゴールデン・自己再生成の裏を鎖の外から取る。
+QEMU もコンテナも要らない。
+
+```sh
+bash verify/audit/audit.sh
+```
+
+検査の一覧・信頼モデル・全段監査の手順は
+[verify/audit/README.md](../verify/audit/README.md) を参照。
+
 ## 4. 落とし穴
 
 - **`xxd` が入っていない。** バイナリを見るときは `od -A x -t x1` を使う。
