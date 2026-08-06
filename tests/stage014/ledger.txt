@@ -28,10 +28,10 @@ multidecl    ok   7\n
 strcat_lit   ok   abcd\n
 usuffix      ok   1y\n
 registerkw   ok   3\n
+nestinit     ok   23\n
 
 # ---- 未対応 (cc が拒む) ----
-nestinit     gap  1    入れ子の初期化子 ({{1,2},{3,4}})
-fptab        gap  1    関数名を初期化子に使う (関数ポインタの表)
+fptab        gap  1    構造体メンバの関数ポインタ (int (*fn)(); を struct に置く)
 staticloc    gap  1    関数内 static
 kr_func      gap  1    K&R 形式の関数定義
 bitfield     gap  1    ビットフィールド
