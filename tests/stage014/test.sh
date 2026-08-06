@@ -17,13 +17,13 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s14
 
-cc=tmp/build/cc.bin
+cc=tmp/build/cc14a.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage014/probe
 hdr=stage013/libc/include/stdarg.h
 
-ensure_build stage013
+ensure_build stage014
 
 # probe を 1 つ通す。結果を "状態 値" の形で標準出力へ返す
 #   gap <cc の終了コード> / ok <出力> / linkfail / runfail <終了コード>
@@ -54,6 +54,33 @@ probe() {
     # 改行を \n として 1 行に畳む (台帳に書ける形にする)
     printf 'ok %s\n' "$(printf '%s\n' "$out" | sed -e 's/\\/\\\\/g' -e 's/\t/\\t/g' | tr '\n' '@' | sed 's/@/\\n/g')"
 }
+
+section "ビルド再現と固定点"
+
+want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage014/cc14.md | cut -d' ' -f2)
+got=$(sha256sum tmp/build/cc14a.bin); got=${got%% *}
+[ -n "$want" ] && [ "$want" = "$got" ]
+report $? "build: cc14a.bin の SHA-256 が cc14.md 記載値と一致"
+
+# 世代を触ったら必ず固定点を見る (docs/dev-notes.md 3.1)
+{ cat stage014/cc14.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc14a.bin > tmp/s14/b3.o \
+    && { cat tmp/s14/b3.o; printf '\0'; } \
+        | sh tools/env.sh qemu "$ld" > tmp/s14/b3.bin \
+    && cmp -s tmp/s14/b3.bin tmp/build/cc14a.bin
+report $? "fixpoint: cc14a が自分自身を再生成する (B2 == B3)"
+
+# 足したのは構文と字句の幅だけで，コード生成には触れていない。
+# 既存のソースを cc10l と同じオブジェクトへコンパイルできることで示す
+ok=0
+for n in sh ed mk; do
+    sh tools/bundle.sh stage013/libc/include/*.h "stage013/$n.c" 2> /dev/null \
+        | sh tools/env.sh qemu "$pp" > "tmp/s14/r_$n.i" 2> /dev/null \
+        && sh tools/env.sh qemu "$cc" < "tmp/s14/r_$n.i" > "tmp/s14/r_$n.o" 2> /dev/null \
+        && cmp -s "tmp/s14/r_$n.o" "tmp/build/${n}13.o" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "regress: cc14a が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合"
 

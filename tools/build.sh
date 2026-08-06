@@ -2,7 +2,7 @@
 # 生成物のビルド。成果物は tmp/build/ (git ignore) に置く。
 # 各 Stage の成果物は前段の成果物のみでビルドする (docs/plan.md 2.1)。
 #
-# 使用法: build.sh [stage002|...|stage012|stage013|all]
+# 使用法: build.sh [stage002|...|stage013|stage014|all]
 #
 # キャッシュ (スタンプ):
 #   ビルドは決定的である (同じ入力から常に同じバイト列が生成される。
@@ -328,6 +328,27 @@ build_stage013() {
     done
 }
 
+# Stage 14 は cc の新世代 (cc14a) を作る。前段の成果物のみでビルドする
+# 約束のとおり，1 段目は cc10l (= cc.bin) が作り，正本はその 1 段目が
+# 自分自身を再コンパイルしたものである (以降は固定点)。
+#
+# **cc.bin は差し替えない。** cc.bin を最新世代へ向けると Stage 11 以降の
+# 記録済み成果物がすべて別のバイト列になる (それらは cc10l が作ったもの
+# として凍結されている。docs/artifacts.md)。世代を足す段では別名で置き，
+# 差し替えは必要になった時点で判断する (docs/stage014-external.md 5.3)
+build_stage014() {
+    { cat stage014/cc14.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/cc14a0.o
+    { cat tmp/build/cc14a0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14a0.bin
+    echo "built tmp/build/cc14a0.bin (bootstrap)" >&2
+    { cat stage014/cc14.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14a0.bin > tmp/build/cc14a.o
+    { cat tmp/build/cc14a.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14a.bin
+    echo "built tmp/build/cc14a.bin" >&2
+}
+
 # 各 Stage の入力 (ソースと前段のスタンプ) と生成物の宣言。
 # 生成物には後段とテストが参照するファイルをすべて挙げる (.o / .i の
 # 中間物は挙げない。スタンプはそれらの有無を保証しない)。
@@ -403,13 +424,18 @@ do_stage013() {
            tools/build.sh tools/bundle.sh
 }
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013"
+do_stage014() {
+    run_stage stage014 cc14a0.bin cc14a.bin \
+        -- stage014/cc14.sc tmp/build/stage010.stamp tools/build.sh
+}
+
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014"
 target=${1:-all}
-[ "$target" = all ] && target=stage013
+[ "$target" = all ] && target=stage014
 case " $stages " in
 *" $target "*) ;;
 *)
-    echo "usage: build.sh [stage002|...|stage012|stage013|all]" >&2
+    echo "usage: build.sh [stage002|...|stage013|stage014|all]" >&2
     exit 2
     ;;
 esac

@@ -24,20 +24,22 @@ vaforward    ok   6\n
 unsignedops  ok   abcd\n
 multidim     ok   6\n
 cvquals      ok   3\n
+multidecl    ok   7\n
+strcat_lit   ok   abcd\n
+usuffix      ok   1y\n
+registerkw   ok   3\n
 
 # ---- 未対応 (cc が拒む) ----
-multidecl    gap  1    1 つの宣言に複数の宣言子 (int a, b;)
-strcat_lit   gap  1    隣接する文字列リテラルの連結 ("ab" "cd")
-usuffix      gap  1    整数定数の接尾辞 (U / L)
 nestinit     gap  1    入れ子の初期化子 ({{1,2},{3,4}})
 fptab        gap  1    関数名を初期化子に使う (関数ポインタの表)
 staticloc    gap  1    関数内 static
 kr_func      gap  1    K&R 形式の関数定義
 bitfield     gap  1    ビットフィールド
-registerkw   gap  2    register 記憶域クラス
 selfref      gap  2    不完全型への typedef の前方参照
 floatv       gap  2    浮動小数点 (float / double)
 emptyproto   gap  5    引数リストが空の宣言へ実引数を渡す
+llwidth      gap  2    long long (64 bit の型は無い。通さず拒む)
 
 # ---- 通るが誤り ----
-llwidth      bad  4\n  long long が 32 bit として扱われる (8 になるべき)
+# いまは無い。llwidth は第 2 部で「通るが 32 bit」から「拒む」へ移した
+# (docs/stage014-external.md 5.2)
