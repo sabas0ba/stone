@@ -380,6 +380,17 @@ build_stage014() {
     { cat tmp/build/cc14d.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14d.bin
     echo "built tmp/build/cc14d.bin" >&2
+    # 第 6 部 (ビットフィールド)。前段は cc14d
+    { cat stage014/cc14e.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14d.bin > tmp/build/cc14e0.o
+    { cat tmp/build/cc14e0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14e0.bin
+    echo "built tmp/build/cc14e0.bin (bootstrap)" >&2
+    { cat stage014/cc14e.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14e0.bin > tmp/build/cc14e.o
+    { cat tmp/build/cc14e.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14e.bin
+    echo "built tmp/build/cc14e.bin" >&2
 }
 
 # 各 Stage の入力 (ソースと前段のスタンプ) と生成物の宣言。
@@ -459,9 +470,10 @@ do_stage013() {
 
 do_stage014() {
     run_stage stage014 cc14a0.bin cc14a.bin cc14b0.bin cc14b.bin \
-        cc14c0.bin cc14c.bin cc14d0.bin cc14d.bin \
+        cc14c0.bin cc14c.bin cc14d0.bin cc14d.bin cc14e0.bin cc14e.bin \
         -- stage014/cc14.sc stage014/cc14b.sc stage014/cc14c.sc \
-           stage014/cc14d.sc tmp/build/stage010.stamp tools/build.sh
+           stage014/cc14d.sc stage014/cc14e.sc \
+           tmp/build/stage010.stamp tools/build.sh
 }
 
 stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014"
