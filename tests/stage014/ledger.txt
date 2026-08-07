@@ -31,11 +31,11 @@ registerkw   ok   3\n
 nestinit     ok   23\n
 staticloc    ok   3\n
 fptab        ok   3\n
+selfref      ok   5\n
+kr_func      ok   7\n
 
 # ---- 未対応 (cc が拒む) ----
-kr_func      gap  1    K&R 形式の関数定義
 bitfield     gap  1    ビットフィールド
-selfref      gap  2    不完全型への typedef の前方参照
 floatv       gap  2    浮動小数点 (float / double)
 emptyproto   gap  5    引数リストが空の宣言へ実引数を渡す
 llwidth      gap  2    long long (64 bit の型は無い。通さず拒む)

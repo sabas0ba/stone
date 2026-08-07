@@ -17,7 +17,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s14
 
-cc=tmp/build/cc14c.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
+cc=tmp/build/cc14d.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage014/probe
@@ -59,21 +59,21 @@ section "ビルド再現と固定点"
 
 ok=0
 for pair in cc14a.bin:stage014/cc14.md cc14b.bin:stage014/cc14b.md \
-        cc14c.bin:stage014/cc14c.md; do
+        cc14c.bin:stage014/cc14c.md cc14d.bin:stage014/cc14d.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc14a.bin / cc14b.bin / cc14c.bin の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc14a.bin / cc14b.bin / cc14c.bin / cc14d.bin の SHA-256 が各 .md 記載値と一致"
 
 # 世代を触ったら必ず固定点を見る (docs/dev-notes.md 3.1)
-{ cat stage014/cc14c.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc14c.bin > tmp/s14/b3.o \
+{ cat stage014/cc14d.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc14d.bin > tmp/s14/b3.o \
     && { cat tmp/s14/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s14/b3.bin \
-    && cmp -s tmp/s14/b3.bin tmp/build/cc14c.bin
-report $? "fixpoint: cc14c が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s14/b3.bin tmp/build/cc14d.bin
+report $? "fixpoint: cc14d が自分自身を再生成する (B2 == B3)"
 
 # 足したのは構文と字句の幅だけで，コード生成には触れていない。
 # 既存のソースを cc10l と同じオブジェクトへコンパイルできることで示す
@@ -85,7 +85,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s14/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc14c が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc14d が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合"
 
