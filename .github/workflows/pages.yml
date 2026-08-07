@@ -1,0 +1,89 @@
+# Web アプリ (web/) を GitHub Pages へ配信する。
+#
+# チェーンをコンテナ上で再ビルドし (ci.yml と同じキャッシュ機構)，
+# エミュレータの検証 (web/test-emu.mjs: 成果物の実行出力が QEMU と
+# ビット一致すること) を通してから，サイトを gh-pages ブランチへ push する。
+# 公開には Settings > Pages で「Deploy from a branch: gh-pages」を
+# 一度だけ設定する (web/README.md)。
+#
+# 使用する action は ci.yml と同じものだけ (commit SHA で固定)。
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', 'stage*/**', 'tools/**', 'env/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # gh-pages ブランチへの push
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      STONE_ENGINE: podman
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Container runtime version (for cache key)
+        id: rt
+        run: |
+          ver=$( { podman --version; podman info --format '{{.Host.OCIRuntime.Version}}' 2>/dev/null | head -n 1; } | tr -cd 'A-Za-z0-9._-' )
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Restore container image
+        id: image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/stone-env.tar
+          key: stone-env-${{ steps.rt.outputs.ver }}-${{ hashFiles('env/Containerfile') }}
+
+      - name: Load container image
+        if: steps.image.outputs.cache-hit == 'true'
+        run: podman load -i tmp/stone-env.tar
+
+      - name: Restore build artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/build
+          key: stone-build-${{ hashFiles('stage*/**', 'include/**', 'lib/**', 'tools/**') }}
+          restore-keys: |
+            stone-build-
+
+      - name: Build environment and chain
+        run: |
+          sh tools/env.sh build
+          sh tools/build.sh all
+
+      - name: Verify emulator against chain artifacts
+        run: node web/test-emu.mjs
+
+      - name: Assemble site
+        run: sh web/build-site.sh
+
+      - name: Push to gh-pages
+        run: |
+          cd tmp/site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "deploy: ${GITHUB_SHA}"
+          git push -q --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Save container image
+        if: steps.image.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p tmp
+          podman save -o tmp/stone-env.tar stone-env
