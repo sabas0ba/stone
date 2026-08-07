@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stone — lineage of a bootstrap</title>
+<meta name="description"
+      content="A bootstrap chain that grows from a 256-byte hand-encoded seed into an assembler, a C compiler, a libc and a homemade OS. Every generation's artifact runs in your browser on a RV32 emulator.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23282433'/%3E%3Ctext x='8' y='12' font-size='10' text-anchor='middle' fill='%23e8b04b' font-family='monospace'%3E石%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <h1>stone</h1>
+    <p class="lede">From a hand-encoded <strong>256-byte</strong> seed to an assembler,
+      a C compiler, a libc and a homemade OS — one generation at a time.
+      Each stage is built <strong>only from the artifacts of the previous stage</strong>,
+      and the whole process is bit-reproducible.</p>
+    <p class="lede sub">Every artifact on this page is a genuine chain product,
+      and runs right here in your browser on a RV32 emulator.</p>
+    <nav class="site-links">
+      <a id="repo-link" href="#" rel="noopener">Repository</a>
+      <span id="build-info"></span>
+    </nav>
+  </div>
+</header>
+
+<nav class="timeline wrap" aria-label="Stage selection">
+  <div class="tl-phases" id="tl-phases"></div>
+  <div class="tl-nodes" id="tl-nodes"></div>
+  <div class="tl-slider">
+    <button id="tl-play" title="Auto-advance through the generations">▶ auto</button>
+    <button id="tl-prev" title="Previous stage (←)">←</button>
+    <input type="range" id="tl-range" min="1" max="14" value="1" step="1"
+           aria-label="Stage">
+    <button id="tl-next" title="Next stage (→)">→</button>
+  </div>
+</nav>
+
+<main class="wrap" id="main">
+  <section class="stage-head">
+    <div class="stage-num" id="st-num"></div>
+    <div>
+      <h2 id="st-title"></h2>
+      <p class="tagline" id="st-tagline"></p>
+      <div class="meta-chips" id="st-meta"></div>
+    </div>
+  </section>
+
+  <div class="cols">
+    <article class="col-main">
+      <h3>Specification digest</h3>
+      <div class="md" id="st-summary"></div>
+      <h3>What this generation made possible</h3>
+      <ul class="caps" id="st-caps"></ul>
+      <div id="st-coverage-box" hidden>
+        <h3>Coverage — how complete is it?</h3>
+        <div id="st-coverage"></div>
+      </div>
+      <div id="st-trivia-box" hidden>
+        <h3>Field notes</h3>
+        <p class="trivia" id="st-trivia"></p>
+      </div>
+    </article>
+
+    <aside class="col-side">
+      <h3>Artifacts</h3>
+      <table class="artifacts" id="st-artifacts"></table>
+      <h3>Sources (frozen)</h3>
+      <ul class="sources" id="st-sources"></ul>
+      <h3>Design documents</h3>
+      <ul class="docs" id="st-docs"></ul>
+    </aside>
+  </div>
+
+  <section class="evolution">
+    <h3>Artifact size over generations</h3>
+    <div id="evo-chart"></div>
+  </section>
+
+  <section class="playground" id="playground">
+    <h3>Playground</h3>
+    <p class="pg-note" id="pg-note"></p>
+    <div id="pg-body">
+      <label class="pg-label" id="pg-input-label" for="pg-input"></label>
+      <textarea id="pg-input" spellcheck="false" rows="14"></textarea>
+      <details id="pg-stdin-box">
+        <summary>Runtime input (stdin for the produced program)</summary>
+        <textarea id="pg-stdin" spellcheck="false" rows="2"></textarea>
+      </details>
+      <div class="pg-run-row">
+        <button id="pg-run">Run</button>
+        <span class="pg-steps" id="pg-steps"></span>
+      </div>
+      <div id="pg-result" hidden>
+        <div class="pg-out-head" id="pg-out-head"></div>
+        <pre class="pg-out" id="pg-out"></pre>
+        <div id="pg-ran" hidden>
+          <div class="pg-out-head" id="pg-ran-head"></div>
+          <pre class="pg-out" id="pg-ran-out"></pre>
+        </div>
+      </div>
+    </div>
+    <p id="pg-none" hidden></p>
+  </section>
+
+  <section class="terminal" id="terminal" hidden>
+    <h3>Terminal — a live session on the OS</h3>
+    <p class="pg-note" id="term-note"></p>
+    <div class="term-cols">
+      <div class="term-main">
+        <div class="term-bar">
+          <button id="term-boot">Boot</button>
+          <span class="term-status" id="term-status">not booted</span>
+        </div>
+        <pre class="term-out" id="term-out" aria-live="polite"></pre>
+        <div class="term-in-row">
+          <span class="term-prompt">›</span>
+          <input id="term-in" spellcheck="false" autocomplete="off"
+                 placeholder="type a command and press Enter">
+        </div>
+        <div id="term-files-box" hidden>
+          <div class="pg-out-head">Files in the sfs image after the session — click to download</div>
+          <ul class="term-files" id="term-files"></ul>
+        </div>
+      </div>
+      <aside class="term-side">
+        <div class="cov-title">Guided tour</div>
+        <div class="term-side-note">Each suggested command is pre-typed into the input —
+          just press Enter. Click any step to load it instead.</div>
+        <ol class="term-samples" id="term-samples"></ol>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<dialog id="src-dialog">
+  <div class="dlg-head">
+    <span id="src-name"></span>
+    <button id="src-close">Close</button>
+  </div>
+  <pre id="src-body"></pre>
+</dialog>
+
+<footer class="wrap site-foot">
+  <p>Artifacts are rebuilt from the seed by CI inside a pinned container, with SHA-256
+     checked against the values recorded in each design document. The emulator is for
+     exhibition only — the reference for verification remains QEMU + the container.</p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

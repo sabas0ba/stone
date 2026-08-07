@@ -1,0 +1,1666 @@
+{
+ "stages": [
+  {
+   "id": "stage001",
+   "num": 1,
+   "name": "hex0",
+   "title": "hex0 — the trust root",
+   "tagline": "A hand-encoded seed of 64 instructions in 256 bytes. Everything in the chain grows from here",
+   "phase": "seed",
+   "lang_in": "hex0 language (hex pairs + comments + '.' terminator)",
+   "lang_impl": "hand-encoded (RV32I machine code)",
+   "built_by": "by hand (the raw binary is tracked directly in git; no conversion tool intervenes)",
+   "summary_md": "hex0 is a filter that converts hex text into binary. It caps the hand-maintained raw binaries at exactly one — hex0 itself — so that every subsequent program can be maintained as diff-able source.\n\n**Grammar**: two hex digits (lowercase only) emit one byte immediately. `#` to end of line is a comment; whitespace is SP/TAB/CR/LF; `.` terminates normally.\n\n**Errors**: disallowed character = 1, end of input with one pending hex digit = 2. Detection causes immediate abnormal termination.\n\n**Execution model**: the flat binary is placed at 0x8000_0000 on QEMU virt (RV32IM) via `-bios`. Only the UART's (16550-compatible @ 0x1000_0000) RBR/THR/LSR are used; termination is a write to the test finisher @ 0x0010_0000 (success 0x5555 / failure (code<<16)|0x3333). This shape — a filter that reads from the UART and writes to the UART — is inherited by every later stage.\n\n**Implementation**: RV32I only. A single loop with no subroutines and no stack; all state lives in registers. Hex digits are converted to values with two range comparisons, with no lookup table.\n\nhex0.bin was frozen on completion; all feature additions belong to successor stages. Verification is by self-regeneration (hex0(hex0.hex) == hex0.bin) and by re-derivation from a reference implementation (verify/audit) written independently from the specification.",
+   "new_capabilities": [
+    "Mechanical hex-text-to-binary conversion (direct maintenance of binaries stops here)",
+    "Development in a commented, diff-able source format",
+    "Mechanical detection of transcription errors via self-regeneration",
+    "Establishes the filter execution model (UART I/O + test finisher) inherited by all later stages"
+   ],
+   "artifacts": [
+    {
+     "file": "hex0.bin",
+     "desc": "Hand-encoded raw binary (256 bytes). The only executable artifact not produced by the build",
+     "size": 256,
+     "sha256": "4ea1781a7c450eb953dbde1af2f93301f631e62a162aaa54ea6082d370ff5cac"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage001/hex0.hex",
+     "desc": "Annotated listing of every instruction. hex0's own source representation in the hex0 language (verification input)"
+    },
+    {
+     "path": "stage001/hex0.bin",
+     "desc": "The raw binary itself, tracked in git (SHA-256 recorded in hex0.md)"
+    }
+   ],
+   "docs": [
+    "docs/stage001-hex0.md",
+    "stage001/hex0.md"
+   ],
+   "trivia": "With no labels and no address arithmetic, every branch offset is computed by hand, and 64 instructions is close to the practical ceiling for that. Consistency between the listing and the binary is pinned by the self-regeneration test: feed hex0 its own listing and hex0 itself comes out."
+  },
+  {
+   "id": "stage002",
+   "num": 2,
+   "name": "hex1",
+   "title": "hex1 — introducing labels",
+   "tagline": "Label definitions and references eliminate hand-computed branch offsets. hex1's own source is the last hand computation",
+   "phase": "plan",
+   "lang_in": "hex1 language (superset of hex0 + labels)",
+   "lang_impl": "hex0 language",
+   "built_by": "hex0.bin",
+   "summary_md": "The hex0 language has no way to express branch targets, so every instruction insertion or deletion forces the offsets to be recomputed by hand. hex1 eliminates this with labels.\n\n**Grammar additions** (a full superset of hex0):\n\n- `:name` — binds name to the current output address (name is 1..15 bytes of `a-z0-9_`)\n- `!name tmpl` — B-type reference. Merges imm[12:1] into a 4-byte template whose imm is 0\n- `$name tmpl` — J-type reference. Likewise merges imm[20:1]\n- `&name` — emits the label's absolute address as 4 LE bytes\n\n**Error additions**: undefined label = 3, duplicate definition = 4, offset out of range (B: ±4KiB, J: ±1MiB) or odd = 5.\n\n**Implementation**: UART input cannot be rewound, so the entire input is buffered in RAM and scanned twice (pass 1 = address computation and symbol table registration, pass 2 = output and reference merging). The two passes are the same scan differing only in whether output is emitted, and share the implementation. The symbol table is a linear scan at 20 bytes/entry. lui/addi pair synthesis and linker-style relocation are not introduced (non-goals).",
+   "new_capabilities": [
+    "Branch and jump targets written as labels (forward references allowed)",
+    "Automatic computation and range checking of B-type / J-type offsets",
+    "Emission of a label's absolute address as a data word (&)",
+    "Source maintenance that survives instruction insertion and deletion (writing at Stage 3 scale becomes feasible)"
+   ],
+   "artifacts": [
+    {
+     "file": "hex1.bin",
+     "desc": "Label-aware filter built by hex0 (not tracked in git; pinned by SHA-256)",
+     "size": 2128,
+     "sha256": "827550b2729be1d6540dc48845fc7627f9293059f59132dd423f839180a88552"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage002/hex1.hex",
+     "desc": "hex1's source (hex0 language). Doubles as an annotated listing"
+    }
+   ],
+   "docs": [
+    "docs/stage002-hex1.md",
+    "stage002/hex1.md"
+   ],
+   "trivia": "hex1 itself is written in the hex0 language, so its offsets are the last ones computed by hand. To keep the burden down, the code is split into small per-feature blocks and unused areas are padded with 00 so that block addresses land on round values. The build script tools/build.sh was also introduced at this stage."
+  },
+  {
+   "id": "stage003",
+   "num": 3,
+   "name": "asm",
+   "title": "asm — the assembler",
+   "tagline": "All RV32IM instructions via mnemonics and operands. asm's own source is the last hand encoding",
+   "phase": "plan",
+   "lang_in": "asm language (RV32IM mnemonics + pseudo-instructions)",
+   "lang_impl": "hex1 language",
+   "built_by": "hex1.bin",
+   "summary_md": "Eliminates hand encoding — packing register numbers and immediates into bit fields one bit at a time. A two-pass assembler that expresses all 48 RV32IM instructions as mnemonics.\n\n**Lexical rules**: free-form with no notion of lines. Registers are `x0..x31` only (no ABI names), `,` is treated as whitespace, hex is lowercase only. Label definitions are `name:`.\n\n**Instruction formats**: the 9 formats R / I / SH / LD / S / B / U / J / FX. Branch and jump targets are labels only; numeric offsets cannot be written.\n\n**Pseudo-instructions**: nop, mv, li, la, j, call, jr, ret, beqz, bnez. li/la always expand to a fixed 8 bytes of lui+addi regardless of immediate magnitude — fixed so that size decisions cannot differ between passes.\n\n**Directives**: word / byte (no `.` prefix, since `.` is the terminator). Alignment is not automated and remains the writer's responsibility.\n\n**Errors**: malformed syntax = 1, unknown mnemonic = 2, undefined label = 3, duplicate definition = 4, offset out of range = 5, immediate out of range = 6, invalid register = 7.\n\n**Implementation**: two passes with the same skeleton as hex1. Instruction metadata lives in a mnemonic table at the end of the body (24 bytes/entry: name + base word + handler address); handler addresses are written with hex1's `&`, so relocating the table needs no manual follow-up.",
+   "new_capabilities": [
+    "Mnemonic notation for all 48 RV32IM instructions (manual bit packing disappears)",
+    "Pseudo-instructions (li/la/call/ret etc.) abbreviating common patterns",
+    "Range checking of immediates and registers (error codes 6/7)",
+    "Data embedding via the word/byte directives"
+   ],
+   "artifacts": [
+    {
+     "file": "asm.bin",
+     "desc": "Two-pass assembler built by hex1",
+     "size": 3528,
+     "sha256": "50dca9893143542ed5a557aa203cf13456ff02eed8914902a0982f9a4f58e8db"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage003/asm.hex1",
+     "desc": "asm's source (hex1 language). Every line carries an asm-language transcription comment #:"
+    }
+   ],
+   "docs": [
+    "docs/stage003-asm.md",
+    "stage003/asm.md"
+   ],
+   "trivia": "Every code line carries an asm-language transcription comment `#:`; mechanically extracting these yields asm itself written in the asm language. Running that through asm produces output bit-identical to asm.bin, so the hand encoding and the assembler's encoding cross-validate each other."
+  },
+  {
+   "id": "stage004",
+   "num": 4,
+   "name": "sol",
+   "title": "sol — a stack-oriented language",
+   "tagline": "Register management and instruction selection stop being the writer's job. A small language with structured control, functions, and globals",
+   "phase": "plan",
+   "lang_in": "sol language (stack-oriented, postfix)",
+   "lang_impl": "asm language",
+   "built_by": "asm.bin",
+   "summary_md": "sol (stack-oriented language) is a compiler for a small Forth-like stack-oriented language. Hand-written assembly ends with the source of the sol compiler itself.\n\n**Definitions** (top level only): `const name n` / `var name` / `buf name n` / `fn name ... end`. Functions may be forward-referenced; forward references to var/buf/const are errors (their size decisions would differ between passes).\n\n**Primitive words**: stack operations (dup drop swap over rot), arithmetic (+ - * / %), bitwise (& | ^ << >>), comparison (= <> < > <= >= u< u>=), memory (@ ! c@ c!), I/O (getc putc), exit. Control structures are `if/else/then`, `begin/until`, and `begin/while/repeat`.\n\n**Execution model**: untyped; every cell is 32 bits. Two stacks: the data stack on x9 and the return stack on x2. Truth is 0 = false / nonzero = true. `main` is required; returning from it exits with code 0.\n\n**Implementation**: two passes + a fixup table. Every token's generated size is independent of its operand values (a literal push is always 4 words, etc.), so addresses cannot drift between passes. Forward branches are resolved by numbering the branch tokens with a sequence shared by both passes. Each word expands to a fixed instruction template; no optimization is performed.",
+   "new_capabilities": [
+    "Structured control (if/else and two loop forms) — branch construction becomes a language feature",
+    "Named functions and subroutine calls (recursion allowed)",
+    "Named globals, buffers, and constants",
+    "Embedded string literals",
+    "Freedom from register allocation (neither registers nor the stack are visible to the writer)"
+   ],
+   "artifacts": [
+    {
+     "file": "sol.bin",
+     "desc": "sol compiler built by asm (output is a flat binary)",
+     "size": 5604,
+     "sha256": "079d90e9accfb4309c31e1ba82835d9fa25c7ef35db0acaa4154181a8376dad1"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage004/sol.s",
+     "desc": "Source of the sol compiler (asm language)"
+    }
+   ],
+   "docs": [
+    "docs/stage004-sol.md",
+    "stage004/sol.md"
+   ],
+   "trivia": "sol uses `#` for line comments, so it has its own convention of `#/` for documentation comments. Being stack-oriented with no named parameters, it records stack effects as `@stack ( args -- results )` in place of @param."
+  },
+  {
+   "id": "stage005",
+   "num": 5,
+   "name": "sc",
+   "title": "sc — a C subset",
+   "tagline": "small C with functions, pointers, and structs. The language that can describe itself arrives here",
+   "phase": "plan",
+   "lang_in": "sc language (C subset; terminator is EOT 0x04)",
+   "lang_impl": "sol language",
+   "built_by": "sol.bin",
+   "summary_md": "sc (small C) is the definition of a C subset and its compiler. The design document doubles as the language specification, and the language is the one in which Stage 6's self-host describes itself.\n\n**Language**: 7 reserved words — `int` `char` `struct` `if` `else` `while` `return`. All values are 32-bit cells; only `char` storage access is 1 byte. Pointers may be arbitrarily deep; arrays are one-dimensional only (decaying to pointers in expressions). Struct variables are global only, with no pass-by-value or assignment-by-value (access is via pointers). Identifiers are 1..15 bytes of lowercase letters.\n\n**Expressions**: infix operators in 11 precedence levels (assignment, short-circuit &&/||, bitwise, comparison, shift, arithmetic), unary `- ! * &`, postfix `[] () . ->`. Pointer arithmetic scales by pointee size.\n\n**Built-ins**: just getc / putc / exit. The return value of `main` becomes the exit code.\n\n**Errors**: syntax = 1, undefined = 2, main undefined = 3, duplicate = 4, type = 5, capacity exceeded = 6.\n\n**Implementation**: unlike under sol, memory access is unconstrained, so the compiler moves to single-pass generation into an output buffer + backpatching (forward branches and forward calls). Recursive-descent parsing; each expression result carries a flag distinguishing a \"value\" from an \"address (lvalue, load deferred)\". The input terminator changed from `.` to EOT (0x04), since `.` is frequent in C source.",
+   "new_capabilities": [
+    "Infix expressions with precedence and parentheses (postfix notation and stack juggling disappear)",
+    "Functions with named parameters and local variables, returning values via return",
+    "The type concepts pointer, one-dimensional array, and struct",
+    "Pointer arithmetic scaled by pointee size",
+    "Single pass + backpatching as the compiler structure (a shift away from two-pass scanning)"
+   ],
+   "artifacts": [
+    {
+     "file": "sc.bin",
+     "desc": "sc compiler built by sol",
+     "size": 57356,
+     "sha256": "ece275e324fc29afbf1290c59703b8210a12e9dd67427598245f9bf43926cdec"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage005/sc.sol",
+     "desc": "Source of the sc compiler (sol language)"
+    }
+   ],
+   "docs": [
+    "docs/stage005-sc.md",
+    "stage005/sc.md"
+   ],
+   "trivia": "To debug sc.sol, a debug build was produced by mechanically assigning a distinct exit code to every `exit` site, so which check had failed could be read directly off the exit code; this pinpointed a missing argument-count check (dev-notes.md 2.1)."
+  },
+  {
+   "id": "stage006",
+   "num": 6,
+   "name": "scc",
+   "title": "scc — self-hosting",
+   "tagline": "The sc compiler rewritten in the sc language. The fixed point B2 == B3 mechanically proves the self-host",
+   "phase": "plan",
+   "lang_in": "sc language (spec identical to Stage 5)",
+   "lang_impl": "sc language",
+   "built_by": "sc.bin (bootstrap step 1) → itself (scc1 → scc)",
+   "summary_md": "scc (self-hosted sc compiler) is the sc compiler rewritten in the sc language itself. From here on, the build chain no longer depends on the lower languages (sol and below).\n\n**Fixed-point verification** (completion criterion): with scc.sc as S and the Stage 5 compiler as C0:\n\n```\nB1 = C0(S)   # scc bootstrapped by the lower chain\nB2 = B1(S)   # scc compiled by itself\nB3 = B2(S)\n```\n\nBit-for-bit equality B2 == B3 is the completion criterion. Because the code generation templates are kept identical to C0's, B1 == B2 also holds and serves as an additional equality check. Maintaining this fixed point becomes the discipline observed by every later generation change.\n\n**Restructuring within sc's constraints**: arrays of structs cannot be written, so the symbol table is represented as parallel arrays (a char array + int arrays). There is no constant syntax, so token kinds are assigned to globals in `init()`. There is no break/continue, so search loops are factored into functions and exited via return.\n\n**Equivalence**: the Stage 5 specification test suite is compiled and run with B2, confirming the same outputs and exit codes as Stage 5. The language spec is not extended.",
+   "new_capabilities": [
+    "Self-hosting: the sc toolchain can be maintained in the sc language alone",
+    "Establishes fixed-point verification (B2 == B3) as a mechanical proof of soundness",
+    "Development proceeds from here by revising scc.sc alone"
+   ],
+   "artifacts": [
+    {
+     "file": "scc1.bin",
+     "desc": "B1 = sc(scc.sc). Bootstrap step 1 via the lower chain",
+     "size": 74296,
+     "sha256": "5bb7ae24f0405ff1874522da72fdf99cf0b8fae0f1215ad46ba584f6bda5bbf0"
+    },
+    {
+     "file": "scc.bin",
+     "desc": "B2 = scc1(scc.sc). The canonical binary from here on",
+     "size": 74296,
+     "sha256": "5bb7ae24f0405ff1874522da72fdf99cf0b8fae0f1215ad46ba584f6bda5bbf0"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage006/scc.sc",
+     "desc": "Source of scc (sc language). The canonical source from here on"
+    }
+   ],
+   "docs": [
+    "docs/stage006-scc.md",
+    "stage006/scc.md"
+   ],
+   "trivia": "The build passes the same source through twice. The first pass (scc1) is the product of the sol-built compiler, the second (scc) the product of scc itself; their equality proves the code generation is identical."
+  },
+  {
+   "id": "stage007",
+   "num": 7,
+   "name": "occ",
+   "title": "occ — modernization (IR and optimization)",
+   "tagline": "IR (φ-free SSA), constant folding, DCE, register allocation. The era of template expansion ends",
+   "phase": "plan",
+   "lang_in": "sc language (spec identical to Stage 5)",
+   "lang_impl": "sc language",
+   "built_by": "scc.bin (bootstrap step 1) → itself (occ1 → occ)",
+   "summary_md": "occ (optimizing sc compiler) redesigns the compiler's internals into a modern multi-stage structure — parsing builds an IR, optimization passes rewrite the IR, and output follows register allocation. The language spec is unchanged.\n\n**IR**: per-function three-address code. Each instruction defines at most one value, and values are referenced by instruction number. Expression temporaries are defined exactly once, so the IR is SSA without φ functions. Variables stay in memory as LOAD/STORE (mem2reg is a non-goal). Instructions include CONST / LADDR / GADDR / LOADW / STOREW / BIN / NEG / ARG / CALL / RET / LABEL / JMP / BZ.\n\n**Register allocation**: targets the 15 registers x13..x27. All are treated as callee-saved, and only those actually used are saved in the prologue. When no register is free, the value whose last use is farthest away is spilled.\n\n**Optimization passes**: fold (constant folding; division by 0 is not folded) → dce (removal of unused pure values).\n\n**Output improvements**: constants in -2048..2047 become a single addi. Conditional branches are emitted as two words — an inverted-condition one-word skip plus a jal — removing a latent bug in which the previous implementation emitted beq with no range check and silently miscompiled if/while bodies over 4KiB.\n\nThe inter-function ABI (data-stack argument passing, 32-word preamble) is kept identical to scc's. Since code generation changes, B1 == B2 does not hold; only the fixed point B2 == B3 is the completion criterion.",
+   "new_capabilities": [
+    "Multi-stage structure via an SSA-style IR (departure from syntax-driven templates)",
+    "Constant folding (fold) and dead code elimination (dce)",
+    "Register allocation of expression temporaries (15 registers + spilling)",
+    "Substantially smaller and faster generated code",
+    "Removal of the ±4KiB conditional-branch limit (two-word emission via jal)"
+   ],
+   "artifacts": [
+    {
+     "file": "occ1.bin",
+     "desc": "B1 = scc(occ.sc). Bootstrap via the old code generation",
+     "size": 126788,
+     "sha256": "dc58ed5b7e2817a66da3743cf5dee0367f026af62bd7227e0ea20353d61c1ab4"
+    },
+    {
+     "file": "occ.bin",
+     "desc": "B2 = occ1(occ.sc). The canonical binary from here on; the staged plan in plan.md completes here",
+     "size": 70420,
+     "sha256": "253cfd88361001c4922476aae2fa7632efe744c2138eeccdfa1f384c05cc036d"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage007/occ.sc",
+     "desc": "Source of occ (sc language). Inherits scc's lexer and parser; adds the IR, optimization, and allocation"
+    }
+   ],
+   "docs": [
+    "docs/stage007-occ.md",
+    "stage007/occ.md"
+   ],
+   "trivia": "scc's silent miscompilation of B-type branches beyond ±4KiB was discovered during this stage's development by counting PC wraparounds in a QEMU execution trace. Because occ.sc's own bootstrap step 1 goes through the old code generation, its large loop bodies are split into functions (foldins, factored out of fold) to stay within the 4KiB limit."
+  },
+  {
+   "id": "stage008",
+   "num": 8,
+   "name": "cc + ld",
+   "title": "cc + ld — ELF and separate compilation",
+   "tagline": "The compiler emits relocatable objects and the linker joins them. The premise for everything that follows",
+   "phase": "phase-a",
+   "lang_in": "sc language (cc) / concatenated ELF object stream (ld)",
+   "lang_impl": "sc language",
+   "built_by": "occ.bin (bootstrap: cc0/ld0) → cc0 + ld0 → themselves (cc8.bin / ld.bin)",
+   "summary_md": "Makes translation units separable. cc is occ plus ELF relocatable object output; ld is new.\n\n**ELF subset** (ET_REL, EM_RISCV, LE): 7 sections including NULL — .text / .bss / .symtab / .strtab / .rela.text / .shstrtab. No section symbols are created; every function and global variable is registered as its own symbol — the linker never needs to resolve \"section + offset\".\n\n**Only 4 relocation types**: R_RISCV_32 (data words), R_RISCV_JAL (jal displacement), R_RISCV_HI20 / R_RISCV_LO12_I (lui/addi pairs). String literals become self-references to internal symbols within .text (.L.str.N, LOCAL).\n\n**Moving the preamble**: the 32-word runtime that occ placed at the head of its output is now emitted by the linker (crt0 equivalent), since which translation unit comes first is undetermined. getc/putc/exit change from fixed addresses to external symbols provided by the linker.\n\n**Feeding input**: the execution environment has only a UART and cannot open files, so objects are concatenated and fed to the linker on standard input (`cat a.o b.o | ld`). The total length of each is computed from its ELF header to slice them out in order.\n\n**Errors** (ld): not ELF = 1, undefined symbol = 2, multiple definition = 3, relocation out of range = 4, main undefined = 5, capacity exceeded = 6.",
+   "new_capabilities": [
+    "Separate compilation (per-translation-unit .o files joined by linking)",
+    "Generation of ELF relocatable objects (mechanically checkable with the verify layer's readelf/objdump)",
+    "Symbol resolution and 4 relocation types",
+    "The runtime preamble becomes a crt0 (getc/putc/exit become external symbols)",
+    "Groundwork for library-style linking (Stage 11's libc is used just by listing objects)"
+   ],
+   "artifacts": [
+    {
+     "file": "cc0.bin",
+     "desc": "occ(cc.sc). Bootstrap compiler with flat output",
+     "size": 76828,
+     "sha256": "7ad3ea85dfb3bf840839eabcb47f57c30f696234314ac0350351fc7a7b9f8509"
+    },
+    {
+     "file": "ld0.bin",
+     "desc": "occ(ld.sc). Bootstrap linker",
+     "size": 13964,
+     "sha256": "7baf932b1d58a229482d4e5ed0486f1fda2d88092871283f27d17b72bee41771"
+    },
+    {
+     "file": "cc8.bin",
+     "desc": "Canonical compiler built with cc0 + ld0 (the cc.bin of its day; known by this name from Stage 10 on)",
+     "size": 76828,
+     "sha256": "3a5ae4c010ff1429da6f49fa97eb26edec32054acd6d19633d9788b5dcc9607a"
+    },
+    {
+     "file": "ld.bin",
+     "desc": "Canonical linker. Handles linking for every generation up to Stage 12's ld12",
+     "size": 13964,
+     "sha256": "79ac94c7e937458fc75f3d00e859b6b94c566273b4615040403269e73a615d83"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage008/cc.sc",
+     "desc": "C-subset compiler emitting ELF objects"
+    },
+    {
+     "path": "stage008/ld.sc",
+     "desc": "Linker (32-word preamble + .text concatenation + .bss placement + relocation application)"
+    }
+   ],
+   "docs": [
+    "docs/stage008-elf-ld.md",
+    "stage008/cc.md",
+    "stage008/ld.md"
+   ],
+   "trivia": "A custom format would have been smaller to implement, but the long-term goals (GCC, Linux) assume ELF, so ELF was adopted from the start. The artifact is named cc8.bin because a successor appeared in Stage 10 — the naming convention that cc.bin always refers to the latest generation begins here."
+  },
+  {
+   "id": "stage009",
+   "num": 9,
+   "name": "pp",
+   "title": "pp — the preprocessor",
+   "tagline": "An independent text transformer. #include works over bundles, bringing header sharing to a world without files",
+   "phase": "phase-a",
+   "lang_in": "C source in bundle format (#include / #define / #if family)",
+   "lang_impl": "sc language (contains no directives itself, so it compiles without going through pp)",
+   "built_by": "cc8.bin + ld.bin (Stage 8 artifacts)",
+   "summary_md": "A preprocessor for sharing declarations between translation units. It is a standalone executable, not built into the compiler — its text-to-text I/O makes it verifiable on its own, it leaves cc.bin unchanged, and it matches the classic toolchain structure.\n\n**Bundles**: the execution environment has no way to open files by name, so sources are concatenated under names — a `#!stone-bundle` magic plus `@name size` headers — and fed on standard input. The last member is the translation target; the others are the search space for `#include`. tools/bundle.sh generates bundles.\n\n**Directives**: `#define` (object-like, function-like, variadic `__VA_ARGS__`), `#undef`, `#include \"n\"` / `<n>` (same search space), `#if` / `#ifdef` / `#ifndef` / `#elif` / `#else` / `#endif`, `#error`. `#pragma` / `#line` / `#warning` are skipped.\n\n**Macro expansion**: C89-conformant. Argument prescan, stringizing `#`, pasting `##`, recursion suppression (judged by marks on the stack). Function-like macros expand only when followed by `(`. Predefined macros: __STDC__ / __STONE__ / __FILE__ / __LINE__.\n\n**#if constant expressions**: defined → macro expansion → evaluation, in that order. 32-bit signed. As a deliberate simplification, `||` `&&` `?:` do not short-circuit; in exchange, division by 0 is defined to yield 0.\n\n**Implementation**: the core is a stack of frames from which characters are pulled one at a time. The bottom frame is the translation unit; #include pushes a file frame and macro expansion pushes a replacement-text frame. Replacement text is managed in two stack-allocated arenas (xb / eb). Output is EOT-terminated, so it pipes directly as `pp | cc`.",
+   "new_capabilities": [
+    "Header sharing via #include (multiple sources in a single input via the bundle format)",
+    "Object-like, function-like, and variadic macros with the # / ## operators",
+    "Conditional compilation via the #if family",
+    "/* */ block comments (a side benefit — cc understands only //)",
+    "Line splicing (\\ + newline) and __FILE__ / __LINE__"
+   ],
+   "artifacts": [
+    {
+     "file": "pp.bin",
+     "desc": "The preprocessor itself. Built by cc8 in every generation; its SHA-256 never changes",
+     "size": 53104,
+     "sha256": "e54e418ba47b72253d804addaaa342be3dde4e44db492f611859391e9053afd3"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage009/pp.sc",
+     "desc": "The preprocessor itself (sc language)"
+    },
+    {
+     "path": "tools/bundle.sh",
+     "desc": "Host-side helper that converts a set of sources into bundle format"
+    }
+   ],
+   "docs": [
+    "docs/stage009-pp.md",
+    "stage009/pp.md"
+   ],
+   "trivia": "It was not named cpp because .cpp is widely used as the C++ file extension, and the name is kept free for a possible future C++ subset toolchain (option A of the GCC build). One pitfall recorded in dev-notes: unless one-character lookahead pushback is partitioned per frame, `return A;` comes out as `return ;1`."
+  },
+  {
+   "id": "stage010",
+   "num": 10,
+   "name": "cc10",
+   "title": "cc10 — completing C89",
+   "tagline": "Twelve generations lift sc to C89. Each generation makes the next one easier to write",
+   "phase": "phase-a",
+   "lang_in": "C89 (the accepted range grows generation by generation)",
+   "lang_impl": "the language accepted by each generation's predecessor (cc.sc is in the sc language; later sources use the already-implemented features)",
+   "built_by": "cc8.bin (step 1) → each generation builds the next (sources frozen per generation)",
+   "summary_md": "cc8 accepts only the sc language. Stage 10 raises it to the C89 language specification. The work does not fit into one change, so it is split into generations: each generation's source is frozen, and the next generation is built with the previous compiler — Part 2's sources can be written using the for / switch / ++ added in Part 1.\n\n| Generation | Source | What it adds |\n|---|---|---|\n| cc10a | cc.sc | Part 1 (statements and expressions): for / do / switch / break / continue / goto, ?:, compound assignment, ++/--, comma, sizeof, casts |\n| cc10b | cc2.sc | Types: typedef / enum / union / const / volatile / void, uppercase in identifiers |\n| cc10c | cc3.sc | Declarations: function prototypes / extern / static (accepted) / block-scope declarations |\n| cc10d | cc4.sc | Identifier length 31, multidimensional arrays |\n| cc10e | cc5.sc | Integer types: unsigned / signed / short / long — the first generation to change code generation rules |\n| cc10f | cc6.sc | Function pointers, static linkage |\n| cc10g | cc7.sc | Initializers (initialized globals placed in .text) |\n| cc10h | cc8.sc | Variadic functions (stdarg.h's va_start / va_arg) |\n| cc10i | cc9.sc | Struct pass-by-value and assignment-by-value |\n| cc10j | cc10.sc | Struct return — Phase A completes here |\n| cc10k | cc11.sc | Addendum: missed character escapes (found when starting Stage 11) |\n| cc10l | cc12.sc | Addendum 2: unary & on arrays (so offsetof works on array members) |\n\nGenerations that only added syntax have bootstrap step 1 byte-identical to the canonical binary (cc10x0 == cc10x); generations that changed code generation (cc10e etc.) are validated by the fixed point B2 == B3. `cc.bin` is an alias for the latest generation, cc10l. Non-goals: floating point, bit-fields, volatile semantics, C99 and later.",
+   "new_capabilities": [
+    "Nearly all C89 statements and expressions (for / switch / goto / ?: / compound assignment / ++ / sizeof / casts)",
+    "typedef / enum / union / function prototypes / extern / block-scope declarations",
+    "Width and signedness of unsigned / short / long (sign selection for loads, division, and comparison)",
+    "Function pointers and static linkage",
+    "Initializers, variadic functions, struct pass-by-value and return",
+    "Headers become the place where declarations are shared (extern + prototypes)"
+   ],
+   "artifacts": [
+    {
+     "file": "cc10a.bin",
+     "desc": "Part 1 (statements and expressions)",
+     "size": 95132,
+     "sha256": "ffc7ff2734380411064a96b9f2a73dc6d5bc0c9f7c793ee0470249aff86371a7"
+    },
+    {
+     "file": "cc10b.bin",
+     "desc": "Part 2, no. 1 (types)",
+     "size": 100284,
+     "sha256": "d98a4cd3356b372b82e5438b1a1cf926bbcef5893e64bdb977e466dd72ce430d"
+    },
+    {
+     "file": "cc10c.bin",
+     "desc": "Part 2, no. 2 (declarations)",
+     "size": 102416,
+     "sha256": "507d89ae3e7636c93cad517f8789930a2d8c0039b4be25eecab4bbb51917724c"
+    },
+    {
+     "file": "cc10d.bin",
+     "desc": "Part 2, no. 3 (identifiers and arrays)",
+     "size": 103960,
+     "sha256": "180d02b1c8d5c82db6ab6e6113a5b46cca2ac5bdd8a27f0a8c6bf054ffb0f61f"
+    },
+    {
+     "file": "cc10e.bin",
+     "desc": "Part 2, no. 4 (integer types)",
+     "size": 113388,
+     "sha256": "8301207039402b27851460e428f28aa24c4cf80af5a706fb9f9098fed82540a3"
+    },
+    {
+     "file": "cc10f.bin",
+     "desc": "Part 2, no. 5 (function pointers and static)",
+     "size": 120508,
+     "sha256": "8f3214b51ca257c1d97061ede0a798cc523b6754b3e70b49b3513333d15ca18f"
+    },
+    {
+     "file": "cc10g.bin",
+     "desc": "Part 3, no. 1 (initializers)",
+     "size": 129268,
+     "sha256": "0d3bd9960daf7edefedd8afd4bb5a610a8cc7a61b66d73c8405e8195c1f10e25"
+    },
+    {
+     "file": "cc10h.bin",
+     "desc": "Part 3, no. 2 (variadic functions)",
+     "size": 133100,
+     "sha256": "2d3784eea93391d8291c18a9d7bfa981e984a23be2c5a592de63f57803501e14"
+    },
+    {
+     "file": "cc10i.bin",
+     "desc": "Part 3, no. 3 (struct values)",
+     "size": 135580,
+     "sha256": "b8fed83c7fcf5da18af4cdcec614d1be3ca9b9085192256d1a96de983938c43a"
+    },
+    {
+     "file": "cc10j.bin",
+     "desc": "Part 3, no. 4 (struct return)",
+     "size": 136908,
+     "sha256": "1657cbc453086c832ef0173511f6a8ea64455a2d41853bdf2c0151fbd646c629"
+    },
+    {
+     "file": "cc10k.bin",
+     "desc": "Addendum (character escapes)",
+     "size": 138824,
+     "sha256": "7e3f88903d45ba515ca627f9d8f176c6804ef5b31fb40d3a88b0aa41e1fc7910"
+    },
+    {
+     "file": "cc10l.bin",
+     "desc": "Addendum 2 (unary & on arrays). The current canonical binary",
+     "size": 139124,
+     "sha256": "f26f058da421bea13443c279bbdae8bc00d82deb529f6d0dfc9337af625fc49f"
+    },
+    {
+     "file": "cc.bin",
+     "desc": "Alias for the latest generation (= cc10l.bin). The per-generation bootstrap intermediates cc10a0 through cc10l0 are also produced",
+     "size": 139124,
+     "sha256": "f26f058da421bea13443c279bbdae8bc00d82deb529f6d0dfc9337af625fc49f"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage010/cc.sc",
+     "desc": "Part 1 source (written in the sc language)"
+    },
+    {
+     "path": "stage010/cc2.sc",
+     "desc": "Part 2, no. 1 (written in cc10a's language)"
+    },
+    {
+     "path": "stage010/cc3.sc",
+     "desc": "Part 2, no. 2"
+    },
+    {
+     "path": "stage010/cc4.sc",
+     "desc": "Part 2, no. 3"
+    },
+    {
+     "path": "stage010/cc5.sc",
+     "desc": "Part 2, no. 4"
+    },
+    {
+     "path": "stage010/cc6.sc",
+     "desc": "Part 2, no. 5"
+    },
+    {
+     "path": "stage010/cc7.sc",
+     "desc": "Part 3, no. 1"
+    },
+    {
+     "path": "stage010/cc8.sc",
+     "desc": "Part 3, no. 2"
+    },
+    {
+     "path": "stage010/cc9.sc",
+     "desc": "Part 3, no. 3"
+    },
+    {
+     "path": "stage010/cc10.sc",
+     "desc": "Part 3, no. 4"
+    },
+    {
+     "path": "stage010/cc11.sc",
+     "desc": "Addendum"
+    },
+    {
+     "path": "stage010/cc12.sc",
+     "desc": "Addendum 2. The current canonical source of cc (151636 bytes)"
+    },
+    {
+     "path": "stage010/include/stdarg.h",
+     "desc": "va_start / va_arg / va_end (macros wrapping the hidden local __va_ptr)"
+    }
+   ],
+   "docs": [
+    "docs/stage010-c89.md"
+   ],
+   "trivia": "After the spec was judged complete, the moment isspace was written in Stage 11 an implementation gap in character escapes (\\f \\r \\v) surfaced, producing the addendum cc10k. Implementation gaps surface at the first real use — this experience shaped the design of Stage 14's conformance ledger (making the unimplemented explicit and counted).",
+   "coverage": [
+    {
+     "title": "C89 language coverage (which generation brought what)",
+     "note": "gaps are rejected explicitly with an error — never silently miscompiled",
+     "items": [
+      {
+       "label": "for / do / switch / goto",
+       "state": "ok",
+       "note": "cc10a (part 1)"
+      },
+      {
+       "label": "?: , compound assign, ++/--, comma, sizeof, cast",
+       "state": "ok",
+       "note": "cc10a (part 1)"
+      },
+      {
+       "label": "typedef / enum / union / const / void",
+       "state": "ok",
+       "note": "cc10b"
+      },
+      {
+       "label": "prototypes / extern / block-scope decls",
+       "state": "ok",
+       "note": "cc10c"
+      },
+      {
+       "label": "31-char identifiers / multi-dim arrays",
+       "state": "ok",
+       "note": "cc10d"
+      },
+      {
+       "label": "unsigned, short, long — widths & signedness",
+       "state": "ok",
+       "note": "cc10e"
+      },
+      {
+       "label": "function pointers / static linkage",
+       "state": "ok",
+       "note": "cc10f"
+      },
+      {
+       "label": "initializers (arrays, structs, strings)",
+       "state": "ok",
+       "note": "cc10g"
+      },
+      {
+       "label": "variadic functions (stdarg.h)",
+       "state": "ok",
+       "note": "cc10h"
+      },
+      {
+       "label": "struct arguments by value",
+       "state": "ok",
+       "note": "cc10i"
+      },
+      {
+       "label": "struct return",
+       "state": "ok",
+       "note": "cc10j"
+      },
+      {
+       "label": "character escapes (\\f \\r \\v ...)",
+       "state": "ok",
+       "note": "cc10k (addendum)"
+      },
+      {
+       "label": "unary & on arrays (offsetof)",
+       "state": "ok",
+       "note": "cc10l (addendum 2)"
+      },
+      {
+       "label": "local static variables",
+       "state": "gap",
+       "note": "rejected as a syntax error (tracked in issue #46)"
+      },
+      {
+       "label": "constant expressions in case labels",
+       "state": "gap",
+       "note": "numeric literals only (issue #46)"
+      },
+      {
+       "label": "constant exprs / nested braces in global initializers",
+       "state": "gap",
+       "note": "issue #46"
+      },
+      {
+       "label": "floating point",
+       "state": "gap",
+       "note": "declared non-goal for now"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "stage011",
+   "num": 11,
+   "name": "libc",
+   "title": "libc — a freestanding standard library",
+   "tagline": "string / ctype / stdlib written in our own C. The standard library, minus everything that requires an OS",
+   "phase": "phase-b",
+   "lang_in": "C89 (users just #include the headers and link)",
+   "lang_impl": "C89 (within our own cc's subset)",
+   "built_by": "pp.bin + cc.bin (= cc10l). Kept as objects; users list only what they need to ld",
+   "summary_md": "C programs cannot be written with the language alone. Stage 11 provides the core of the standard library in our own C. The execution environment is still bare metal, so this is a C89 freestanding implementation covering only what needs no OS. stdio is Stage 12's problem.\n\n**Part 1 (pure functions)**: stddef.h (size_t / NULL / offsetof), limits.h, string.h (memcpy / memmove / strcmp / strstr / strspn etc.), ctype.h. Comparisons use unsigned char as C89 requires. ctype is written with range comparisons instead of a 256-byte table (so it consumes no .bss when unused).\n\n**Part 2 (storage)**: malloc / free / calloc / realloc as a K&R-style first-fit free list. The heap is a fixed 1 MiB in .bss, and its supply is funneled through the internal function morecore — swapping in brk in Stage 12 touches only this one function. realloc's copy does not call memcpy (calling it would force string.o into the link).\n\n**Part 3 (sorting, searching, numeric conversion)**: qsort (Shell sort; non-recursive, no extra storage) / bsearch / atoi / strtol (auto-detected base 0, saturation to LONG_MAX) / abs / div (struct return — cc10j's work pays off here).\n\n**Link granularity**: there are no archives (.a) yet; only the needed objects are listed to ld. Unused functions are never linked in the first place. libc is frozen per generation (later generations become inputs to the tools on the OS).",
+   "new_capabilities": [
+    "The pure functions of string.h / ctype.h (freedom from hand-written scanning)",
+    "malloc / free / calloc / realloc (K&R-style free list with coalescing)",
+    "qsort / bsearch / strtol / atoi / abs / div",
+    "The morecore boundary (moving to an OS later means replacing one function)",
+    "The discipline of linking only the objects you need"
+   ],
+   "artifacts": [
+    {
+     "file": "l11_string.o",
+     "desc": "Implementation of string.h (generation 11)",
+     "size": 7156,
+     "sha256": "71ad0ad02741a4e874492ce48ee08def32f4ffadd4a051523fa73c35d767d11b"
+    },
+    {
+     "file": "l11_ctype.o",
+     "desc": "Implementation of ctype.h",
+     "size": 3984,
+     "sha256": "58ad6ed541e2ba02a6801bb5b78ca2e3bcdd3b091ade6b291c8a00ae94a1392a"
+    },
+    {
+     "file": "l11_stdlib.o",
+     "desc": "malloc family + qsort / bsearch / strtol etc.",
+     "size": 10268,
+     "sha256": "9194ae5ab6438a0e77535e97251d42ca1500898817a25fa509de14c8272d8f44"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage011/libc/include",
+     "desc": "6 headers (stddef / limits / stdarg / string / ctype / stdlib)"
+    },
+    {
+     "path": "stage011/libc/src/string.c",
+     "desc": "Implementation of string.h"
+    },
+    {
+     "path": "stage011/libc/src/ctype.c",
+     "desc": "Implementation of ctype.h (range comparisons, no table)"
+    },
+    {
+     "path": "stage011/libc/src/stdlib.c",
+     "desc": "malloc family and the Part 3 functions"
+    }
+   ],
+   "docs": [
+    "docs/stage011-libc.md"
+   ],
+   "trivia": "Starting the stage immediately exposed two holes in the toolchain: the missed character escapes, and the unary & on arrays that offsetof requires. Both were addressed by adding addendum generations to Stage 10 (cc10k / cc10l) before proceeding. qsort is not quicksort inside, because C89 does not prescribe the algorithm.",
+   "coverage": [
+    {
+     "title": "Freestanding libc coverage (string.h / ctype.h / stdlib.h)",
+     "items": [
+      {
+       "label": "memcpy",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "memmove",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "memset",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "memcmp",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strlen",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strcpy",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strncpy",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strcat",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strncat",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strcmp",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strncmp",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strchr",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strrchr",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strstr",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strspn",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strcspn",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "strpbrk",
+       "state": "ok",
+       "note": "string.h"
+      },
+      {
+       "label": "isalpha",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "isdigit",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "isalnum",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "isspace",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "isupper",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "islower",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "isprint",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "isgraph",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "ispunct",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "iscntrl",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "isxdigit",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "toupper",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "tolower",
+       "state": "ok",
+       "note": "ctype.h"
+      },
+      {
+       "label": "malloc",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "free",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "calloc",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "realloc",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "qsort",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "bsearch",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "atoi",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "strtol",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "abs",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "div",
+       "state": "ok",
+       "note": "stdlib.h"
+      },
+      {
+       "label": "strtok",
+       "state": "gap",
+       "note": "not implemented"
+      },
+      {
+       "label": "strtoul",
+       "state": "gap",
+       "note": "not implemented"
+      },
+      {
+       "label": "strcoll / strxfrm",
+       "state": "gap",
+       "note": "locale is out of scope"
+      },
+      {
+       "label": "stdio.h",
+       "state": "gap",
+       "note": "needs an OS — arrives in Stage 12"
+      },
+      {
+       "label": "math.h / setjmp.h / signal.h / time.h",
+       "state": "gap",
+       "note": "out of scope for now"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "stage012",
+   "num": 12,
+   "name": "OS",
+   "title": "OS — a homegrown kernel and POSIX-like environment",
+   "tagline": "Option Y chosen: a simple homegrown OS. The syscall ABI is RV32 Linux compatible; files are injected as an sfs image",
+   "phase": "phase-b",
+   "lang_in": "ld12: 1 format byte ('F'/'K'/'E') + object stream / kernel: an sfs image and a boot line",
+   "lang_impl": "ld12 in the sc language; the kernel and the libc environment part in C89 (our own cc). Privileged instructions are confined to ld12's preamble (machine code)",
+   "built_by": "ld12: cc.bin + ld.bin (stage008) / kernel and libc: pp.bin + cc.bin + ld12.bin",
+   "summary_md": "On bare metal with only a UART, you cannot even open multiple inputs. Stage 12 builds a simple homegrown OS and a POSIX-like execution environment on top of it. The roadmap's fork is resolved as option Y (a homegrown OS) — no external runtime enters the build path, and every generation's artifacts stay on our own chain.\n\n**Syscall ABI is RV32 Linux compatible**: number in a7, arguments in a0..a5, ecall, return value in a0 (negative values are -errno). Implemented: read(63) / write(64) / openat(56) / close(57) / brk(214) / exit(93); everything else is -ENOSYS. The number table is a specification, not an implementation, so it does not violate the purity policy — libc and user programs will later run unchanged on real Linux.\n\n**sfs**: a homegrown FS that merely lists names and lengths. A 32-byte superblock (magic 'sfs1') + a file table at 64 bytes/entry (path strings up to 51 bytes) + append-allocated data. It is mapped at guest physical 0x8400_0000 (max 32 MiB) via QEMU's memory-backend-file, so input injection and artifact retrieval both go through one image.\n\n**Kernel**: runs in M-mode, reads an ELF executable from sfs, and mrets to U-mode. No address translation (direct physical). One process at a time. The boot entry and trap entry that cannot be written in C live as machine code in ld12's kernel preamble, keeping inline asm out of cc.\n\n**ld12**: the first input byte selects 'F' (legacy flat) / 'K' (kernel) / 'E' (ET_EXEC with one program header). 'F' output is byte-identical to stage008's ld, so existing stages are unaffected.\n\n**libc reorganization**: split into a pure part (string / stdlib) and an environment part (posix/). The preamble's raw stubs (sys_*, returning -errno) are wrapped under POSIX names (read / write / open / sbrk), introducing errno. Swapping morecore for the brk version lets malloc grow past bare metal's 1 MiB. stdio is an unbuffered FILE, up through printf / fgets / ungetc.",
+   "new_capabilities": [
+    "File I/O (open / read / write / close) and file exchange with the host via sfs",
+    "Dynamic storage requests via brk (malloc's 1 MiB cap is lifted)",
+    "argc / argv and exit codes (programs become commands)",
+    "U-mode user processes and ELF executable loading",
+    "errno and stdio (fopen / printf / fgets / ungetc; unbuffered)",
+    "Linux-compatible syscall ABI (securing a future path to real Linux)"
+   ],
+   "artifacts": [
+    {
+     "file": "ld12.bin",
+     "desc": "New linker generation (the 3 formats 'F'/'K'/'E')",
+     "size": 33880,
+     "sha256": "881d99206440286573fa2c8f435c25a7d9e3d82b98f1de435ba4b00da8a49802"
+    },
+    {
+     "file": "kernel.bin",
+     "desc": "'K'-format kernel (trap / syscall / ELF loader)",
+     "size": 11152,
+     "sha256": "140e4557f7b9328e70a5978e76619b2752dd2fb2bfc07c9d55b043fdd8ca9db3"
+    },
+    {
+     "file": "l12_src_string.o",
+     "desc": "libc pure part (generation 12)",
+     "size": 7156,
+     "sha256": "71ad0ad02741a4e874492ce48ee08def32f4ffadd4a051523fa73c35d767d11b"
+    },
+    {
+     "file": "l12_src_ctype.o",
+     "desc": "Ditto",
+     "size": 3984,
+     "sha256": "58ad6ed541e2ba02a6801bb5b78ca2e3bcdd3b091ade6b291c8a00ae94a1392a"
+    },
+    {
+     "file": "l12_src_stdlib.o",
+     "desc": "Ditto",
+     "size": 9696,
+     "sha256": "74d02bcdd54bb606c56a38a1c2ae0be25c01f53fa292dc673a3dd43126e7e225"
+    },
+    {
+     "file": "l12_src_morecore.o",
+     "desc": "Fixed-region version of morecore (for bare metal)",
+     "size": 1100,
+     "sha256": "700cd7df10e7960b5ec0c9102f8bead714655718d7a6a08444855c2ed7611fd3"
+    },
+    {
+     "file": "l12_posix_sys.o",
+     "desc": "Environment part: POSIX wrappers over the syscalls, plus errno",
+     "size": 2348,
+     "sha256": "e012a669d9b10a749256e7cf38358ea7c10d66fb4bd29d966e0ed97168c8278b"
+    },
+    {
+     "file": "l12_posix_morecore.o",
+     "desc": "brk version of morecore",
+     "size": 1008,
+     "sha256": "e0b40e857e7479463d9a8685f23382c220bcbd6617359ac4347a92d563d24801"
+    },
+    {
+     "file": "l12_posix_stdio.o",
+     "desc": "Unbuffered FILE and the printf / fgets family",
+     "size": 10696,
+     "sha256": "1e2efd9b269f0bfe554d8b41ff1a94d2bd4cb2c29b5db45350b037301ebc0b70"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage012/ld12.sc",
+     "desc": "Source of the new linker generation"
+    },
+    {
+     "path": "stage012/kernel.c",
+     "desc": "The kernel itself (C89 for our own cc)"
+    },
+    {
+     "path": "stage012/libc",
+     "desc": "libc generation 12 (include / src / posix)"
+    }
+   ],
+   "docs": [
+    "docs/stage012-os.md",
+    "stage012/ld12.md",
+    "stage012/kernel.md"
+   ],
+   "trivia": "With zero PMP entries configured, U-mode denies all accesses and the mret is bounced as an illegal instruction — confusing, because the cause appears to be mret itself. Separately, a syscall stub clobbered the callee-saved a3/a7 without saving them, producing a remote symptom: a variable live across the call was silently corrupted, and an exception fired at an unrelated store.",
+   "coverage": [
+    {
+     "title": "Syscall ABI coverage (RV32 Linux-compatible numbers)",
+     "note": "unimplemented calls return -ENOSYS instead of misbehaving",
+     "items": [
+      {
+       "label": "openat (56)",
+       "state": "ok"
+      },
+      {
+       "label": "close (57)",
+       "state": "ok"
+      },
+      {
+       "label": "read (63)",
+       "state": "ok"
+      },
+      {
+       "label": "write (64)",
+       "state": "ok"
+      },
+      {
+       "label": "exit (93)",
+       "state": "ok"
+      },
+      {
+       "label": "brk (214)",
+       "state": "ok"
+      },
+      {
+       "label": "lseek",
+       "state": "gap",
+       "note": "no seek — files are read/written sequentially"
+      },
+      {
+       "label": "fstat / stat",
+       "state": "gap"
+      },
+      {
+       "label": "unlink / rename",
+       "state": "gap"
+      },
+      {
+       "label": "fork / execve",
+       "state": "gap",
+       "note": "process model is spawn (Stage 13) instead"
+      },
+      {
+       "label": "mmap",
+       "state": "gap"
+      },
+      {
+       "label": "gettimeofday",
+       "state": "gap",
+       "note": "sfs has no timestamps"
+      }
+     ]
+    },
+    {
+     "title": "Hosted libc coverage (POSIX wrappers + stdio)",
+     "items": [
+      {
+       "label": "errno",
+       "state": "ok"
+      },
+      {
+       "label": "open / close / read / write",
+       "state": "ok"
+      },
+      {
+       "label": "sbrk / malloc over brk",
+       "state": "ok",
+       "note": "malloc can grow past the 1 MiB bare-metal arena"
+      },
+      {
+       "label": "FILE (unbuffered by design)",
+       "state": "ok"
+      },
+      {
+       "label": "fopen",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fclose",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fgetc",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fputc",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "ungetc",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fread",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fwrite",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fgets",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fputs",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "feof",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "ferror",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fflush",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "getchar",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "putchar",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "puts",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "printf",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fprintf",
+       "state": "ok",
+       "note": "stdio"
+      },
+      {
+       "label": "fseek / ftell",
+       "state": "gap",
+       "note": "no lseek underneath"
+      },
+      {
+       "label": "fopen(\"a\") append",
+       "state": "gap",
+       "note": "currently overwrites from the start (issue #52)"
+      },
+      {
+       "label": "sprintf / sscanf / fscanf",
+       "state": "gap"
+      },
+      {
+       "label": "remove / rename",
+       "state": "gap"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "stage013",
+   "num": 13,
+   "name": "tools",
+   "title": "tools — build tooling and in-guest development",
+   "tagline": "spawn, sh, ed, and mk arrive; the toolchain rebuilds itself on the OS it built for itself",
+   "phase": "phase-b",
+   "lang_in": "sh: command lines (< > redirection) / ed: line-editor commands / mk: build descriptions (make-like)",
+   "lang_impl": "C89 + libc generation 13 (our own cc). The command versions of cc / pp / ld have no source ('E' relink only)",
+   "built_by": "ld13: cc.bin + ld.bin / others: pp.bin + cc.bin + ld13.bin",
+   "summary_md": "Stage 12 made commands writable, but the only way to start one was the single boot line. Stage 13 assembles the tooling needed for development to be completed inside the guest. It is the final stage of Phase B.\n\n**sys_ecall**: adds exactly one generic syscall stub to ld13's 'E' preamble. From now on, adding syscalls only requires wrapping in libc (the C layer); the preamble (machine code) never changes again.\n\n**spawn** (syscall 500): starts the ELF at path, waits for the child to finish, and returns its exit code — sequential execution. With no address translation, the parent's image is protected by copying it to a save area (nesting up to 8 deep). Linux has no \"start and wait\" syscall, so it is placed at number 500, which Linux does not use, preserving compatibility. Redirection is expressed as spawn arguments binding the child's fd 0 / fd 1, avoiding dup2.\n\n**sh**: a minimal line-oriented shell. Splits on whitespace, `< in > out`, built-ins are exit / echo only. **ed**: an ed-like line editor. It assumes nothing about terminal capabilities (escape sequences), works on the raw UART character stream, and behaves identically in interactive and scripted use. Substitution is literal string match, not regex.\n\n**Migrating cc / pp / ld**: all three are filters that read standard input and write standard output, so relinking the frozen objects with 'E' turns them into OS commands — not one line of source changes. What was actually missing was the input-assembly side: bundle / eot / ldin were written as guest versions.\n\n**mk**: reads a build description and executes it. sfs has no timestamps, so there is no staleness check — only ordering. pp / cc / ld were rebuilt inside the guest; byte-identity with the recorded artifacts and the fixed point also hold on the OS. The chain's boundary is settled too: the flat binaries of Stages 1–7 cannot run on the OS, and what can be rebuilt in-guest is Stage 8 onward. The only carry-in is cc8.o.",
+   "new_capabilities": [
+    "Starting programs from programs (spawn; sequential, parent image saved and protected)",
+    "Command execution and I/O rewiring via the shell",
+    "In-guest source editing (ed)",
+    "cc / pp / ld become OS commands (an 'E' relink with zero source changes)",
+    "Executing build descriptions with mk and regenerating the chain in-guest (Stage 8 onward)",
+    "Fixed-point verification on the OS (the rebuilt cc's .o matches the original)"
+   ],
+   "artifacts": [
+    {
+     "file": "ld13.bin",
+     "desc": "New linker generation (generic stub sys_ecall in the 'E' preamble)",
+     "size": 34896,
+     "sha256": "39a49ebe330fda087d597579b86b1b86736993b4ccd2679a83376654de848c1f"
+    },
+    {
+     "file": "kernel13.bin",
+     "desc": "spawn / I/O rewiring / blocking read on fd 0 / boot-line arguments",
+     "size": 19096,
+     "sha256": "63f3217a7fe364ada3a3410a40f5b6268fe1be5893b2441c1b3bae0db3fd1f5d"
+    },
+    {
+     "file": "l13_src_string.o",
+     "desc": "libc generation 13 (pure part; likewise below)",
+     "size": 7156,
+     "sha256": "71ad0ad02741a4e874492ce48ee08def32f4ffadd4a051523fa73c35d767d11b"
+    },
+    {
+     "file": "l13_src_ctype.o",
+     "desc": "",
+     "size": 3984,
+     "sha256": "58ad6ed541e2ba02a6801bb5b78ca2e3bcdd3b091ade6b291c8a00ae94a1392a"
+    },
+    {
+     "file": "l13_src_stdlib.o",
+     "desc": "",
+     "size": 9696,
+     "sha256": "74d02bcdd54bb606c56a38a1c2ae0be25c01f53fa292dc673a3dd43126e7e225"
+    },
+    {
+     "file": "l13_src_morecore.o",
+     "desc": "",
+     "size": 1100,
+     "sha256": "700cd7df10e7960b5ec0c9102f8bead714655718d7a6a08444855c2ed7611fd3"
+    },
+    {
+     "file": "l13_posix_sys.o",
+     "desc": "Environment part (adds the spawn wrapper)",
+     "size": 2760,
+     "sha256": "587dce692339d8137e22e5e491325ffe3b56fa0bb66d950d00c4ec10fa2d5441"
+    },
+    {
+     "file": "l13_posix_morecore.o",
+     "desc": "",
+     "size": 1032,
+     "sha256": "723d425561e9f1913f3683643f463a0ed5d5c782f0f6e2f40f7997ee27c35a52"
+    },
+    {
+     "file": "l13_posix_stdio.o",
+     "desc": "",
+     "size": 10716,
+     "sha256": "4ad1774c2e0414b10b34310a48da3d19f7d2b5c29256488f7094e7e89a3d7ea6"
+    },
+    {
+     "file": "sh13",
+     "desc": "Minimal line-oriented shell",
+     "size": 28796,
+     "sha256": "ca43edda8063856482dd8d5701b42fc15f2dfea032546e5c7df46a459ffec654"
+    },
+    {
+     "file": "ed13",
+     "desc": "ed-like line editor",
+     "size": 39316,
+     "sha256": "f03f51695dd058f2e30c74d363dc16bbe80b225de2af3370300943071322619f"
+    },
+    {
+     "file": "bundle13",
+     "desc": "Guest version of bundle building",
+     "size": 28372,
+     "sha256": "a30785ae7fc224aeb1af8308eff258f08689739113eacc6896187a21dc6dd25e"
+    },
+    {
+     "file": "ldin13",
+     "desc": "Assembles linker input (1 format byte + object stream)",
+     "size": 27916,
+     "sha256": "0f37ca9f97d1ccff2701789e36c8bc56342f2ddc57aa7fde82600f19862fe74b"
+    },
+    {
+     "file": "eot13",
+     "desc": "Filter that copies standard input and appends EOT at the end",
+     "size": 26800,
+     "sha256": "fc587eeebfd7107a53c28bca4809566af16ad476b6a3c0991c6f51cea1fa9079"
+    },
+    {
+     "file": "mk13",
+     "desc": "Executes build descriptions (make equivalent; ordering only)",
+     "size": 33880,
+     "sha256": "37835fcfd8a3fb81737f0a76ef4fb538bcf00a638bff9ea5b720e2a982b6f515"
+    },
+    {
+     "file": "pp13cmd",
+     "desc": "OS command version of pp (pp.o relinked with 'E')",
+     "size": 53564,
+     "sha256": "3ea938f8f32750a144c9ac0fc89839e50a291a3dba54f030ccb3870c618b1063"
+    },
+    {
+     "file": "cc13cmd",
+     "desc": "OS command version of cc (cc10l.o relinked with 'E')",
+     "size": 139584,
+     "sha256": "8573e378f9b788b4c1fcb7f8e591beb290f28e7d3abd9357e8f49dd94c8b96e7"
+    },
+    {
+     "file": "ld13cmd",
+     "desc": "OS command version of ld (ld13.o relinked with 'E')",
+     "size": 35356,
+     "sha256": "a2cdb19955f36c2f922d2e006204b887d17a6db003be3488ceef0322b24048ab"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage013/ld13.sc",
+     "desc": "Source of the new linker generation"
+    },
+    {
+     "path": "stage013/kernel.c",
+     "desc": "New kernel generation (spawn / save and restore)"
+    },
+    {
+     "path": "stage013/sh.c",
+     "desc": "The shell"
+    },
+    {
+     "path": "stage013/ed.c",
+     "desc": "The line editor"
+    },
+    {
+     "path": "stage013/bundle.c",
+     "desc": "Bundle assembly"
+    },
+    {
+     "path": "stage013/ldin.c",
+     "desc": "Linker-input assembly"
+    },
+    {
+     "path": "stage013/eot.c",
+     "desc": "EOT-appending filter"
+    },
+    {
+     "path": "stage013/mk.c",
+     "desc": "Build-description execution"
+    },
+    {
+     "path": "stage013/libc",
+     "desc": "libc generation 13 (adds the spawn wrapper)"
+    }
+   ],
+   "docs": [
+    "docs/stage013-tools.md",
+    "stage013/kernel.md",
+    "stage013/sh.md",
+    "stage013/ed.md",
+    "stage013/mk.md",
+    "stage013/cmds.md"
+   ],
+   "trivia": "cc's own 151636-byte source was compiled inside the guest, and the resulting cc10l.bin was byte-identical to the chain's artifact (3.5 seconds under QEMU). The first mk description written, however, built pp with the newest cc — \"it produces a working binary, but the SHA-256 does not match\". Generation discipline carries over unchanged into in-guest build descriptions.",
+   "coverage": [
+    {
+     "title": "Self-hosted development environment coverage",
+     "note": "the chain from Stage 8 onward can be rebuilt inside the guest OS, byte-identical to the recorded artifacts — the only import is `cc8.o`",
+     "items": [
+      {
+       "label": "spawn",
+       "state": "ok",
+       "note": "sequential: runs a child and waits; nests 8 deep"
+      },
+      {
+       "label": "stdin / stdout rebinding",
+       "state": "ok",
+       "note": "child fd 0 / fd 1 can be bound to sfs files"
+      },
+      {
+       "label": "sh (line shell)",
+       "state": "ok",
+       "note": "builtins exit / echo, < and > redirects"
+      },
+      {
+       "label": "ed (line editor)",
+       "state": "ok",
+       "note": "ed-style commands; substitution is literal match"
+      },
+      {
+       "label": "bundle / eot / ldin",
+       "state": "ok",
+       "note": "guest versions of the host-side input assembly"
+      },
+      {
+       "label": "mk (build driver)",
+       "state": "ok",
+       "note": "ordering, once-only, cycle detection"
+      },
+      {
+       "label": "pp / cc / ld as guest commands",
+       "state": "ok",
+       "note": "the frozen sources run unchanged"
+      },
+      {
+       "label": "guest rebuild == recorded artifacts",
+       "state": "ok",
+       "note": "pp.bin, cc10l.bin, ld13.bin match byte-for-byte"
+      },
+      {
+       "label": "pipes in sh",
+       "state": "gap",
+       "note": "redirects only"
+      },
+      {
+       "label": "shell variables / quoting",
+       "state": "gap",
+       "note": "max 8 words per command"
+      },
+      {
+       "label": "regex in ed",
+       "state": "gap",
+       "note": "substitution is plain-string match"
+      },
+      {
+       "label": "timestamps in mk",
+       "state": "gap",
+       "note": "sfs has no mtimes — mk orders, never compares ages"
+      },
+      {
+       "label": "rebuilding Stage 1-7 in guest",
+       "state": "gap",
+       "note": "flat -bios binaries cannot run on the OS"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "stage014",
+   "num": 14,
+   "name": "external",
+   "title": "external — reading other people's C",
+   "tagline": "The input becomes other people's C. A conformance ledger counts ok / gap / bad and tolerates no silent errors",
+   "phase": "phase-c",
+   "lang_in": "C89 + real-world C idioms (multiple declarators, string literal concatenation, suffixes, nested initializers, etc.)",
+   "lang_impl": "C89 (within what cc10l accepts; the extension stays .sc)",
+   "built_by": "cc.bin (= cc10l; step 1) → itself (fixed point). cc14b is built by cc14a",
+   "summary_md": "Until now, every input was C we wrote ourselves. A toolchain fed only its own code can get away without implementing idioms it never uses. Stage 14 is the entrance to Phase C, switching the input to other people's C. External sources are not imported into the repo; they are fetched and pinned by SHA-256.\n\n**Conformance ledger** (Part 1): 26 probes, each isolating one real-world C idiom, with measured results recorded in a ledger (tests/stage014/ledger.txt) and re-checked on every run. Three states:\n\n- `ok` — compiles and produces the expected output\n- `gap` — cc rejects it with the designated exit code (unimplemented; rejecting is itself correct)\n- `bad` — compiles but the result is wrong (the worst state)\n\nIf the ledger and the measurements disagree, the check fails. It equally catches \"fixed it but the table is stale\" and \"broke it without noticing\". The first measurement came out 13 ok / 12 gap / 1 bad — the sole bad was long long being silently treated as 32 bits.\n\n**cc14a** (Part 2): implements the top-priority multiple declarators (`int a, b;`), adjacent string literal concatenation, integer constant suffixes (U/L), and register, and turns long long from \"accept as 32 bits\" into a rejection. The ledger moved to 17 ok / 9 gap / 0 bad.\n\n**cc14b** (Part 3): nested initializers (`{{1,2},{3,4}}`). nestinit and fptab looked like one cause (ginit1 not accepting `{`), but after the fix the remainder of fptab turned out to be function pointers as struct members. The ledger currently stands at 18 ok / 8 gap / 0 bad.\n\n**cc.bin is not replaced**: pointing it at the newest generation would turn every frozen artifact from Stage 11 onward into different bytes, so the cc14 line is kept under separate names and used only for ledger measurement. Remaining gaps include function-scope static, K&R style, bit-fields, and floating point.",
+   "new_capabilities": [
+    "Making the unimplemented visible and mechanically detecting regressions via the conformance ledger",
+    "Multiple declarators in one declaration (int a, b;) — present in nearly every real C file",
+    "Adjacent string literal concatenation and integer constant suffixes (U / L)",
+    "Nested initializers (static tables become writable)",
+    "Elimination of silent long long miscompilation (0 bad)"
+   ],
+   "artifacts": [
+    {
+     "file": "cc14a0.bin",
+     "desc": "Bootstrap step 1 by cc10l",
+     "size": 140532,
+     "sha256": "d56f7c4f6dff376fd726bd8203aea127c89ff1acaed916f880ef8cd954a96196"
+    },
+    {
+     "file": "cc14a.bin",
+     "desc": "Canonical binary of Part 2 (declarations and lexical width)",
+     "size": 140532,
+     "sha256": "d56f7c4f6dff376fd726bd8203aea127c89ff1acaed916f880ef8cd954a96196"
+    },
+    {
+     "file": "cc14b0.bin",
+     "desc": "Bootstrap step 1 by cc14a",
+     "size": 141560,
+     "sha256": "b47e0f814b84273367a35bf501fa0d8555979561b8b6d042d86612f8a4f9e110"
+    },
+    {
+     "file": "cc14b.bin",
+     "desc": "Canonical binary of Part 3 (nested initializers). The frontline generation used for ledger measurement",
+     "size": 141560,
+     "sha256": "b47e0f814b84273367a35bf501fa0d8555979561b8b6d042d86612f8a4f9e110"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage014/cc14.sc",
+     "desc": "Source of cc14a (copied from cc10l and extended)"
+    },
+    {
+     "path": "stage014/cc14b.sc",
+     "desc": "Source of cc14b (copied from cc14.sc and extended)"
+    },
+    {
+     "path": "tests/stage014/ledger.txt",
+     "desc": "Conformance ledger (one probe per line: name, state, expectation, description)"
+    },
+    {
+     "path": "tests/stage014/probe",
+     "desc": "Probe programs, each isolating one real-world C idiom"
+    }
+   ],
+   "docs": [
+    "docs/stage014-external.md",
+    "stage014/cc14.md",
+    "stage014/cc14b.md"
+   ],
+   "trivia": "During Part 3, the frozen cc14.sc was at first edited in place. On remembering the freeze rule (never rewrite an input whose SHA-256 is recorded), the diff was moved into the new generation cc14b.sc — adding a generation always starts from a copy. Ledger entries are named by symptom, so two entries may share one cause, and one entry may hide two.",
+   "coverage": [
+    {
+     "title": "Conformance ledger — real-world C idioms (tests/stage014/ledger.txt)",
+     "note": "measured against the newest generation; `gap` means the compiler rejects it explicitly (never silently miscompiles)",
+     "items": [
+      {
+       "label": "escapes",
+       "state": "ok",
+       "note": "expected output: AB\\t\\\\\\n"
+      },
+      {
+       "label": "gotoout",
+       "state": "ok",
+       "note": "expected output: 4\\n"
+      },
+      {
+       "label": "ppcond",
+       "state": "ok",
+       "note": "expected output: 7ok\\n"
+      },
+      {
+       "label": "ppelif",
+       "state": "ok",
+       "note": "expected output: c\\n"
+      },
+      {
+       "label": "ptrdiff",
+       "state": "ok",
+       "note": "expected output: abc\\n"
+      },
+      {
+       "label": "sizeofx",
+       "state": "ok",
+       "note": "expected output: 784\\n"
+      },
+      {
+       "label": "strtab",
+       "state": "ok",
+       "note": "expected output: hiyo\\n"
+      },
+      {
+       "label": "switchfall",
+       "state": "ok",
+       "note": "expected output: 139\\n"
+      },
+      {
+       "label": "unionuse",
+       "state": "ok",
+       "note": "expected output: 10\\n"
+      },
+      {
+       "label": "vaforward",
+       "state": "ok",
+       "note": "expected output: 6\\n"
+      },
+      {
+       "label": "unsignedops",
+       "state": "ok",
+       "note": "expected output: abcd\\n"
+      },
+      {
+       "label": "multidim",
+       "state": "ok",
+       "note": "expected output: 6\\n"
+      },
+      {
+       "label": "cvquals",
+       "state": "ok",
+       "note": "expected output: 3\\n"
+      },
+      {
+       "label": "multidecl",
+       "state": "ok",
+       "note": "expected output: 7\\n"
+      },
+      {
+       "label": "strcat_lit",
+       "state": "ok",
+       "note": "expected output: abcd\\n"
+      },
+      {
+       "label": "usuffix",
+       "state": "ok",
+       "note": "expected output: 1y\\n"
+      },
+      {
+       "label": "registerkw",
+       "state": "ok",
+       "note": "expected output: 3\\n"
+      },
+      {
+       "label": "nestinit",
+       "state": "ok",
+       "note": "expected output: 23\\n"
+      },
+      {
+       "label": "staticloc",
+       "state": "ok",
+       "note": "expected output: 3\\n"
+      },
+      {
+       "label": "fptab",
+       "state": "ok",
+       "note": "expected output: 3\\n"
+      },
+      {
+       "label": "selfref",
+       "state": "ok",
+       "note": "expected output: 5\\n"
+      },
+      {
+       "label": "kr_func",
+       "state": "ok",
+       "note": "expected output: 7\\n"
+      },
+      {
+       "label": "bitfield",
+       "state": "gap",
+       "note": "rejected by cc with exit code 1 — ビットフィールド"
+      },
+      {
+       "label": "floatv",
+       "state": "gap",
+       "note": "rejected by cc with exit code 2 — 浮動小数点 (float / double)"
+      },
+      {
+       "label": "emptyproto",
+       "state": "gap",
+       "note": "rejected by cc with exit code 5 — 引数リストが空の宣言へ実引数を渡す"
+      },
+      {
+       "label": "llwidth",
+       "state": "gap",
+       "note": "rejected by cc with exit code 2 — long long (64 bit の型は無い。通さず拒む)"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "commit": "2570ff5a85fcfc9928722472c4ea8ea86c4e5d96"
+}
