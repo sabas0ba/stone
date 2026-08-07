@@ -105,6 +105,35 @@
     </div>
     <p id="pg-none" hidden></p>
   </section>
+
+  <section class="terminal" id="terminal" hidden>
+    <h3>Terminal — a live session on the OS</h3>
+    <p class="pg-note" id="term-note"></p>
+    <div class="term-cols">
+      <div class="term-main">
+        <div class="term-bar">
+          <button id="term-boot">Boot</button>
+          <span class="term-status" id="term-status">not booted</span>
+        </div>
+        <pre class="term-out" id="term-out" aria-live="polite"></pre>
+        <div class="term-in-row">
+          <span class="term-prompt">›</span>
+          <input id="term-in" spellcheck="false" autocomplete="off"
+                 placeholder="type a command and press Enter">
+        </div>
+        <div id="term-files-box" hidden>
+          <div class="pg-out-head">Files in the sfs image after the session — click to download</div>
+          <ul class="term-files" id="term-files"></ul>
+        </div>
+      </div>
+      <aside class="term-side">
+        <div class="cov-title">Guided tour</div>
+        <div class="term-side-note">Each suggested command is pre-typed into the input —
+          just press Enter. Click any step to load it instead.</div>
+        <ol class="term-samples" id="term-samples"></ol>
+      </aside>
+    </div>
+  </section>
 </main>
 
 <dialog id="src-dialog">

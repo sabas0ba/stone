@@ -1,7 +1,7 @@
 // stone — bootstrap の系譜 (メイン)。
 // data/stages.json (世代コンテンツ + ビルド時に付与した成果物メタ) を読み，
 // 世代スライダーと各パネルを描画する。プレイグラウンドは worker.js が実行する。
-import { PIPELINES } from './pipelines.js';
+import { PIPELINES, TERMINALS } from './pipelines.js';
 
 const REPO = 'https://github.com/sabas0ba/stone';
 const $ = (id) => document.getElementById(id);
@@ -18,6 +18,13 @@ let DATA = null;
 let current = 1;
 const worker = new Worker('worker.js', { type: 'module' });
 let runId = 0;
+
+// worker からの応答は実行 id で振り分ける (プレイグラウンドとターミナルが共用)
+const handlers = new Map();
+worker.onmessage = (ev) => {
+    const h = handlers.get(ev.data.id);
+    if (h) h(ev.data);
+};
 
 // ---- 最小 markdown 描画 (見出し・強調・code・リスト・表・整形済み) ----
 const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -250,6 +257,7 @@ function select(num, push = true) {
         `<li><a href="${REPO}/blob/main/${d}" rel="noopener">${d}</a></li>`).join('');
 
     setupPlayground(st);
+    setupTerminal(st);
 }
 
 // ---- カバレッジ (処理系 / OS としての完成度) ----
@@ -310,13 +318,11 @@ async function setupPlayground(st) {
     $('pg-steps').textContent = '';
     const none = $('pg-none');
     if (!pgConfig) {
-        $('pg-body').hidden = true;
-        none.hidden = false;
-        none.textContent = st.num === 12 || st.num === 13
-            ? 'The artifacts of this generation form an OS (a kernel plus ELF executables), not a UART filter, so they are outside the playground\'s scope. See the design documents and artifact downloads instead.'
-            : 'This generation has no playground.';
+        // ターミナルを持つ世代はプレイグラウンド節ごと隠す
+        $('playground').hidden = true;
         return;
     }
+    $('playground').hidden = false;
     $('pg-body').hidden = false;
     none.hidden = true;
     $('pg-note').innerHTML = pgConfig.note ? inlineMd(pgConfig.note) : '';
@@ -341,9 +347,7 @@ $('pg-run').onclick = () => {
         .join(' → ');
     $('pg-result').hidden = true;
 
-    worker.onmessage = (ev) => {
-        const m = ev.data;
-        if (m.id !== id) return;
+    handlers.set(id, (m) => {
         if (m.kind === 'step') {
             const el = $(`pgs-${m.index}`);
             const ok = m.status === 'exit' && m.exitCode === 0;
@@ -390,7 +394,7 @@ $('pg-run').onclick = () => {
                 $('pg-ran').hidden = true;
             }
         }
-    };
+    });
 
     worker.postMessage({
         id,
@@ -400,6 +404,161 @@ $('pg-run').onclick = () => {
         runOutput: Boolean(pgConfig.run),
     });
 };
+
+// ---- ターミナル (OS 世代の対話セッション) ----
+let termConfig = null;
+let termId = null;
+let termSampleIdx = 0;
+
+function setupTerminal(st) {
+    termConfig = TERMINALS[st.id] || null;
+    $('terminal').hidden = !termConfig;
+    if (termId != null) {                       // 前の世代のセッションは破棄
+        worker.postMessage({ kind: 'tkill', id: termId });
+        handlers.delete(termId);
+        termId = null;
+    }
+    if (!termConfig) return;
+    $('term-note').innerHTML = inlineMd(termConfig.note || '');
+    $('term-out').textContent = '';
+    $('term-status').textContent = 'not booted';
+    $('term-status').className = 'term-status';
+    $('term-files-box').hidden = true;
+    termSampleIdx = 0;
+    renderTermSamples();
+    if (termConfig.mode === 'boot') {
+        $('term-boot').textContent = 'Boot';
+        $('term-in').placeholder = 'boot line (program + argv) — press Enter to boot';
+    } else {
+        $('term-boot').textContent = 'Boot';
+        $('term-in').placeholder = 'type a command and press Enter';
+    }
+    loadTermSample();
+}
+
+function renderTermSamples() {
+    $('term-samples').innerHTML = '';
+    termConfig.samples.forEach((s, i) => {
+        const li = document.createElement('li');
+        li.className = i < termSampleIdx ? 'done' : i === termSampleIdx ? 'current' : '';
+        li.innerHTML = `<code>${escapeHtml(s.cmd)}</code>`
+            + `<span class="ts-note">${escapeHtml(s.note || '')}</span>`;
+        li.onclick = () => { termSampleIdx = i; renderTermSamples(); loadTermSample(); };
+        $('term-samples').appendChild(li);
+    });
+}
+
+function loadTermSample() {
+    const s = termConfig.samples[termSampleIdx];
+    if (s) $('term-in').value = s.cmd;
+}
+
+function termPrint(text, cls) {
+    const out = $('term-out');
+    if (cls) {
+        const span = document.createElement('span');
+        span.className = cls;
+        span.textContent = text;
+        out.appendChild(span);
+    } else {
+        out.appendChild(document.createTextNode(text));
+    }
+    out.scrollTop = out.scrollHeight;
+}
+
+const termStatus = (text, cls) => {
+    $('term-status').textContent = text;
+    $('term-status').className = `term-status ${cls || ''}`;
+};
+
+function termBoot(bootLine) {
+    if (termId != null) {
+        worker.postMessage({ kind: 'tkill', id: termId });
+        handlers.delete(termId);
+    }
+    termId = ++runId;
+    $('term-out').textContent = '';
+    $('term-files-box').hidden = true;
+    termStatus('preparing…', 'running');
+    termPrint(`— boot: ${bootLine.trim()} —\n`, 'echo');
+    handlers.set(termId, (m) => {
+        if (m.kind === 'tout') {
+            let s = '';
+            for (let i = 0; i < m.data.length; i++) s += String.fromCharCode(m.data[i]);
+            termPrint(s);
+        } else if (m.kind === 'tstate') {
+            if (m.state === 'running') termStatus('running…', 'running');
+            else if (m.state === 'waiting') termStatus('waiting for input', 'running');
+            else if (m.state === 'exited') {
+                termStatus(`exited with code ${m.exitCode} (${fmtNum(m.icount)} instructions)`);
+                termPrint(`\n— machine halted, exit code ${m.exitCode} —\n`, 'echo');
+            } else {
+                termStatus(m.error || 'crashed', 'err');
+            }
+        } else if (m.kind === 'tfiles') {
+            const names = new Set((termConfig.files || []).map((f) => f.name));
+            $('term-files-box').hidden = false;
+            $('term-files').innerHTML = '';
+            for (const f of m.files) {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.textContent = f.name;
+                a.onclick = () => {
+                    const url = URL.createObjectURL(new Blob([f.data]));
+                    const dl = document.createElement('a');
+                    dl.href = url;
+                    dl.download = f.name;
+                    dl.click();
+                    URL.revokeObjectURL(url);
+                };
+                li.appendChild(a);
+                li.insertAdjacentHTML('beforeend',
+                    `<span class="tf-size">${fmtSize(f.data.length)}</span>`
+                    + (names.has(f.name) ? '' : '<span class="tf-new">new</span>'));
+                $('term-files').appendChild(li);
+            }
+        }
+    });
+    worker.postMessage({
+        kind: 'boot',
+        id: termId,
+        kernel: termConfig.kernel,
+        files: termConfig.files,
+        imgSize: termConfig.imgSize,
+        bootLine,
+    });
+}
+
+$('term-boot').onclick = () => {
+    if (!termConfig) return;
+    termBoot(termConfig.mode === 'boot'
+        ? `${$('term-in').value.trim() || termConfig.samples[0].cmd}\n`
+        : termConfig.bootLine);
+    $('term-in').focus();
+};
+
+$('term-in').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !termConfig) return;
+    const line = $('term-in').value;
+    if (termConfig.mode === 'boot') {
+        termBoot(`${line.trim() || 'hello'}\n`);
+    } else {
+        if (termId == null) { termBoot(termConfig.bootLine); }
+        termPrint(`${line}\n`, 'echo');
+        const bytes = new Uint8Array([...`${line}\n`].map((c) => c.charCodeAt(0) & 0xff));
+        worker.postMessage({ kind: 'tin', id: termId, data: bytes });
+    }
+    // 送った行が案内どおりなら次の手順を先置きする
+    const cur = termConfig.samples[termSampleIdx];
+    if (cur && line.trim() === cur.cmd) {
+        termSampleIdx++;
+        renderTermSamples();
+        loadTermSample();
+        if (!termConfig.samples[termSampleIdx]) $('term-in').value = '';
+    } else {
+        $('term-in').value = '';
+    }
+});
 
 $('src-close').onclick = () => $('src-dialog').close();
 $('src-dialog').onclick = (e) => {

@@ -28,8 +28,8 @@ dist=tmp/site
 rm -rf "$dist"
 mkdir -p "$dist/data" "$dist/assets/bin" "$dist/files"
 
-cp web/index.html web/style.css web/app.js web/rv32.js web/worker.js \
-   web/pipelines.js "$dist/"
+cp web/index.html web/style.css web/app.js web/rv32.js web/sfs.js \
+   web/worker.js web/pipelines.js "$dist/"
 touch "$dist/.nojekyll"
 
 # stages.json: コンテンツに成果物のサイズと SHA-256 を付与する。

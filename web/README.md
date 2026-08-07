@@ -8,17 +8,25 @@
 その場で実行できる。hex を打てば hex0 が変換し，C を書けば
 ブートストラップされた本物の cc がコンパイルする。
 
+Stage 12 / 13 には**ターミナル**があり，自作 OS そのもの (kernel + sfs) を
+エミュレータで起動して対話できる。シェル・ed・cc / ld / pp が OS の上で動き，
+案内 (guided tour) に従って Enter を押すだけで「エディタで書く → ゲスト内で
+コンパイル → 実行 → **cc が自分自身を作り直す**」まで体験できる。
+セッション終了後は sfs 内のファイル (自分で作った cc10l.bin を含む) を
+ダウンロードできる。
+
 ## 構成
 
 | ファイル | 内容 |
 |---|---|
-| rv32.js | RV32IM エミュレータ (UART + test finisher。docs/plan.md 3 章の実行モデル) |
-| worker.js | プレイグラウンドの実行係 (Web Worker)。パイプラインを順に実行する |
-| pipelines.js | 各世代のパイプライン定義 (tools/build.sh・tests/ と同じ手順の再現) |
-| app.js / index.html / style.css | UI 本体 (世代スライダー・要約・成果物・チャート) |
+| rv32.js | RV32IM エミュレータ。UART + test finisher (docs/plan.md 3 章) に加え，M/U 特権・CSR・mret・ecall トラップ (ld12/ld13 の 'K' 前置部と kernel が使う範囲。docs/stage012-os.md 5 章)。入力が尽きると停止し，足すと続きから走る (対話実行) |
+| sfs.js | sfs イメージの構築・読出し (tools/sfs.sh の JS 版。docs/stage012-os.md 4 章) |
+| worker.js | 実行係 (Web Worker)。パイプラインと OS セッション (ターミナル) の両方 |
+| pipelines.js | 各世代のパイプライン定義とターミナル定義 (tools/build.sh・tests/ と同じ手順の再現) |
+| app.js / index.html / style.css | UI 本体 (世代スライダー・要約・成果物・チャート・ターミナル) |
 | data/stages-content.json | 世代コンテンツ (仕様要約・新機能・成果物説明)。設計文書からの要約 |
 | build-site.sh | サイト組立て。tmp/build/ の成果物にサイズ / SHA-256 を付与し tmp/site/ へ集める |
-| test-emu.mjs | エミュレータの検証 (node)。チェーン成果物の実行出力が QEMU とビット一致すること |
+| test-emu.mjs | エミュレータの検証 (node)。チェーン成果物の実行出力が QEMU とビット一致すること。OS の起動・spawn の逐次性・ゲスト内ビルド・自己再生成 (tests/stage012・013 と同じ素材・期待値) を含む |
 
 依存は無い (フレームワーク・ビルドツール・外部 CDN を使わない)。
 エミュレータは**展示専用**であり，ビルド経路には一切使わない。
@@ -28,7 +36,7 @@
 
 ```
 sh tools/build.sh all          # チェーンの成果物を用意する (コンテナが要る)
-node web/test-emu.mjs          # エミュレータの検証 (13 検査)
+node web/test-emu.mjs          # エミュレータの検証 (18 検査)
 sh web/build-site.sh           # tmp/site/ へ組み立てる
 python3 -m http.server -d tmp/site 8000
 ```
@@ -49,10 +57,12 @@ python3 -m http.server -d tmp/site 8000
   最小の実行モデルなので，RV32IM の解釈系 1 枚 (約 250 行) で足りる。
   外部のエミュレータを持ち込むより小さく，依存も増えない
 - **正しさの根拠**: test-emu.mjs が「チェーンの実成果物を実行した出力が
-  QEMU での出力とビット一致すること」を固定する (固定点 occ(occ.sc) == occ.bin や
-  cc8 の自己コンパイルまで走らせる)。pages.yml はこれを通らないと配信しない
-- **Stage 12 / 13 はプレイグラウンド対象外**: 成果物が OS (カーネル + ELF 実行
-  形式 + sfs) でありフィルタ型ではない。対応するにはエミュレータに M/U モード・
-  CSR・PMP の実装が要る。将来の拡張とする
+  QEMU での出力とビット一致すること」を固定する (固定点 occ(occ.sc) == occ.bin，
+  cc8 の自己コンパイル，OS 上の自己再生成 cc10l.bin まで走らせる)。
+  pages.yml はこれを通らないと配信しない
+- **PMP は受けるが強制しない**: カーネルは PMP を設定するが，エミュレータは
+  CSR 書込みとして受けるだけで保護は行わない (展示ではメモリ保護の失敗を
+  再現する必要がなく，U モード全許可で十分)。ecall・mret・CSR・特権遷移は
+  実装している
 - **世代コンテンツは静的 JSON**: 文書の要約は人が書く (自動抽出しない)。
   サイズ・SHA-256 だけを build-site.sh がビルド時に実測して付与する
