@@ -8,10 +8,10 @@ const $ = (id) => document.getElementById(id);
 
 // Stage 番号 → Phase 帯 (docs/plan.md, docs/roadmap.md の区分)
 const PHASES = [
-    { from: 1, to: 7, label: '前半計画 (seed → セルフホスト → 最適化)', cls: 'seed', color: 'var(--phase-seed)' },
-    { from: 8, to: 10, label: 'Phase A: 言語と道具立て', cls: 'a', color: 'var(--phase-a)' },
-    { from: 11, to: 13, label: 'Phase B: 自立した開発環境', cls: 'b', color: 'var(--phase-b)' },
-    { from: 14, to: 14, label: 'Phase C: 外部資産', cls: 'c', color: 'var(--phase-c)' },
+    { from: 1, to: 7, label: 'Foundations (seed → self-host → optimizer)', cls: 'seed', color: 'var(--phase-seed)' },
+    { from: 8, to: 10, label: 'Phase A: language & toolchain', cls: 'a', color: 'var(--phase-a)' },
+    { from: 11, to: 13, label: 'Phase B: self-sufficient environment', cls: 'b', color: 'var(--phase-b)' },
+    { from: 14, to: 14, label: 'Phase C: external code', cls: 'c', color: 'var(--phase-c)' },
 ];
 
 let DATA = null;
@@ -101,7 +101,7 @@ function hexdump(bytes, limit = 512) {
         const asc = row.map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '·')).join('');
         lines.push(`${o.toString(16).padStart(6, '0')}  ${hex.padEnd(47)}  ${asc}`);
     }
-    if (bytes.length > limit) lines.push(`… (全 ${fmtNum(bytes.length)} バイト)`);
+    if (bytes.length > limit) lines.push(`… (${fmtNum(bytes.length)} bytes total)`);
     return lines.join('\n');
 }
 
@@ -131,17 +131,36 @@ function buildTimeline() {
         b.className = 'tl-node';
         b.id = `node-${st.num}`;
         b.innerHTML = `${st.num}<small>${escapeHtml(st.name)}</small>`;
-        b.onclick = () => select(st.num);
+        b.onclick = () => { stopAuto(); select(st.num); };
         nodes.appendChild(b);
     }
-    $('tl-range').oninput = (e) => select(Number(e.target.value));
-    $('tl-prev').onclick = () => select(Math.max(1, current - 1));
-    $('tl-next').onclick = () => select(Math.min(14, current + 1));
+    $('tl-range').oninput = (e) => { stopAuto(); select(Number(e.target.value)); };
+    $('tl-prev').onclick = () => { stopAuto(); select(Math.max(1, current - 1)); };
+    $('tl-next').onclick = () => { stopAuto(); select(Math.min(14, current + 1)); };
+    $('tl-play').onclick = () => (autoTimer ? stopAuto() : startAuto());
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
-        if (e.key === 'ArrowLeft') select(Math.max(1, current - 1));
-        if (e.key === 'ArrowRight') select(Math.min(14, current + 1));
+        if (e.key === 'ArrowLeft') { stopAuto(); select(Math.max(1, current - 1)); }
+        if (e.key === 'ArrowRight') { stopAuto(); select(Math.min(14, current + 1)); }
     });
+}
+
+// ---- 自動スクロール (世代を一定間隔で進める) ----
+let autoTimer = null;
+
+function startAuto() {
+    autoTimer = setInterval(() => select(current >= 14 ? 1 : current + 1), 7000);
+    $('tl-play').classList.add('playing');
+    $('tl-play').textContent = '⏸ auto';
+    select(current >= 14 ? 1 : current + 1);
+}
+
+function stopAuto() {
+    if (!autoTimer) return;
+    clearInterval(autoTimer);
+    autoTimer = null;
+    $('tl-play').classList.remove('playing');
+    $('tl-play').textContent = '▶ auto';
 }
 
 // ---- 推移チャート (主成果物のサイズ，対数目盛) ----
@@ -153,7 +172,7 @@ function buildChart() {
     const sizes = mains.map((a) => a.size || 1);
     const maxLog = Math.max(...sizes.map((v) => Math.log10(v)));
     const W = 1040, H = 130, bw = W / stages.length;
-    let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="成果物サイズの推移">`;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Artifact size over generations">`;
     stages.forEach((st, i) => {
         const h = Math.max(4, (Math.log10(sizes[i]) / maxLog) * 84);
         const x = i * bw + 4, y = 104 - h;
@@ -165,7 +184,7 @@ function buildChart() {
     svg += '</svg>';
     $('evo-chart').innerHTML = svg;
     $('evo-chart').querySelectorAll('.evo-bar').forEach((r) => {
-        r.addEventListener('click', () => select(Number(r.dataset.num)));
+        r.addEventListener('click', () => { stopAuto(); select(Number(r.dataset.num)); });
     });
 }
 
@@ -185,9 +204,9 @@ function select(num, push = true) {
     $('st-title').textContent = st.title;
     $('st-tagline').textContent = st.tagline;
     $('st-meta').innerHTML = [
-        ['読む言語', st.lang_in],
-        ['実装言語', st.lang_impl],
-        ['ビルド', st.built_by],
+        ['reads', st.lang_in],
+        ['written in', st.lang_impl],
+        ['built by', st.built_by],
     ].map(([k, v]) => `<span>${k}: <b>${escapeHtml(v)}</b></span>`).join('');
 
     $('st-summary').innerHTML = renderMd(st.summary_md);
@@ -195,6 +214,8 @@ function select(num, push = true) {
         .map((c) => `<li>${inlineMd(c)}</li>`).join('');
     $('st-trivia-box').hidden = !st.trivia;
     if (st.trivia) $('st-trivia').innerHTML = inlineMd(st.trivia);
+
+    renderCoverage(st);
 
     $('st-artifacts').innerHTML = st.artifacts.map((a) => `
         <tr><td class="af-file"><a href="assets/bin/${a.file}" download>${a.file}</a></td>
@@ -231,9 +252,40 @@ function select(num, push = true) {
     setupPlayground(st);
 }
 
+// ---- カバレッジ (処理系 / OS としての完成度) ----
+// stage.coverage: [{title, note?, items: [{label, state: ok|gap|bad, note?}]}]
+function renderCoverage(st) {
+    const box = $('st-coverage-box');
+    const groups = st.coverage || [];
+    box.hidden = groups.length === 0;
+    if (!groups.length) return;
+    $('st-coverage').innerHTML = groups.map((g) => {
+        const n = { ok: 0, gap: 0, bad: 0 };
+        for (const it of g.items) n[it.state] = (n[it.state] || 0) + 1;
+        const total = g.items.length;
+        const bar = ['ok', 'gap', 'bad']
+            .filter((k) => n[k])
+            .map((k) => `<span class="${k}" style="width:${(n[k] / total) * 100}%"></span>`)
+            .join('');
+        const stats = [
+            n.ok ? `<span class="ok">${n.ok} ok</span>` : '',
+            n.gap ? `<span class="gap">${n.gap} gap</span>` : '',
+            n.bad ? `<span class="bad">${n.bad} bad</span>` : '',
+        ].filter(Boolean).join(' / ');
+        const chips = g.items.map((it) =>
+            `<span class="cov-chip ${it.state}"${it.note ? ` title="${escapeHtml(it.note)}"` : ''}>${escapeHtml(it.label)}</span>`).join('');
+        return `<div class="cov-group">
+            <div class="cov-title">${inlineMd(g.title)}</div>
+            <div class="cov-stats">${stats} — ${total} items${g.note ? ` · ${inlineMd(g.note)}` : ''}</div>
+            <div class="cov-bar">${bar}</div>
+            <div class="cov-chips">${chips}</div>
+        </div>`;
+    }).join('');
+}
+
 async function showSource(path) {
     $('src-name').textContent = path;
-    $('src-body').textContent = '読み込み中…';
+    $('src-body').textContent = 'Loading…';
     $('src-dialog').showModal();
     try {
         const res = await fetch(`files/${path}`);
@@ -241,8 +293,8 @@ async function showSource(path) {
             $('src-body').textContent = await res.text();
         } else {
             // ディレクトリ等はサイト内で開けない。リポジトリへ誘導する
-            $('src-body').innerHTML = 'このパスはサイト内で開けない。'
-                + `<a href="${REPO}/tree/main/${escapeHtml(path)}" rel="noopener">リポジトリで見る</a>`;
+            $('src-body').innerHTML = 'This path cannot be opened on the site. '
+                + `<a href="${REPO}/tree/main/${escapeHtml(path)}" rel="noopener">View it in the repository</a>`;
         }
     } catch (e) {
         $('src-body').textContent = String(e);
@@ -261,8 +313,8 @@ async function setupPlayground(st) {
         $('pg-body').hidden = true;
         none.hidden = false;
         none.textContent = st.num === 12 || st.num === 13
-            ? 'この世代の成果物は OS (カーネルと ELF 実行形式) であり，UART フィルタ型ではないためプレイグラウンドの対象外。設計文書と成果物のダウンロードを参照。'
-            : 'この世代にはプレイグラウンドが無い。';
+            ? 'The artifacts of this generation form an OS (a kernel plus ELF executables), not a UART filter, so they are outside the playground\'s scope. See the design documents and artifact downloads instead.'
+            : 'This generation has no playground.';
         return;
     }
     $('pg-body').hidden = false;
@@ -271,7 +323,7 @@ async function setupPlayground(st) {
     $('pg-input-label').textContent = pgConfig.inputLabel || '';
     $('pg-stdin-box').hidden = !pgConfig.run;
     $('pg-stdin').value = pgConfig.stdin || '';
-    $('pg-input').value = '読み込み中…';
+    $('pg-input').value = 'Loading…';
     try {
         const res = await fetch(pgConfig.sample);
         $('pg-input').value = res.ok ? await res.text() : '';
@@ -297,19 +349,19 @@ $('pg-run').onclick = () => {
             const ok = m.status === 'exit' && m.exitCode === 0;
             el.className = ok ? 'st-ok' : 'st-err';
             el.textContent = `${pgConfig.steps[m.index].name}`
-                + (ok ? ` ✓ (${fmtNum(m.icount)} 命令, ${m.ms.toFixed(0)}ms)`
-                    : ` ✗ (終了コード ${m.exitCode})`);
+                + (ok ? ` ✓ (${fmtNum(m.icount)} instructions, ${m.ms.toFixed(0)}ms)`
+                    : ` ✗ (exit code ${m.exitCode})`);
             return;
         }
         btn.disabled = false;
         $('pg-result').hidden = false;
         if (!m.ok) {
             $('pg-out-head').innerHTML = m.error
-                ? `<span class="err">エラー: ${escapeHtml(m.error)}</span>`
-                : `<span class="err">失敗: ${pgConfig.steps[m.failedStep].name} が終了コード ${m.exitCode}`
-                  + `${m.status === 'budget' ? ' (命令数上限。終端の付け忘れ?)' : ''}</span>`;
+                ? `<span class="err">Error: ${escapeHtml(m.error)}</span>`
+                : `<span class="err">Failed: ${pgConfig.steps[m.failedStep].name} exited with code ${m.exitCode}`
+                  + `${m.status === 'budget' ? ' (instruction budget exhausted — missing terminator?)' : ''}</span>`;
             $('pg-out').textContent = m.output && m.output.length
-                ? new TextDecoder().decode(m.output) : '(出力なし)';
+                ? new TextDecoder().decode(m.output) : '(no output)';
             $('pg-ran').hidden = true;
             return;
         }
@@ -317,21 +369,21 @@ $('pg-run').onclick = () => {
         if (pgConfig.output === 'text') {
             const stripped = out.length && out[out.length - 1] === 4
                 ? out.slice(0, -1) : out;
-            $('pg-out-head').innerHTML = `<span class="ok">✓</span> 出力 (テキスト, ${fmtNum(stripped.length)} バイト)`;
+            $('pg-out-head').innerHTML = `<span class="ok">✓</span> output (text, ${fmtNum(stripped.length)} bytes)`;
             $('pg-out').textContent = new TextDecoder().decode(stripped);
             $('pg-ran').hidden = true;
         } else {
-            $('pg-out-head').innerHTML = `<span class="ok">✓</span> 出力バイナリ (${fmtNum(out.length)} バイト)`;
+            $('pg-out-head').innerHTML = `<span class="ok">✓</span> output binary (${fmtNum(out.length)} bytes)`;
             $('pg-out').textContent = hexdump(out);
             if (m.ran) {
                 $('pg-ran').hidden = false;
                 const r = m.ran;
                 const okRun = r.status === 'exit';
                 $('pg-ran-head').innerHTML = (okRun
-                    ? `<span class="${r.exitCode === 0 ? 'ok' : 'err'}">▶ 実行: 終了コード ${r.exitCode}</span>`
-                    : `<span class="err">▶ 実行: ${r.status}</span>`)
-                    + ` (${fmtNum(r.icount)} 命令, ${r.ms.toFixed(0)}ms)`;
-                $('pg-ran-out').textContent = r.output.length === 0 ? '(出力なし)'
+                    ? `<span class="${r.exitCode === 0 ? 'ok' : 'err'}">▶ run: exit code ${r.exitCode}</span>`
+                    : `<span class="err">▶ run: ${r.status}</span>`)
+                    + ` (${fmtNum(r.icount)} instructions, ${r.ms.toFixed(0)}ms)`;
+                $('pg-ran-out').textContent = r.output.length === 0 ? '(no output)'
                     : looksText(r.output) ? new TextDecoder().decode(r.output)
                         : hexdump(r.output);
             } else {
@@ -360,7 +412,7 @@ async function main() {
     DATA = await res.json();
     $('repo-link').href = REPO;
     if (DATA.commit) {
-        $('build-info').textContent = `成果物: ${DATA.commit.slice(0, 9)} のチェーンから生成`;
+        $('build-info').textContent = `artifacts built from chain @ ${DATA.commit.slice(0, 9)}`;
     }
     buildTimeline();
     buildChart();

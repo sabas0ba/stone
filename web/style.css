@@ -106,6 +106,32 @@ h3 {
     cursor: pointer;
 }
 .tl-slider button:hover { border-color: var(--accent); }
+#tl-play.playing { border-color: var(--accent); color: var(--accent); }
+
+/* ---- カバレッジ ---- */
+.cov-group { margin: 0.8em 0 1.2em; }
+.cov-title { font-size: 0.85em; color: var(--fg); margin-bottom: 2px; }
+.cov-stats { font-size: 0.78em; color: var(--fg-dim); margin-bottom: 6px; }
+.cov-stats .ok { color: var(--ok); }
+.cov-stats .gap { color: var(--accent); }
+.cov-stats .bad { color: var(--err); }
+.cov-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.cov-chip {
+    font-family: var(--mono);
+    font-size: 0.72em;
+    border-radius: 5px;
+    padding: 1px 8px;
+    border: 1px solid var(--line);
+    color: var(--fg-dim);
+    cursor: default;
+}
+.cov-chip.ok { border-color: #3d5c3d; background: #20301f; color: var(--ok); }
+.cov-chip.gap { border-color: #665426; background: #33290f; color: var(--accent); }
+.cov-chip.bad { border-color: #663030; background: #331717; color: var(--err); }
+.cov-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 4px 0 8px; background: var(--bg3); }
+.cov-bar .ok { background: var(--ok); }
+.cov-bar .gap { background: var(--accent); }
+.cov-bar .bad { background: var(--err); }
 
 /* ---- Stage 見出し ---- */
 .stage-head {

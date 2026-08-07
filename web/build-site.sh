@@ -32,12 +32,34 @@ cp web/index.html web/style.css web/app.js web/rv32.js web/worker.js \
    web/pipelines.js "$dist/"
 touch "$dist/.nojekyll"
 
-# stages.json: コンテンツに成果物のサイズと SHA-256 を付与する
+# stages.json: コンテンツに成果物のサイズと SHA-256 を付与する。
+# stage014 には適合台帳 (tests/stage014/ledger.txt) の実データを
+# カバレッジとして取り込む (台帳の書式は同ファイル冒頭)
 python3 - "$dist" <<'EOF'
 import hashlib, json, os, subprocess, sys
 
 dist = sys.argv[1]
 data = json.load(open('web/data/stages-content.json'))
+
+items = []
+for ln in open('tests/stage014/ledger.txt'):
+    ln = ln.rstrip('\n')
+    if not ln or ln.startswith('#'):
+        continue
+    parts = ln.split(None, 3)         # 説明欄は無い行もある
+    name, state, expect = parts[:3]
+    desc = parts[3] if len(parts) > 3 else ''
+    note = (f'expected output: {expect}' if state == 'ok'
+            else f'rejected by cc with exit code {expect}' if state == 'gap'
+            else f'WRONG output: {expect}') + (f' — {desc}' if desc else '')
+    items.append({'label': name, 'state': state, 'note': note})
+st14 = data['stages'][13]
+st14.setdefault('coverage', []).insert(0, {
+    'title': 'Conformance ledger — real-world C idioms (tests/stage014/ledger.txt)',
+    'note': 'measured against the newest generation; `gap` means the compiler '
+            'rejects it explicitly (never silently miscompiles)',
+    'items': items,
+})
 
 def artifact_path(name):
     # hex0.bin だけは git 管理の seed。他は tmp/build の生成物
