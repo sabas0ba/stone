@@ -49,36 +49,8 @@
     </div>
   </section>
 
-  <div class="cols">
-    <article class="col-main">
-      <h3>Specification digest</h3>
-      <div class="md" id="st-summary"></div>
-      <h3>What this generation made possible</h3>
-      <ul class="caps" id="st-caps"></ul>
-      <div id="st-coverage-box" hidden>
-        <h3>Coverage — how complete is it?</h3>
-        <div id="st-coverage"></div>
-      </div>
-      <div id="st-trivia-box" hidden>
-        <h3>Field notes</h3>
-        <p class="trivia" id="st-trivia"></p>
-      </div>
-    </article>
-
-    <aside class="col-side">
-      <h3>Artifacts</h3>
-      <table class="artifacts" id="st-artifacts"></table>
-      <h3>Sources (frozen)</h3>
-      <ul class="sources" id="st-sources"></ul>
-      <h3>Design documents</h3>
-      <ul class="docs" id="st-docs"></ul>
-    </aside>
-  </div>
-
-  <section class="evolution">
-    <h3>Artifact size over generations</h3>
-    <div id="evo-chart"></div>
-  </section>
+  <div class="md lede-md" id="st-lede"></div>
+  <div class="cap-chips" id="st-caps"></div>
 
   <section class="playground" id="playground">
     <h3>Playground</h3>
@@ -133,6 +105,41 @@
         <ol class="term-samples" id="term-samples"></ol>
       </aside>
     </div>
+  </section>
+
+  <section class="accordions">
+    <details class="acc" id="acc-spec">
+      <summary>Specification digest — the full picture</summary>
+      <div class="md" id="st-summary"></div>
+    </details>
+    <details class="acc" id="acc-cov">
+      <summary id="acc-cov-sum">Coverage</summary>
+      <div id="st-coverage"></div>
+    </details>
+    <details class="acc" id="acc-art">
+      <summary id="acc-art-sum">Artifacts, sources &amp; design documents</summary>
+      <div class="acc-art-cols">
+        <div>
+          <h4>Artifacts</h4>
+          <table class="artifacts" id="st-artifacts"></table>
+        </div>
+        <div>
+          <h4>Sources (frozen)</h4>
+          <ul class="sources" id="st-sources"></ul>
+          <h4>Design documents</h4>
+          <ul class="docs" id="st-docs"></ul>
+        </div>
+      </div>
+    </details>
+    <details class="acc" id="acc-trivia">
+      <summary>Field notes — how it actually went</summary>
+      <p class="trivia" id="st-trivia"></p>
+    </details>
+  </section>
+
+  <section class="evolution">
+    <h3>Artifact size over generations</h3>
+    <div id="evo-chart"></div>
   </section>
 </main>
 
