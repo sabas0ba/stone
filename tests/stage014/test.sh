@@ -17,7 +17,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s14
 
-cc=tmp/build/cc14e.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
+cc=tmp/build/cc14f.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage014/probe
@@ -60,24 +60,25 @@ section "ビルド再現と固定点"
 ok=0
 for pair in cc14a.bin:stage014/cc14.md cc14b.bin:stage014/cc14b.md \
         cc14c.bin:stage014/cc14c.md cc14d.bin:stage014/cc14d.md \
-        cc14e.bin:stage014/cc14e.md; do
+        cc14e.bin:stage014/cc14e.md cc14f.bin:stage014/cc14f.md \
+        ld14.bin:stage014/ld14.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc14a..cc14e の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc14a..cc14f と ld14 の SHA-256 が各 .md 記載値と一致"
 
 # 世代を触ったら必ず固定点を見る (docs/dev-notes.md 3.1)
-{ cat stage014/cc14e.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc14e.bin > tmp/s14/b3.o \
+{ cat stage014/cc14f.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc14f.bin > tmp/s14/b3.o \
     && { cat tmp/s14/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s14/b3.bin \
-    && cmp -s tmp/s14/b3.bin tmp/build/cc14e.bin
-report $? "fixpoint: cc14e が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s14/b3.bin tmp/build/cc14f.bin
+report $? "fixpoint: cc14f が自分自身を再生成する (B2 == B3)"
 
-# 足したのは構文と字句の幅だけで，コード生成には触れていない。
-# 既存のソースを cc10l と同じオブジェクトへコンパイルできることで示す
+# コード生成を触ったのは 2048 バイト以上のフレームの経路だけで，
+# 既存のソースには影響しない。cc10l と同じオブジェクトになることで示す
 ok=0
 for n in sh ed mk; do
     sh tools/bundle.sh stage013/libc/include/*.h "stage013/$n.c" 2> /dev/null \
@@ -86,7 +87,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s14/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc14e が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc14f が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合"
 
@@ -146,7 +147,7 @@ build14() {
              tmp/build/l14_src_stdlib.o tmp/build/l14_posix_sys.o \
              tmp/build/l14_posix_morecore.o tmp/build/l14_posix_stdio.o \
              tmp/build/l14_posix_assert.o; printf '\0'; } \
-            | sh tools/env.sh qemu tmp/build/ld13.bin > "tmp/s14/$1"
+            | sh tools/env.sh qemu tmp/build/ld14.bin > "tmp/s14/$1"
 }
 
 build14 lib14
@@ -172,5 +173,70 @@ runos14 abrt
 rc=$?
 [ "$rc" -eq 1 ] && diff -q tmp/s14/abrt.out tests/stage014/expected/abrt.txt > /dev/null
 report $? "run: assert の失敗が式の文字列を出して exit(1) する"
+
+# ---------------------------------------------------------------------------
+section "第 8 部: 外部ソース (bzip2) のビルドと実走"
+
+# 素材があるときだけ走る (docs/stage014-external.md 2.2)。無ければ理由を
+# 出して飛ばす。素材の有無で結果が変わる検査を必須にすると環境の差で
+# チェーン全体が赤くなるためである
+bzdir=docs/external/bzip2
+if [ ! -d "$bzdir" ]; then
+    echo "   skip: $bzdir が無い (sh tools/fetch.sh bzip2 で取得できる)"
+else
+    inc=stage014/libc/include
+
+    # libbz2 の 7 ファイルを BZ_NO_STDIO でコンパイルする。ソースは無改変。
+    # 設定マクロは repo 側の包み (tmp に生成) が与える
+    bzok=0
+    for f in blocksort huffman crctable randtable compress decompress bzlib; do
+        printf '#define BZ_NO_STDIO 1\n#include "%s.c"\n' "$f" > "tmp/s14/bz_$f.c"
+        sh tools/bundle.sh "$inc/stddef.h" "$inc/stdlib.h" \
+                "$bzdir/bzlib.h" "$bzdir/bzlib_private.h" "$bzdir/$f.c" \
+                "tmp/s14/bz_$f.c" 2> /dev/null \
+            | sh tools/env.sh qemu "$pp" 2> /dev/null \
+            | sh tools/env.sh qemu "$cc" > "tmp/s14/bz_$f.o" 2> /dev/null || bzok=1
+    done
+    report $bzok "build: libbz2 (1.0.8) の 7 ファイルが無改変でコンパイルできる"
+
+    # 検査ドライバ (圧縮 -> 伸長 -> 一致) を組み，ld14 でリンクする
+    sh tools/bundle.sh "$inc/stddef.h" "$inc/stdarg.h" "$inc/stdio.h" \
+            "$inc/stdlib.h" "$bzdir/bzlib.h" tests/stage014/user/bzt.c 2> /dev/null \
+        | sh tools/env.sh qemu "$pp" 2> /dev/null \
+        | sh tools/env.sh qemu "$cc" > tmp/s14/bzt.o 2> /dev/null \
+        && { printf 'E'; cat tmp/s14/bzt.o \
+             tmp/s14/bz_blocksort.o tmp/s14/bz_huffman.o tmp/s14/bz_crctable.o \
+             tmp/s14/bz_randtable.o tmp/s14/bz_compress.o tmp/s14/bz_decompress.o \
+             tmp/s14/bz_bzlib.o \
+             tmp/build/l14_src_string.o tmp/build/l14_src_stdlib.o \
+             tmp/build/l14_posix_sys.o tmp/build/l14_posix_morecore.o \
+             tmp/build/l14_posix_stdio.o tmp/build/l14_posix_assert.o; \
+             printf '\0'; } \
+            | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/s14/bzt
+    report $? "link: 検査ドライバ + libbz2 + libc14 (ld14。31 バイトの記号名)"
+
+    # kernel13 の上で走らせ，圧縮と往復一致の出力を照合する
+    rm -rf tmp/s14/root
+    mkdir -p tmp/s14/root
+    cp tmp/s14/bzt tmp/s14/root/bzt
+    printf 'bzt\n' > tmp/s14/root/boot
+    runos14 bzt
+    rc=$?
+    [ "$rc" -eq 0 ] && diff -q tmp/s14/bzt.out tests/stage014/expected/bzt.txt > /dev/null
+    report $? "run: 4096 バイトを圧縮 2555 バイト，伸長して往復一致"
+
+    # 圧縮出力が正規の bzip2 ストリームであること (形式の相互運用)。
+    # ホストに bzip2 が無ければ飛ばす
+    if command -v bzip2 > /dev/null 2>&1; then
+        dd if=tmp/s14/ram of=tmp/s14/fs_after.img bs=64K iflag=skip_bytes \
+            skip="$SFSOFF" count=64 2> /dev/null
+        rm -rf tmp/s14/after
+        sh tools/sfs.sh unpack tmp/s14/fs_after.img tmp/s14/after > /dev/null \
+            && bzip2 -d < tmp/s14/after/out.bz2 | cmp -s - tmp/s14/after/src.bin
+        report $? "interop: 圧縮出力をホストの bzip2 -d が伸長し原文と一致"
+    else
+        echo "   skip: ホストに bzip2 が無い (相互運用の検査)"
+    fi
+fi
 
 summary

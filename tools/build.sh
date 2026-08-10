@@ -391,13 +391,30 @@ build_stage014() {
     { cat tmp/build/cc14e.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14e.bin
     echo "built tmp/build/cc14e.bin" >&2
-    # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14e で
+    # 第 8 部 (外部ソース bzip2)。前段は cc14e
+    { cat stage014/cc14f.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14e.bin > tmp/build/cc14f0.o
+    { cat tmp/build/cc14f0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14f0.bin
+    echo "built tmp/build/cc14f0.bin (bootstrap)" >&2
+    { cat stage014/cc14f.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14f0.bin > tmp/build/cc14f.o
+    { cat tmp/build/cc14f.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14f.bin
+    echo "built tmp/build/cc14f.bin" >&2
+    # リンカの第 14 世代 (シンボル名 31 バイト)。ld13 と同じ道具立てで作る
+    { cat stage014/ld14.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/ld14.o
+    { cat tmp/build/ld14.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld14.bin
+    echo "built tmp/build/ld14.bin" >&2
+    # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14f で
     # コンパイルする (外部ソースと同じ経路に載せるため)
     for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio posix/assert; do
         n=$(echo "$f" | tr / _)
         sh tools/bundle.sh stage014/libc/include/*.h "stage014/libc/$f.c" \
             | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l14_$n.i"
-        sh tools/env.sh qemu tmp/build/cc14e.bin < "tmp/build/l14_$n.i" > "tmp/build/l14_$n.o"
+        sh tools/env.sh qemu tmp/build/cc14f.bin < "tmp/build/l14_$n.i" > "tmp/build/l14_$n.o"
         echo "built tmp/build/l14_$n.o" >&2
     done
 }

@@ -16,9 +16,11 @@
 | 名前 | 内容 | 取得元 | SHA-256 |
 |---|---|---|---|
 | bzip2 | bzip2 1.0.8 (最初の 1 本の候補) | https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz | ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269 |
-| zlib | zlib 1.3.1 (候補) | https://www.zlib.net/zlib-1.3.1.tar.gz | 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23 |
+| zlib | zlib 1.3.1 (候補) | https://www.zlib.net/fossils/zlib-1.3.1.tar.gz | 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23 |
 
-SHA-256 は公開されている配布告知の値を記録した。**最初の取得で照合が
-成立することをもって確定とする** (fetch.sh は不一致なら取得物を消して
-失敗する)。
+SHA-256 は公開されている配布告知の値を記録し，最初の取得 (2026-08-10)
+で照合が成立したことをもって確定した (fetch.sh は不一致なら取得物を
+消して失敗する)。zlib の取得元は当初 www.zlib.net/zlib-1.3.1.tar.gz
+だったが，zlib.net は新版が出ると旧版を fossils/ へ移す (404 になる)
+ため恒久 URL の方を記録している。
 
