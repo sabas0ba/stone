@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# 同じ PR へ続けて push したとき，走行中の古い run を新しい run が取り消す。
+# main への push と週次 (schedule) は検証そのものなので取り消さない
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-24.04

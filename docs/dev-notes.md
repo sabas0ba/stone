@@ -85,6 +85,10 @@ SHA-256 の照合と固定点で保証している)。
 - `STONE_FORCE_BUILD=1` を立てるとスタンプを無視して作り直す
 - `tools/test.sh` は引数で Stage を絞れる
   (`bash tools/test.sh stage010 stage011`)
+- `tools/test.sh` は各 Stage のテストを並列に走らせる (出力は Stage の順の
+  まま)。`STONE_TEST_SERIAL=1` で従来どおり 1 つずつ実行する
+- `tools/build.sh` は stage011 以降 (依存が stage010 までで分かれる) を
+  並列に作る。生成物は逐次と同じバイト列になる
 
 CI は `tmp/build/` を actions/cache で持ち回し，変更のあった Stage だけを
 作り直す。1.1 の「SHA-256 の正当性を保証するのは CI である」は次の
