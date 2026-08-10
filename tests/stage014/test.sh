@@ -61,13 +61,13 @@ ok=0
 for pair in cc14a.bin:stage014/cc14.md cc14b.bin:stage014/cc14b.md \
         cc14c.bin:stage014/cc14c.md cc14d.bin:stage014/cc14d.md \
         cc14e.bin:stage014/cc14e.md cc14f.bin:stage014/cc14f.md \
-        ld14.bin:stage014/ld14.md; do
+        ld14.bin:stage014/ld14.md pp14.bin:stage014/pp14.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc14a..cc14f と ld14 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc14a..cc14f と ld14 / pp14 の SHA-256 が各 .md 記載値と一致"
 
 # 世代を触ったら必ず固定点を見る (docs/dev-notes.md 3.1)
 { cat stage014/cc14f.sc; printf '\004'; } \
@@ -88,6 +88,20 @@ for n in sh ed mk; do
 done
 [ "$ok" -eq 0 ]
 report $? "regress: cc14f が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+
+# pp14 (第 9 部): 容量拡大の実測。長い名前と大きな入力が通り，
+# 短い入力に対しては pp と同じ出力になる
+printf '#ifdef INFLATE_ALLOW_INVALID_DISTANCE_TOOFAR_ARRR\nint x;\n#endif\nint ok;\n\004' \
+    | sh tools/env.sh qemu tmp/build/pp14.bin > tmp/s14/pp14a.out 2> /dev/null \
+    && grep -q "int ok" tmp/s14/pp14a.out
+report $? "pp14: 40 文字のマクロ名が通る (pp は容量超過 6 で拒む)"
+
+sh tools/bundle.sh stage013/libc/include/*.h stage013/sh.c 2> /dev/null \
+    | sh tools/env.sh qemu "$pp" > tmp/s14/pp14b.pp 2> /dev/null
+sh tools/bundle.sh stage013/libc/include/*.h stage013/sh.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp14.bin > tmp/s14/pp14b.pp14 2> /dev/null
+cmp -s tmp/s14/pp14b.pp tmp/s14/pp14b.pp14
+report $? "pp14: 既存ソース (sh.c) の前処理結果が pp と一致する"
 
 section "適合台帳の照合"
 

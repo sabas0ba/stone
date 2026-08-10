@@ -408,6 +408,12 @@ build_stage014() {
     { cat tmp/build/ld14.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld14.bin
     echo "built tmp/build/ld14.bin" >&2
+    # pp の第 14 世代 (容量拡大。第 9 部)。同じ道具立てで作る
+    { cat stage014/pp14.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/pp14.o
+    { cat tmp/build/pp14.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp14.bin
+    echo "built tmp/build/pp14.bin" >&2
     # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14f で
     # コンパイルする (外部ソースと同じ経路に載せるため)
     for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio posix/assert; do
