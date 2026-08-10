@@ -33,9 +33,9 @@ staticloc    ok   3\n
 fptab        ok   3\n
 selfref      ok   5\n
 kr_func      ok   7\n
+bitfield     ok   59\n
 
 # ---- 未対応 (cc が拒む) ----
-bitfield     gap  1    ビットフィールド
 floatv       gap  2    浮動小数点 (float / double)
 emptyproto   gap  5    引数リストが空の宣言へ実引数を渡す
 llwidth      gap  2    long long (64 bit の型は無い。通さず拒む)
