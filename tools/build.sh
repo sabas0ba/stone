@@ -515,8 +515,30 @@ case " $stages " in
     exit 2
     ;;
 esac
-for s in $stages; do
+# stage010 までは 1 本の鎖 (各段が直前の段の成果物を使う) なので順に作る
+for s in stage002 stage003 stage004 stage005 stage006 stage007 stage008 \
+         stage009 stage010; do
     "do_$s"
-    [ "$s" = "$target" ] && break
+    [ "$s" = "$target" ] && exit 0
 done
-exit 0
+
+# stage011 以降は依存が分かれる (do_* の入力宣言のとおり，stage011 -> stage012
+# の鎖と stage013・stage014 は，いずれも stage010 までの成果物とスタンプに
+# しか依らない)。全段が対象のときは 3 本に分けて並列に作る。各 Stage の
+# 生成物とスタンプは互いに素なので，並列にしても出来るバイト列は変わらない。
+# 途中の Stage までの指定は従来どおり順に作る
+if [ "$target" != stage014 ]; then
+    for s in stage011 stage012 stage013; do
+        "do_$s"
+        [ "$s" = "$target" ] && break
+    done
+    exit 0
+fi
+( do_stage011 && do_stage012 ) & lane1=$!
+do_stage013 & lane2=$!
+do_stage014 & lane3=$!
+rc=0
+wait "$lane1" || rc=1
+wait "$lane2" || rc=1
+wait "$lane3" || rc=1
+exit "$rc"

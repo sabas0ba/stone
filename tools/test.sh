@@ -7,6 +7,12 @@
 #   引数なしなら全 Stage。引数を与えるとその Stage のテストだけを実行する。
 #   ビルドは常に全段を対象にするが，スタンプ (tools/build.sh) により
 #   変更の無い段は作り直されない (docs/dev-notes.md 1.3)。
+#
+# 各 Stage のテストは並列に走らせる (共有するのは tmp/build の生成物の
+# 読取りだけで，書き込み先は Stage ごとに分かれている)。出力は Stage ごとに
+# tmp/test-<stage>.log へ取り，Stage の順に完了を待って表示するので，
+# 一覧の見た目は逐次実行と変わらない。STONE_TEST_SERIAL=1 で従来どおり
+# 1 つずつ実行する (出力がその場で流れるので，単体の追い込みに向く)。
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -47,6 +53,8 @@ report $? "build: 全 Stage の生成物 (log: tmp/test-buildall.log)"
 overall_fail=$fail
 export STONE_PREBUILT=1
 
+run_names=()
+run_pids=()
 for t in tests/stage*/test.sh; do
     s=$(basename "$(dirname "$t")")
     if [ -n "$targets" ]; then
@@ -55,9 +63,21 @@ for t in tests/stage*/test.sh; do
         *) continue ;;
         esac
     fi
-    echo "== $(dirname "$t") =="
-    bash "$t"
+    if [ -n "${STONE_TEST_SERIAL:-}" ]; then
+        echo "== tests/$s =="
+        bash "$t"
+        overall_fail=$((overall_fail + $?))
+        continue
+    fi
+    bash "$t" > "tmp/test-$s.log" 2>&1 &
+    run_names+=("$s")
+    run_pids+=("$!")
+done
+for i in "${!run_pids[@]}"; do
+    wait "${run_pids[$i]}"
     overall_fail=$((overall_fail + $?))
+    echo "== tests/${run_names[$i]} =="
+    cat "tmp/test-${run_names[$i]}.log"
 done
 
 echo "===="
