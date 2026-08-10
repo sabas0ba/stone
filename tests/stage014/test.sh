@@ -120,4 +120,57 @@ done < tests/stage014/ledger.txt
 echo
 echo "   台帳: 通る $nok 件 / 未対応 $ngap 件 / 通るが誤り $nbad 件"
 
+# ---------------------------------------------------------------------------
+section "libc 第 14 世代 (第 7 部)"
+
+RAMSIZE=134217728
+SFSOFF=67108864
+IMGSIZE=4194304
+
+# OS (kernel13) の上で走らせる。stage013 のテストと同じ道具立て
+runos14() {
+    sh tools/sfs.sh pack tmp/s14/root tmp/s14/fs.img "$IMGSIZE" 128 || return 1
+    rm -f tmp/s14/ram
+    dd if=/dev/null of=tmp/s14/ram bs=1 seek="$RAMSIZE" 2> /dev/null
+    dd if=tmp/s14/fs.img of=tmp/s14/ram bs=64K oflag=seek_bytes seek="$SFSOFF" \
+        conv=notrunc 2> /dev/null
+    STONE_QEMU_RAMFILE=tmp/s14/ram sh tools/env.sh qemu tmp/build/kernel13.bin \
+        < /dev/null > "tmp/s14/$1.out" 2>&1
+}
+
+build14() {
+    sh tools/bundle.sh stage014/libc/include/*.h "tests/stage014/user/$1.c" \
+        | sh tools/env.sh qemu "$pp" > "tmp/s14/$1.i" \
+        && sh tools/env.sh qemu "$cc" < "tmp/s14/$1.i" > "tmp/s14/$1.o" \
+        && { printf 'E'; cat "tmp/s14/$1.o" tmp/build/l14_src_string.o \
+             tmp/build/l14_src_stdlib.o tmp/build/l14_posix_sys.o \
+             tmp/build/l14_posix_morecore.o tmp/build/l14_posix_stdio.o \
+             tmp/build/l14_posix_assert.o; printf '\0'; } \
+            | sh tools/env.sh qemu tmp/build/ld13.bin > "tmp/s14/$1"
+}
+
+build14 lib14
+report $? "build: lib14 (printf 拡張・sprintf・assert を使う)"
+
+rm -rf tmp/s14/root
+mkdir -p tmp/s14/root
+cp tmp/s14/lib14 tmp/s14/root/lib14
+printf 'lib14\n' > tmp/s14/root/boot
+runos14 lib14
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s14/lib14.out tests/stage014/expected/lib14.txt > /dev/null
+report $? "run: printf の l / 左詰め / %s の幅，sprintf，assert (成立)"
+
+build14 abrt
+report $? "build: abrt (assert の失敗)"
+
+rm -rf tmp/s14/root
+mkdir -p tmp/s14/root
+cp tmp/s14/abrt tmp/s14/root/abrt
+printf 'abrt\n' > tmp/s14/root/boot
+runos14 abrt
+rc=$?
+[ "$rc" -eq 1 ] && diff -q tmp/s14/abrt.out tests/stage014/expected/abrt.txt > /dev/null
+report $? "run: assert の失敗が式の文字列を出して exit(1) する"
+
 summary
