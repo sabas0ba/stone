@@ -34,6 +34,10 @@ fptab        ok   3\n
 selfref      ok   5\n
 kr_func      ok   7\n
 bitfield     ok   59\n
+hexcase      ok   abc\n
+bitnot       ok   abc\n
+dimexpr      ok   abc0\n
+bigframe     ok   0\n
 
 # ---- 未対応 (cc が拒む) ----
 floatv       gap  2    浮動小数点 (float / double)
