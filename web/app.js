@@ -216,14 +216,27 @@ function select(num, push = true) {
         ['built by', st.built_by],
     ].map(([k, v]) => `<span>${k}: <b>${escapeHtml(v)}</b></span>`).join('');
 
-    $('st-summary').innerHTML = renderMd(st.summary_md);
+    // 冒頭段落だけを見せ，全文はアコーディオンへ (プレイグラウンドを主役にする)
+    const lines = st.summary_md.split('\n');
+    let cut = lines.findIndex((ln) => ln.trim() === '');
+    if (cut <= 0 || /^([#|`-])/.test(lines[0])) cut = 0;
+    $('st-lede').innerHTML = renderMd(lines.slice(0, cut).join('\n'));
+    const rest = lines.slice(cut).join('\n').trim();
+    $('acc-spec').hidden = rest === '';
+    $('st-summary').innerHTML = renderMd(rest);
+
     $('st-caps').innerHTML = st.new_capabilities
-        .map((c) => `<li>${inlineMd(c)}</li>`).join('');
-    $('st-trivia-box').hidden = !st.trivia;
+        .map((c) => `<span class="cap-chip">${inlineMd(c)}</span>`).join('');
+    $('acc-trivia').hidden = !st.trivia;
     if (st.trivia) $('st-trivia').innerHTML = inlineMd(st.trivia);
+
+    // 世代を移ったらアコーディオンは畳み直す
+    for (const d of document.querySelectorAll('.acc')) d.open = false;
 
     renderCoverage(st);
 
+    $('acc-art-sum').textContent = 'Artifacts, sources & design documents '
+        + `(${st.artifacts.length} artifacts, ${st.sources.length} sources)`;
     $('st-artifacts').innerHTML = st.artifacts.map((a) => `
         <tr><td class="af-file"><a href="assets/bin/${a.file}" download>${a.file}</a></td>
             <td class="af-size">${a.size != null ? fmtSize(a.size) : '—'}</td></tr>
@@ -263,10 +276,19 @@ function select(num, push = true) {
 // ---- カバレッジ (処理系 / OS としての完成度) ----
 // stage.coverage: [{title, note?, items: [{label, state: ok|gap|bad, note?}]}]
 function renderCoverage(st) {
-    const box = $('st-coverage-box');
+    const box = $('acc-cov');
     const groups = st.coverage || [];
     box.hidden = groups.length === 0;
     if (!groups.length) return;
+    // サマリ行に合計を出す (閉じたままでも完成度が読めるように)
+    const tot = { ok: 0, gap: 0, bad: 0 };
+    for (const g of groups) {
+        for (const it of g.items) tot[it.state] = (tot[it.state] || 0) + 1;
+    }
+    $('acc-cov-sum').innerHTML = 'Coverage — how complete is it? '
+        + `<span class="ok">${tot.ok} ok</span>`
+        + (tot.gap ? ` / <span class="gap">${tot.gap} gap</span>` : '')
+        + (tot.bad ? ` / <span class="bad">${tot.bad} bad</span>` : '');
     $('st-coverage').innerHTML = groups.map((g) => {
         const n = { ok: 0, gap: 0, bad: 0 };
         for (const it of g.items) n[it.state] = (n[it.state] || 0) + 1;
