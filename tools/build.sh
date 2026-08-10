@@ -391,6 +391,15 @@ build_stage014() {
     { cat tmp/build/cc14e.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14e.bin
     echo "built tmp/build/cc14e.bin" >&2
+    # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14e で
+    # コンパイルする (外部ソースと同じ経路に載せるため)
+    for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio posix/assert; do
+        n=$(echo "$f" | tr / _)
+        sh tools/bundle.sh stage014/libc/include/*.h "stage014/libc/$f.c" \
+            | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l14_$n.i"
+        sh tools/env.sh qemu tmp/build/cc14e.bin < "tmp/build/l14_$n.i" > "tmp/build/l14_$n.o"
+        echo "built tmp/build/l14_$n.o" >&2
+    done
 }
 
 # 各 Stage の入力 (ソースと前段のスタンプ) と生成物の宣言。
@@ -471,9 +480,12 @@ do_stage013() {
 do_stage014() {
     run_stage stage014 cc14a0.bin cc14a.bin cc14b0.bin cc14b.bin \
         cc14c0.bin cc14c.bin cc14d0.bin cc14d.bin cc14e0.bin cc14e.bin \
+        l14_src_string.o l14_src_ctype.o l14_src_stdlib.o l14_src_morecore.o \
+        l14_posix_sys.o l14_posix_morecore.o l14_posix_stdio.o l14_posix_assert.o \
         -- stage014/cc14.sc stage014/cc14b.sc stage014/cc14c.sc \
-           stage014/cc14d.sc stage014/cc14e.sc \
-           tmp/build/stage010.stamp tools/build.sh
+           stage014/cc14d.sc stage014/cc14e.sc stage014/libc/include/*.h \
+           stage014/libc/src/*.c stage014/libc/posix/*.c \
+           tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
 }
 
 stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014"
