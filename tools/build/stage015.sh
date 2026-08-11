@@ -40,11 +40,23 @@ build_stage015() {
     { cat tmp/build/cc15c.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15c.bin
     echo "built tmp/build/cc15c.bin" >&2
+    # 64 bit の返却と乗算 (第 2 部の続き)。前段は cc15c
+    { cat stage015/cc15d.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15c.bin > tmp/build/cc15d0.o
+    { cat tmp/build/cc15d0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15d0.bin
+    echo "built tmp/build/cc15d0.bin (bootstrap)" >&2
+    { cat stage015/cc15d.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15d0.bin > tmp/build/cc15d.o
+    { cat tmp/build/cc15d.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15d.bin
+    echo "built tmp/build/cc15d.bin" >&2
 }
 
 do_stage015() {
     run_stage stage015 cc15a0.bin cc15a.bin cc15b0.bin cc15b.bin \
-        cc15c0.bin cc15c.bin \
+        cc15c0.bin cc15c.bin cc15d0.bin cc15d.bin \
         -- stage015/cc15a.sc stage015/cc15b.sc stage015/cc15c.sc \
+           stage015/cc15d.sc \
            tmp/build/stage014.stamp tools/build/stage015.sh
 }

@@ -17,6 +17,8 @@ llstore      ok   0123456789abcdef:0123456789abcdef:0000000100000002\n
 llwiden      ok   fffffffffffffffe:00000000fffffffe\n
 llarith      ok   0000000100000000:00000000fffffffe:ffffffffffffffff:00000000f0f0f0f0:0000010000000000:fffffffffffffffc:1010\n
 llarg        ok   0123456789abcdef12:0123456789abcdf034\n
+llret        ok   0123456789abcdf0:02468acf13579bde:fffffffffffffffe\n
+llmul        ok   0000000300000000:01b69b4bd8f72d93:02468acf13579bde\n
 
 # ---- 未対応 (cc が拒む) ----
-llretreject  gap  5    64 bit の返却 (6.2 の項目 11 の残り)。第 2 部の後続で通す
+lldivreject  gap  5    64 bit の除算・剰余 (6.2 の項目 9)。ソフトウェア除算が要る

@@ -10,7 +10,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s15
 
-cc=tmp/build/cc15c.bin
+cc=tmp/build/cc15d.bin
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -49,20 +49,20 @@ section "ビルド再現と固定点"
 
 ok=0
 for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
-        cc15c.bin:stage015/cc15c.md; do
+        cc15c.bin:stage015/cc15c.md cc15d.bin:stage015/cc15d.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a / cc15b / cc15c の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15d の SHA-256 が各 .md 記載値と一致"
 
-{ cat stage015/cc15c.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc15c.bin > tmp/s15/b3.o \
+{ cat stage015/cc15d.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc15d.bin > tmp/s15/b3.o \
     && { cat tmp/s15/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s15/b3.bin \
-    && cmp -s tmp/s15/b3.bin tmp/build/cc15c.bin
-report $? "fixpoint: cc15c が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s15/b3.bin tmp/build/cc15d.bin
+report $? "fixpoint: cc15d が自分自身を再生成する (B2 == B3)"
 
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
@@ -73,7 +73,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15c が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15d が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合 (64 bit の土台)"
 
