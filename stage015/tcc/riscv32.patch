@@ -20,6 +20,7 @@ TCC_TARGET_RISCV64` を 1 つも書き換えずに済む。
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
 --- a/Makefile
 +++ b/Makefile
 @@ -117,6 +117,7 @@
@@ -96,7 +97,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      "__riscv_flen 64\0"
      "__riscv_div\0"
      "__riscv_mul\0"
-@@ -55,7 +68,14 @@
+@@ -55,7 +68,16 @@
      "__riscv_float_abi_double\0"
      ;
  
@@ -106,13 +107,15 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
 +
 +/* 語 1 本の読み書き: RV64 は ld/sd (funct3 = 3)，RV32 は lw/sw (= 2) */
 +#define F3_LX (XLEN == 8 ? 3 : 2)
++/* 語 1 本ぶんの値を表す型 (ポインタと同じ幅) */
++#define VT_XWORD (XLEN == 8 ? VT_LLONG : VT_INT)
 +/* opcode に足すと 32 bit 幅の演算になる (RV64 の OP-IMM-32 / OP-32)。
 +   RV32 には無く，素の演算がそのまま 32 bit である */
 +#define OP32 (XLEN == 8 ? 8 : 0)
  
  #define TREG_RA 17
  #define TREG_SP 18
-@@ -213,7 +233,7 @@
+@@ -213,7 +235,7 @@
                  doload || !forstore
                    ? R_RISCV_PCREL_LO12_I : R_RISCV_PCREL_LO12_S, 0);
          if (doload) {
@@ -121,7 +124,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              if (large_addend) {
                  o(0x37 | (6 << 7) | UPPER(fc)); //lui t1, high(fc)
                  ER(0x33, 0, rr, rr, 6, 0); // add RR, RR, t1
-@@ -274,7 +294,7 @@
+@@ -274,7 +296,7 @@
              fc = 0; // XXX store ofs in LVAL(reg)
          } else if (v == VT_LLOCAL) {
              br = load_symofs(r, sv, 0, &fc);
@@ -130,7 +133,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              br = rr;
              fc = 0;
          } else if (v == VT_CONST) {
-@@ -293,7 +313,7 @@
+@@ -293,7 +315,7 @@
          }
          EI(opcode, func3, rr, br, fc); // l[bhwd][u] / fl[wd] RR, fc(BR)
      } else if (v == VT_CONST) {
@@ -139,7 +142,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          if (is_float(sv->type.t) && bt != VT_LDOUBLE) {
              /* load float/double constant: move bit pattern from int reg */
              uint64_t val = sv->c.i;
-@@ -307,7 +327,7 @@
+@@ -307,7 +329,7 @@
              } else {
                  if (LOW_OVERFLOW(fc))
                      o(0x37 | (6 << 7) | UPPER(fc)); // lui t1, upper
@@ -148,7 +151,19 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              }
              o(0x53 | (rr << 7) | (6 << 15) | ((unsigned)(0x78 | is_dbl) << 25));
              return;
-@@ -431,7 +451,10 @@
+@@ -421,6 +443,11 @@
+       tcc_error("unimp: store(struct)");
+     if (size > 8)
+       tcc_error("unimp: large sized store");
++    /* RV32 には語 2 本ぶんを 1 命令で書く命令が無い。ここへ来るのは
++       tccgen.c が 64 bit を上下に割らずに渡してきた場合であり，
++       **黙って下位だけ書くと値が壊れる**ので拒む (その 3 の残り) */
++    if (XLEN == 4 && size > 4 && !is_float(bt))
++      tcc_error("unimp: store(64bit int on rv32)");
+     assert(sv->r & VT_LVAL);
+     if (fr == VT_LOCAL || (sv->r & VT_SYM)) {
+         ptrreg = load_symofs(-1, sv, 1, &fc);
+@@ -431,7 +458,10 @@
          fc = 0; // XXX support offsets regs
      } else if (fr == VT_CONST) {
          int64_t si = sv->c.i;
@@ -160,7 +175,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          si >>= 32;
          if (si != 0) {
  	    load_large_constant(ptrreg, fc, si);
-@@ -519,7 +542,7 @@
+@@ -519,7 +549,7 @@
          greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
          o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
          greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -169,7 +184,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          gen_bounds_call(TOK___bound_local_new);
          ind = saved_ind;
          label.c = 0; /* force new local ELF symbol */
-@@ -532,7 +555,7 @@
+@@ -532,13 +562,23 @@
      greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
      o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
      greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -178,7 +193,90 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      gen_bounds_call(TOK___bound_local_delete);
      o(0x65a26502); /* ld   a0,0(sp)   ld   a1,8(sp)   */
      o(0x61052542); /* fld  fa0,16(sp) addi sp,sp,32   */
-@@ -773,7 +796,7 @@
+ }
+ #endif
+ 
++/* 語 1 本 (XLEN バイト) に収まる大きさ size を，載せる型で表す。
++   端数のときは狭い型にして，はみ出しを読まないようにする */
++static int chunkt(int size)
++{
++    if (size <= 1) return VT_BYTE;
++    if (size <= 2) return VT_SHORT;
++    if (XLEN == 4 || size <= 4) return VT_INT;
++    return VT_LLONG;
++}
++
+ static void reg_pass_rec(CType *type, int *rc, int *fieldofs, int ofs)
+ {
+     if ((type->t & VT_BTYPE) == VT_STRUCT) {
+@@ -566,7 +606,8 @@
+       rc[0] = -1;
+     else if (!rc[0] || rc[1] == RC_FLOAT || is_float(type->t)) {
+       rc[++rc[0]] = is_float(type->t) ? RC_FLOAT : RC_INT;
+-      fieldofs[rc[0]] = (ofs << 4) | ((type->t & VT_BTYPE) == VT_PTR ? VT_LLONG : type->t & VT_BTYPE);
++      fieldofs[rc[0]] = (ofs << 4)
++        | ((type->t & VT_BTYPE) == VT_PTR ? VT_XWORD : type->t & VT_BTYPE);
+     } else
+       rc[0] = -1;
+ }
+@@ -577,10 +618,10 @@
+     reg_pass_rec(type, prc, fieldofs, 0);
+     if (prc[0] <= 0 || !named) {
+         int align, size = type_size(type, &align);
+-        prc[0] = (size + 7) >> 3;
++        prc[0] = (size + XLEN - 1) / XLEN;
+         prc[1] = prc[2] = RC_INT;
+-        fieldofs[1] = (0 << 4) | (size <= 1 ? VT_BYTE : size <= 2 ? VT_SHORT : size <= 4 ? VT_INT : VT_LLONG);
+-        fieldofs[2] = (8 << 4) | (size <= 9 ? VT_BYTE : size <= 10 ? VT_SHORT : size <= 12 ? VT_INT : VT_LLONG);
++        fieldofs[1] = (0 << 4) | chunkt(size);
++        fieldofs[2] = (XLEN << 4) | chunkt(size - XLEN);
+     }
+ }
+ 
+@@ -608,13 +649,13 @@
+         sv = &vtop[1 + i - nb_args];
+         sv->type.t &= ~VT_ARRAY; // XXX this should be done in tccgen.c
+         size = type_size(&sv->type, &align);
+-        if (size > 16) {
++        if (size > 2 * XLEN) {
+             if (align < XLEN)
+               align = XLEN;
+             tempspace = (tempspace + align - 1) & -align;
+             tempofs = tempspace;
+             tempspace += size;
+-            size = align = 8;
++            size = align = XLEN;   /* 渡すのは番地 1 本 */
+             byref = 64 | (tempofs << 7);
+         }
+         reg_pass(&sv->type, prc, fieldofs, old || sa != 0);
+@@ -645,7 +686,7 @@
+                   info[i] |= (1 + areg[prc[2] - 1]++) << 7;
+                 else {
+                     info[i] |= 16;
+-                    stack_adj += 8;
++                    stack_adj += XLEN;
+                 }
+                 if (!byref) {
+                     assert((fieldofs[2] >> 4) < 2048);
+@@ -684,7 +725,7 @@
+                     vswap();
+                     vstore();
+                     vpop();
+-                    size = align = 8;
++                    size = align = XLEN;   /* 渡すのは番地 1 本 */
+                 }
+                 if (info[i] & 32) {
+                     if (align < XLEN)
+@@ -708,7 +749,7 @@
+             } else if (info[i] & 16) {
+                 assert(!splitofs);
+                 splitofs = ofs;
+-                ofs += 8;
++                ofs += XLEN;
+             }
+         }
+     }
+@@ -773,7 +814,7 @@
                  vtop->r2 = r2;
              }
              if (info[nb_args - 1 - i] & 16) {
@@ -187,23 +285,51 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  vtop->r2 = VT_CONST;
              } else if (loadt == VT_LDOUBLE && vtop->r2 != r2) {
                  assert(vtop->r2 <= 7 && r2 <= 7);
-@@ -826,7 +849,7 @@
+@@ -814,7 +855,7 @@
+     CType *type;
+ 
+     sym = func_type->ref;
+-    loc = -16; // for ra and s0
++    loc = -2 * XLEN; // for ra and s0
+     func_sub_sp_offset = ind;
+     ind += 5 * 4;
+ 
+@@ -824,9 +865,9 @@
+        implicit pointer parameter */
+     size = type_size(&func_vt, &align);
      if (size > 2 * XLEN) {
-         loc -= 8;
+-        loc -= 8;
++        loc -= XLEN;
          func_vc = loc;
 -        ES(0x23, 3, 8, 10 + areg[0]++, loc); // sd a0, loc(s0)
 +        ES(0x23, F3_LX, 8, 10 + areg[0]++, loc); // s[wd] a0, loc(s0)
      }
      /* define parameters */
      while ((sym = sym->next) != NULL) {
-@@ -856,13 +879,13 @@
+@@ -837,7 +878,7 @@
+         size = type_size(type, &align);
+         if (size > 2 * XLEN) {
+             type = &char_pointer_type;
+-            size = align = byref = 8;
++            size = align = byref = XLEN;
+         }
+         reg_pass(type, prc, fieldofs, 1);
+         regcount = prc[0];
+@@ -851,18 +892,18 @@
+             param_addr = addr;
+             addr += size;
+         } else {
+-            loc -= regcount * 8; // XXX could reserve only 'size' bytes
++            loc -= regcount * XLEN; // XXX could reserve only 'size' bytes
+             param_addr = loc;
              for (i = 0; i < regcount; i++) {
                  if (areg[prc[1+i] - 1] >= 8) {
                      assert(i == 1 && regcount == 2 && !(addr & 7));
 -                    EI(0x03, 3, 5, 8, addr); // ld t0, addr(s0)
-+                    EI(0x03, F3_LX, 5, 8, addr); // l[wd] t0, addr(s0)
-                     addr += 8;
+-                    addr += 8;
 -                    ES(0x23, 3, 8, 5, loc + i*8); // sd t0, loc(s0)
++                    EI(0x03, F3_LX, 5, 8, addr); // l[wd] t0, addr(s0)
++                    addr += XLEN;
 +                    ES(0x23, F3_LX, 8, 5, loc + i*XLEN); // s[wd] t0, loc(s0)
                  } else if (prc[1+i] == RC_FLOAT) {
                      ES(0x27, (size / regcount) == 4 ? 2 : 3, 8, 10 + areg[1]++, loc + (fieldofs[i+1] >> 4)); // fs[wd] FAi, loc(s0)
@@ -213,7 +339,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  }
              }
          }
-@@ -873,7 +896,7 @@
+@@ -873,7 +914,7 @@
      if (func_var) {
          for (; areg[0] < 8; areg[0]++) {
              num_va_regs++;
@@ -222,7 +348,18 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          }
      }
  #ifdef CONFIG_TCC_BCHECK
-@@ -927,18 +950,18 @@
+@@ -888,8 +929,8 @@
+     int align, size = type_size(vt, &align), nregs;
+     int prc[3], fieldofs[3];
+     *ret_align = 1;
+-    *regsize = 8;
+-    if (size > 16)
++    *regsize = XLEN;
++    if (size > 2 * XLEN)
+       return 0;
+     reg_pass(vt, prc, fieldofs, 1);
+     nregs = prc[0];
+@@ -927,18 +968,18 @@
          gen_bounds_epilog();
  #endif
  
@@ -246,7 +383,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          o(0x37 | (5 << 7) | UPPER(v-16)); //lui t0, upper(v)
          EI(0x13, 0, 5, 5, SIGN11(v-16)); // addi t0, t0, lo(v)
          ER(0x33, 0, 2, 2, 5, 0x20); // sub sp, sp, t0
-@@ -948,10 +971,10 @@
+@@ -948,10 +989,10 @@
  
      ind = func_sub_sp_offset;
      EI(0x13, 0, 2, 2, -d);     // addi sp, sp, -d
@@ -260,7 +397,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      else
        gjmp_addr(large_ofs_ind);
      if ((ind - func_sub_sp_offset) != 5*4)
-@@ -1040,12 +1063,15 @@
+@@ -1040,12 +1081,15 @@
  {
      int a, b, d;
      int func3 = 0;
@@ -278,7 +415,71 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              vswap();
              gv(RC_INT);
              a = ireg(vtop[0].r);
-@@ -1172,10 +1198,13 @@
+@@ -1106,6 +1150,30 @@
+             }
+         }
+     }
++#ifdef TCC_TARGET_RISCV32
++    if (op == TOK_UMULL) {
++        /* 符号なし 32x32 -> 64。下位を mul，上位を mulhu で作り，
++           レジスタ 2 本の組で返す。64 bit の乗算を組み立てる
++           tccgen.c の gen_opl がこれを使う (i386 と arm も同じ形)。
++
++           結果はいったん t0 / t1 (割付けの対象外) に置く。行き先を
++           先に取ると，取った先が掛ける側と重なって値を潰しうる */
++        int ml, mh, ma, mb;
++        gv2(RC_INT, RC_INT);
++        ma = ireg(vtop[-1].r);
++        mb = ireg(vtop[0].r);
++        ER(0x33, 3, 6, ma, mb, 1); // mulhu t1, a, b
++        ER(0x33, 0, 5, ma, mb, 1); // mul   t0, a, b
++        vtop -= 2;
++        ml = get_reg(RC_INT);
++        vtop++;
++        vtop[0].r = ml;            /* 先に押さえてから 2 本目を取る */
++        vtop[0].r2 = mh = get_reg(RC_INT);
++        EI(0x13, 0, ireg(ml), 5, 0); // mv ML, t0
++        EI(0x13, 0, ireg(mh), 6, 0); // mv MH, t1
++        return;
++    }
++#endif
+     gv2(RC_INT, RC_INT);
+     a = ireg(vtop[-1].r);
+     b = ireg(vtop[0].r);
+@@ -1164,6 +1232,32 @@
+     case TOK_UDIV:
+         ER(0x33 | ll, 5, d, a, b, 1); // divu d, a, b
+         break;
++
++#ifdef TCC_TARGET_RISCV32
++    /* 64 bit の加減算を 32 bit 2 回に分けるための桁上げ付き演算
++       (tccgen.c の gen_opl が下位で C1，上位で C2 を呼ぶ)。
++       RISC-V に桁上げの旗は無いので，**t2 に持って次へ渡す**。
++       t0 / t2 は割付けの対象外なので，行き先が掛ける側と重なっても
++       壊れない。C1 と C2 の間に挟まるのは退避の書出しだけであり，
++       これらは t2 を触らない (旗を使う i386 / arm と同じ前提) */
++    case TOK_ADDC1: // 下位: 足して桁上げを t2 へ
++        ER(0x33, 0, 5, a, b, 0);   // add  t0, a, b
++        ER(0x33, 3, 7, 5, a, 0);   // sltu t2, t0, a
++        EI(0x13, 0, d, 5, 0);      // mv   d, t0
++        break;
++    case TOK_ADDC2: // 上位: 足して桁上げを足す
++        ER(0x33, 0, 5, a, b, 0);   // add  t0, a, b
++        ER(0x33, 0, d, 5, 7, 0);   // add  d, t0, t2
++        break;
++    case TOK_SUBC1: // 下位: 引いて桁借りを t2 へ
++        ER(0x33, 3, 7, a, b, 0);   // sltu t2, a, b
++        ER(0x33, 0, d, a, b, 0x20);// sub  d, a, b
++        break;
++    case TOK_SUBC2: // 上位: 引いて桁借りを引く
++        ER(0x33, 0, 5, a, b, 0x20);// sub  t0, a, b
++        ER(0x33, 0, d, 5, 7, 0x20);// sub  d, t0, t2
++        break;
++#endif
+     }
+ }
+ 
+@@ -1172,10 +1266,13 @@
      gen_opil(op, 0);
  }
  
@@ -292,7 +493,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  
  ST_FUNC void gen_opf(int op)
  {
-@@ -1279,25 +1308,28 @@
+@@ -1279,25 +1376,28 @@
      int r = ireg(gv(RC_INT));
      if ((t & VT_BTYPE) == VT_SHORT) {
          if (t & VT_UNSIGNED) {
@@ -328,7 +529,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      EI(0x1b, 0, r, r, 0); // addiw r, r, 0
  }
  
-@@ -1416,14 +1448,14 @@
+@@ -1416,14 +1516,14 @@
      put_extern_sym(&label, cur_text_section, ind, 0);
      o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
      greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -345,7 +546,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      vpop();
  }
  
-@@ -1438,10 +1470,10 @@
+@@ -1438,10 +1538,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
@@ -358,7 +559,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  }
  
  ST_FUNC void gen_vla_sp_restore(int addr)
-@@ -1449,10 +1481,10 @@
+@@ -1449,10 +1549,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
