@@ -272,7 +272,10 @@ runk() {
     dd if=/dev/null of=tmp/s14/ram bs=1 seek="$RAMSIZE" 2> /dev/null
     dd if=tmp/s14/fs.img of=tmp/s14/ram bs=64K oflag=seek_bytes seek="$SFSOFF" \
         conv=notrunc 2> /dev/null
-    printf '%s' "$3" | STONE_QEMU_RAMFILE=tmp/s14/ram \
+    # 末尾に EOT を置く。シェルは `exit` でも終わるが，取りこぼしたときに
+    # UART の read が永久に待つ (kernel の fd 0 はブロックする) ため，
+    # 入力の終わりを必ず伝える
+    printf '%s\004' "$3" | STONE_QEMU_RAMFILE=tmp/s14/ram \
         sh tools/env.sh qemu "$1" > "tmp/s14/$2.out" 2>&1
     krc=$?
     dd if=tmp/s14/ram of=tmp/s14/fs2.img bs=64K iflag=skip_bytes,count_bytes \
