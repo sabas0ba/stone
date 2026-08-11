@@ -16,12 +16,17 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ext="$repo_root/docs/external"
 
-# manifest: 名前 URL SHA-256 (書庫の形式は URL の拡張子で見分ける)
+# manifest: 名前 URL 印
+#   書庫 (.tar.gz / .tar.bz2) なら印は SHA-256。
+#   それ以外は git の取得元とみなし，印は commit とする。git の commit は
+#   木と履歴の内容ハッシュなので，書庫の SHA-256 と同じ役目を果たす
+#   (git 自身が取得時に検証する)。**ただし git の commit は SHA-1 である**
+#   ことは意識しておく (docs/stage015-tcc.md 3 章)
 manifest() {
     cat <<'EOF'
 bzip2 https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
 zlib https://www.zlib.net/fossils/zlib-1.3.1.tar.gz 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
-tcc https://download.savannah.gnu.org/releases/tinycc/tcc-0.9.27.tar.bz2 de23af78fca90ce32dff2dd45b3432b2334740bb9bb7b05bf60fdbfc396ceb9c
+tcc https://github.com/TinyCC/tinycc release_0_9_27:d348a9a51d32cece842b7885d27a411436d7887b
 EOF
 }
 
@@ -44,11 +49,30 @@ fi
 url=${line%% *}
 want=${line##* }
 
-# 書庫の形式は URL の末尾で決める (tar.gz / tar.bz2)
+# 書庫の形式は URL の末尾で決める (tar.gz / tar.bz2)。
+# どちらでもなければ git の取得元とみなす
 case "$url" in
 *.tar.bz2) ext_sfx=tar.bz2; taropt=-xjf ;;
 *.tar.gz|*.tgz) ext_sfx=tar.gz; taropt=-xzf ;;
-*) echo "fetch.sh: 未知の書庫形式: $url" >&2; exit 2 ;;
+*)
+    # git: 印は「タグ:commit」。タグで浅く取り，commit が一致するか見る
+    tag=${want%%:*}
+    com=${want##*:}
+    echo "fetch: $url ($tag)" >&2
+    rm -rf "$ext/$name"
+    mkdir -p "$ext"
+    git clone -q --depth 1 --branch "$tag" "$url" "$ext/$name"
+    got=$(cd "$ext/$name" && git rev-parse HEAD)
+    if [ "$got" != "$com" ]; then
+        rm -rf "$ext/$name"
+        echo "fetch.sh: commit が一致しない" >&2
+        echo "  期待: $com" >&2
+        echo "  実際: $got" >&2
+        exit 1
+    fi
+    echo "fetched: $ext/$name (commit 照合済み)" >&2
+    exit 0
+    ;;
 esac
 
 mkdir -p "$ext"
