@@ -13,6 +13,11 @@
 # tmp/test-<stage>.log へ取り，Stage の順に完了を待って表示するので，
 # 一覧の見た目は逐次実行と変わらない。STONE_TEST_SERIAL=1 で従来どおり
 # 1 つずつ実行する (出力がその場で流れるので，単体の追い込みに向く)。
+#
+# **同時に走らせる本数は CPU 数までに抑える** (STONE_TEST_JOBS で変えられる)。
+# 各 Stage のテストは QEMU を次々に起動するので，本数が CPU 数を大きく
+# 超えると取り合いになる。CI (2 コア) で Stage が 14 まで増えたとき，
+# 負荷の高い版のコンパイルが 1 つだけ落ちる形で現れた。
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -53,8 +58,8 @@ report $? "build: 全 Stage の生成物 (log: tmp/test-buildall.log)"
 overall_fail=$fail
 export STONE_PREBUILT=1
 
-run_names=()
-run_pids=()
+# 走らせる Stage を並べる
+run_list=()
 for t in tests/stage*/test.sh; do
     s=$(basename "$(dirname "$t")")
     if [ -n "$targets" ]; then
@@ -63,22 +68,42 @@ for t in tests/stage*/test.sh; do
         *) continue ;;
         esac
     fi
-    if [ -n "${STONE_TEST_SERIAL:-}" ]; then
+    run_list+=("$s")
+done
+
+if [ -n "${STONE_TEST_SERIAL:-}" ]; then
+    for s in "${run_list[@]}"; do
         echo "== tests/$s =="
-        bash "$t"
+        bash "tests/$s/test.sh"
         overall_fail=$((overall_fail + $?))
-        continue
-    fi
-    bash "$t" > "tmp/test-$s.log" 2>&1 &
-    run_names+=("$s")
-    run_pids+=("$!")
-done
-for i in "${!run_pids[@]}"; do
-    wait "${run_pids[$i]}"
-    overall_fail=$((overall_fail + $?))
-    echo "== tests/${run_names[$i]} =="
-    cat "tmp/test-${run_names[$i]}.log"
-done
+    done
+else
+    maxjobs=${STONE_TEST_JOBS:-$(nproc 2> /dev/null || echo 2)}
+    [ "$maxjobs" -lt 1 ] && maxjobs=1
+    i=0
+    n=${#run_list[@]}
+    while [ "$i" -lt "$n" ]; do
+        # maxjobs 本を起こし，その組が終わってから次の組へ進む。
+        # 組の中は Stage の順に並べてあるので，出力の順序は逐次実行と同じ
+        batch_names=()
+        batch_pids=()
+        j=0
+        while [ "$j" -lt "$maxjobs" ] && [ "$i" -lt "$n" ]; do
+            s=${run_list[$i]}
+            bash "tests/$s/test.sh" > "tmp/test-$s.log" 2>&1 &
+            batch_names+=("$s")
+            batch_pids+=("$!")
+            i=$((i + 1))
+            j=$((j + 1))
+        done
+        for k in "${!batch_pids[@]}"; do
+            wait "${batch_pids[$k]}"
+            overall_fail=$((overall_fail + $?))
+            echo "== tests/${batch_names[$k]} =="
+            cat "tmp/test-${batch_names[$k]}.log"
+        done
+    done
+fi
 
 echo "===="
 if [ "$overall_fail" -eq 0 ]; then
