@@ -17,7 +17,7 @@
 |---|---|---|---|
 | bzip2 | bzip2 1.0.8 (最初の 1 本の候補) | https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz | ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269 |
 | zlib | zlib 1.3.1 (候補) | https://www.zlib.net/fossils/zlib-1.3.1.tar.gz | 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23 |
-| tcc | Tiny C Compiler 0.9.27 (Stage 15 の対象)。git のタグ release_0_9_27 | https://github.com/TinyCC/tinycc | commit d348a9a51d32cece842b7885d27a411436d7887b |
+| tcc | Tiny C Compiler (Stage 15 の対象)。開発枝 mob を commit で固定 | https://github.com/TinyCC/tinycc | commit 2ba12e83b3599ca8f5d50c179fe5138fe956f0c9 |
 
 SHA-256 は公開されている配布告知の値を記録し，**最初の取得で照合が
 成立することをもって確定とする** (fetch.sh は不一致なら取得物を消して

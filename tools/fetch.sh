@@ -26,7 +26,7 @@ manifest() {
     cat <<'EOF'
 bzip2 https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
 zlib https://www.zlib.net/fossils/zlib-1.3.1.tar.gz 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
-tcc https://github.com/TinyCC/tinycc release_0_9_27:d348a9a51d32cece842b7885d27a411436d7887b
+tcc https://github.com/TinyCC/tinycc mob:2ba12e83b3599ca8f5d50c179fe5138fe956f0c9
 EOF
 }
 
@@ -55,13 +55,19 @@ case "$url" in
 *.tar.bz2) ext_sfx=tar.bz2; taropt=-xjf ;;
 *.tar.gz|*.tgz) ext_sfx=tar.gz; taropt=-xzf ;;
 *)
-    # git: 印は「タグ:commit」。タグで浅く取り，commit が一致するか見る
-    tag=${want%%:*}
+    # git: 印は「枝またはタグ:commit」。**commit を直接取りに行く**。
+    # 枝の先頭を取ると，枝が動いた瞬間に照合が壊れて取得できなくなる
+    # (mob のような開発枝は日々動く)。名札は記録のためだけに持つ
+    lbl=${want%%:*}
     com=${want##*:}
-    echo "fetch: $url ($tag)" >&2
+    echo "fetch: $url ($lbl $com)" >&2
     rm -rf "$ext/$name"
-    mkdir -p "$ext"
-    git clone -q --depth 1 --branch "$tag" "$url" "$ext/$name"
+    mkdir -p "$ext/$name"
+    ( cd "$ext/$name" \
+      && git init -q . \
+      && git remote add origin "$url" \
+      && git fetch -q --depth 1 origin "$com" \
+      && git checkout -q FETCH_HEAD )
     got=$(cd "$ext/$name" && git rev-parse HEAD)
     if [ "$got" != "$com" ]; then
         rm -rf "$ext/$name"
