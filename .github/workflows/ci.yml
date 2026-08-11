@@ -24,7 +24,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 鎖は世代を足すたびに長くなる。さらに tools/build.sh は全 Stage の
+    # スタンプの入力なので (build.sh 参照)，ビルド手順を触る変更では
+    # tmp/build のキャッシュがあっても全段を作り直す。Stage 15 の世代を
+    # 足した時点で 30 分では足りなくなった (30 分でジョブが cancelled)
+    timeout-minutes: 60
     env:
       STONE_ENGINE: podman
     steps:
