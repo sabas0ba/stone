@@ -525,13 +525,33 @@ do_stage014() {
            tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
 }
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014"
+# Stage 15 は cc の新世代 (cc15a = 64 bit 整数の土台) を Stage 14 の
+# 最前線 cc14g で作る (docs/stage015-tcc.md 6 章)
+build_stage015() {
+    { cat stage015/cc15a.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14g.bin > tmp/build/cc15a0.o
+    { cat tmp/build/cc15a0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15a0.bin
+    echo "built tmp/build/cc15a0.bin (bootstrap)" >&2
+    { cat stage015/cc15a.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15a0.bin > tmp/build/cc15a.o
+    { cat tmp/build/cc15a.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15a.bin
+    echo "built tmp/build/cc15a.bin" >&2
+}
+
+do_stage015() {
+    run_stage stage015 cc15a0.bin cc15a.bin \
+        -- stage015/cc15a.sc tmp/build/stage014.stamp tools/build.sh
+}
+
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015"
 target=${1:-all}
-[ "$target" = all ] && target=stage014
+[ "$target" = all ] && target=stage015
 case " $stages " in
 *" $target "*) ;;
 *)
-    echo "usage: build.sh [stage002|...|stage013|stage014|all]" >&2
+    echo "usage: build.sh [stage002|...|stage014|stage015|all]" >&2
     exit 2
     ;;
 esac
@@ -547,7 +567,7 @@ done
 # しか依らない)。全段が対象のときは 3 本に分けて並列に作る。各 Stage の
 # 生成物とスタンプは互いに素なので，並列にしても出来るバイト列は変わらない。
 # 途中の Stage までの指定は従来どおり順に作る
-if [ "$target" != stage014 ]; then
+if [ "$target" != stage014 ] && [ "$target" != stage015 ]; then
     for s in stage011 stage012 stage013; do
         "do_$s"
         [ "$s" = "$target" ] && break
@@ -556,7 +576,12 @@ if [ "$target" != stage014 ]; then
 fi
 ( do_stage011 && do_stage012 ) & lane1=$!
 do_stage013 & lane2=$!
-do_stage014 & lane3=$!
+# stage015 は stage014 の成果物 (cc14g) を使うので同じ本の中で順に作る
+if [ "$target" = stage015 ]; then
+    ( do_stage014 && do_stage015 ) & lane3=$!
+else
+    do_stage014 & lane3=$!
+fi
 rc=0
 wait "$lane1" || rc=1
 wait "$lane2" || rc=1
