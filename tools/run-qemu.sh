@@ -1,8 +1,9 @@
 #!/bin/sh
 # QEMU virt (RV32) 上でフラットバイナリをフィルタとして実行する。
 #
-# 使用法: run-qemu.sh <flat.bin> [追加の QEMU オプション...]
+# 使用法: run-qemu.sh <flat.bin | prog.elf> [追加の QEMU オプション...]
 #   - <flat.bin> は RAM 先頭 0x8000_0000 に配置され，そこから実行される
+#   - ELF を渡すと program header どおりに読み込み entry から始める
 #   - stdin  -> UART RX (0x1000_0000)
 #   - stdout <- UART TX
 #   - test finisher (0x0010_0000) への書込みで終了コード付きで停止する
@@ -24,13 +25,30 @@ set -eu
 bios="$1"
 shift
 
-set -- \
-    -M virt \
-    -bios "$bios" \
-    -display none \
-    -monitor none \
-    -serial stdio \
-    "$@"
+# 与えられたのが ELF なら，program header どおりに読み込んで entry から
+# 始める (-device loader)。平らな像は従来どおり -bios で 0x8000_0000 へ置く。
+#
+# 鎖の成果物はすべて平らな像なので，この枝を通るのは第 5 部で tcc に
+# 吐かせたものだけである (docs/stage015-riscv32.md)。tcc の出す ELF は
+# 節ごとに 0x1000 境界へ揃うため，そのまま平らに落とすと番地が合わない。
+if [ "$(od -An -c -N 4 "$bios" | tr -d ' ')" = '177ELF' ]; then
+    set -- \
+        -M virt \
+        -bios none \
+        -device "loader,file=$bios,cpu-num=0" \
+        -display none \
+        -monitor none \
+        -serial stdio \
+        "$@"
+else
+    set -- \
+        -M virt \
+        -bios "$bios" \
+        -display none \
+        -monitor none \
+        -serial stdio \
+        "$@"
+fi
 
 if [ -n "${STONE_QEMU_RAMFILE:-}" ]; then
     set -- "$@" -m 128M \

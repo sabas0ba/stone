@@ -1,0 +1,402 @@
+tcc に RV32 の対象 (riscv32) を足す。
+
+上流: https://github.com/TinyCC/tinycc  mob 2ba12e83b3599ca8f5d50c179fe5138fe956f0c9
+説明: docs/stage015-riscv32.md
+
+RISC-V の backend (riscv64-gen.c / riscv64-link.c) は RV32 と RV64 で
+大半が共通なので，ファイルを写さず**同じファイルを XLEN で切り替える**
+形にしてある。この patch の差分がそのまま「RV32 に要る違い」である。
+
+RV32 の対応とは別に，**上流の誤りの修正が 1 つ入っている** (store が
+番地を絶対値で書くときに枠の指し手 s0 を潰す)。RV64 でも同じ誤りが
+出るので RV32 固有ではない。docs/stage015-riscv32.md 10 章。
+
+対象は -DTCC_TARGET_RISCV64 -DTCC_TARGET_RISCV32 の 2 つを定義して選ぶ。
+TCC_TARGET_RISCV64 は「RISC-V であること」を表し，TCC_TARGET_RISCV32 が
+「語長が 32 bit であること」を絞り込む。こうすると core (tccgen.c・
+tccelf.c・tccasm.c・tccdbg.c) にある 40 箇所あまりの `#ifdef
+TCC_TARGET_RISCV64` を 1 つも書き換えずに済む。
+
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -117,6 +117,7 @@
+ DEF-arm64-OpenBSD  = $(DEF-arm64) -DTARGETOS_OpenBSD
+ DEF-arm64-win32    = $(DEF-arm64) -DTCC_TARGET_PE
+ DEF-riscv64        = -DTCC_TARGET_RISCV64
++DEF-riscv32        = -DTCC_TARGET_RISCV64 -DTCC_TARGET_RISCV32
+ DEF-c67            = -DTCC_TARGET_C67 -w # disable warnigs
+ DEF-x86_64-FreeBSD = $(DEF-x86_64) -DTARGETOS_FreeBSD
+ DEF-x86_64-NetBSD  = $(DEF-x86_64) -DTARGETOS_NetBSD
+@@ -134,7 +135,7 @@
+ 
+ # cross compiler targets to build
+ TCC_X = i386 x86_64 i386-win32 x86_64-win32 x86_64-osx arm arm64 arm64-win32 arm-wince c67
+-TCC_X += riscv64 arm64-osx
++TCC_X += riscv64 arm64-osx riscv32
+ # TCC_X += arm-fpa arm-fpa-ld arm-vfp arm-eabi
+ 
+ # cross libtcc1.a targets to build
+@@ -217,6 +218,7 @@
+ arm64-win32_FILES = $(arm64_FILES) tccpe.c
+ c67_FILES = $(CORE_FILES) c67-gen.c c67-link.c tcccoff.c
+ riscv64_FILES = $(CORE_FILES) riscv64-gen.c riscv64-link.c riscv64-asm.c
++riscv32_FILES = $(riscv64_FILES)
+ 
+ TCCDEFS_H$(subst yes,,$(CONFIG_predefs)) = tccdefs_.h
+ 
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/lib/Makefile ../../tmp/tcc/src/lib/Makefile
+--- a/lib/Makefile
++++ b/lib/Makefile
+@@ -74,6 +74,8 @@
+ OBJ-arm-eabihf = $(OBJ-arm)
+ OBJ-arm-wince = $(ARM_O) $(WIN_O)
+ OBJ-riscv64 = $(RISCV64_O) armflush.o $(LIN_O)
++RISCV32_O = libtcc1.o $(COMMON_O)
++OBJ-riscv32 = $(RISCV32_O) armflush.o $(LIN_O)
+ 
+ OBJ-extra = $(filter $(EXTRA_O),$(OBJ-$T))
+ OBJ-libtcc1 = $(addprefix $(X),$(filter-out $(OBJ-extra),$(OBJ-$T)))
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/riscv64-gen.c ../../tmp/tcc/src/riscv64-gen.c
+--- a/riscv64-gen.c
++++ b/riscv64-gen.c
+@@ -21,12 +21,21 @@
+ #define REG_IRE2 (TREG_R(1)) // int 2nd return register number
+ #define REG_FRET (TREG_F(0)) // float return register number
+ 
++#ifdef TCC_TARGET_RISCV32
++#define PTR_SIZE 4
++
++#define LDOUBLE_SIZE 8
++#define LDOUBLE_ALIGN 8
++
++#define MAX_ALIGN 8
++#else
+ #define PTR_SIZE 8
+ 
+ #define LDOUBLE_SIZE 16
+ #define LDOUBLE_ALIGN 16
+ 
+ #define MAX_ALIGN 16
++#endif
+ 
+ #define CHAR_IS_UNSIGNED
+ 
+@@ -46,7 +55,11 @@
+ 
+ ST_DATA const char * const target_machine_defs =
+     "__riscv\0"
++#ifdef TCC_TARGET_RISCV32
++    "__riscv_xlen 32\0"
++#else
+     "__riscv_xlen 64\0"
++#endif
+     "__riscv_flen 64\0"
+     "__riscv_div\0"
+     "__riscv_mul\0"
+@@ -55,7 +68,14 @@
+     "__riscv_float_abi_double\0"
+     ;
+ 
+-#define XLEN 8
++#define XLEN PTR_SIZE
++#define XBITS (XLEN * 8)
++
++/* 語 1 本の読み書き: RV64 は ld/sd (funct3 = 3)，RV32 は lw/sw (= 2) */
++#define F3_LX (XLEN == 8 ? 3 : 2)
++/* opcode に足すと 32 bit 幅の演算になる (RV64 の OP-IMM-32 / OP-32)。
++   RV32 には無く，素の演算がそのまま 32 bit である */
++#define OP32 (XLEN == 8 ? 8 : 0)
+ 
+ #define TREG_RA 17
+ #define TREG_SP 18
+@@ -213,7 +233,7 @@
+                 doload || !forstore
+                   ? R_RISCV_PCREL_LO12_I : R_RISCV_PCREL_LO12_S, 0);
+         if (doload) {
+-            EI(0x03, 3, rr, rr, 0); // ld RR, 0(RR)
++            EI(0x03, F3_LX, rr, rr, 0); // l[wd] RR, 0(RR)
+             if (large_addend) {
+                 o(0x37 | (6 << 7) | UPPER(fc)); //lui t1, high(fc)
+                 ER(0x33, 0, rr, rr, 6, 0); // add RR, RR, t1
+@@ -274,7 +294,7 @@
+             fc = 0; // XXX store ofs in LVAL(reg)
+         } else if (v == VT_LLOCAL) {
+             br = load_symofs(r, sv, 0, &fc);
+-            EI(0x03, 3, rr, br, fc); // ld RR, fc(BR)
++            EI(0x03, F3_LX, rr, br, fc); // l[wd] RR, fc(BR)
+             br = rr;
+             fc = 0;
+         } else if (v == VT_CONST) {
+@@ -293,7 +313,7 @@
+         }
+         EI(opcode, func3, rr, br, fc); // l[bhwd][u] / fl[wd] RR, fc(BR)
+     } else if (v == VT_CONST) {
+-        int rb = 0, do32bit = 8, zext = 0;
++        int rb = 0, do32bit = OP32, zext = 0;
+         if (is_float(sv->type.t) && bt != VT_LDOUBLE) {
+             /* load float/double constant: move bit pattern from int reg */
+             uint64_t val = sv->c.i;
+@@ -307,7 +327,7 @@
+             } else {
+                 if (LOW_OVERFLOW(fc))
+                     o(0x37 | (6 << 7) | UPPER(fc)); // lui t1, upper
+-                EI(0x13 | 8, 0, 6, LOW_OVERFLOW(fc) ? 6 : 0, SIGN11(fc)); // addiw t1,...
++                EI(0x13 | OP32, 0, 6, LOW_OVERFLOW(fc) ? 6 : 0, SIGN11(fc)); // addi[w] t1,...
+             }
+             o(0x53 | (rr << 7) | (6 << 15) | ((unsigned)(0x78 | is_dbl) << 25));
+             return;
+@@ -431,7 +451,10 @@
+         fc = 0; // XXX support offsets regs
+     } else if (fr == VT_CONST) {
+         int64_t si = sv->c.i;
+-        ptrreg = 8; // s0
++        /* 番地を絶対値で書く場合の base。**s0 を使ってはいけない。**
++           s0 は枠の指し手であり，ここで潰すと後片付け (mv sp,s0 と
++           ra / s0 の復元) が壊れる。t0 は割付けの対象外なので安全 */
++        ptrreg = 5; // t0
+         si >>= 32;
+         if (si != 0) {
+ 	    load_large_constant(ptrreg, fc, si);
+@@ -519,7 +542,7 @@
+         greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
+         o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
+         greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
+-        EI(0x03, 3, 10, 10, 0); // ld a0, 0(a0)
++        EI(0x03, F3_LX, 10, 10, 0); // l[wd] a0, 0(a0)
+         gen_bounds_call(TOK___bound_local_new);
+         ind = saved_ind;
+         label.c = 0; /* force new local ELF symbol */
+@@ -532,7 +555,7 @@
+     greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
+     o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
+     greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
+-    EI(0x03, 3, 10, 10, 0); // ld a0, 0(a0)
++    EI(0x03, F3_LX, 10, 10, 0); // l[wd] a0, 0(a0)
+     gen_bounds_call(TOK___bound_local_delete);
+     o(0x65a26502); /* ld   a0,0(sp)   ld   a1,8(sp)   */
+     o(0x61052542); /* fld  fa0,16(sp) addi sp,sp,32   */
+@@ -773,7 +796,7 @@
+                 vtop->r2 = r2;
+             }
+             if (info[nb_args - 1 - i] & 16) {
+-                ES(0x23, 3, 2, ireg(vtop->r2), splitofs); // sd t0, ofs(sp)
++                ES(0x23, F3_LX, 2, ireg(vtop->r2), splitofs); // s[wd] t0, ofs(sp)
+                 vtop->r2 = VT_CONST;
+             } else if (loadt == VT_LDOUBLE && vtop->r2 != r2) {
+                 assert(vtop->r2 <= 7 && r2 <= 7);
+@@ -826,7 +849,7 @@
+     if (size > 2 * XLEN) {
+         loc -= 8;
+         func_vc = loc;
+-        ES(0x23, 3, 8, 10 + areg[0]++, loc); // sd a0, loc(s0)
++        ES(0x23, F3_LX, 8, 10 + areg[0]++, loc); // s[wd] a0, loc(s0)
+     }
+     /* define parameters */
+     while ((sym = sym->next) != NULL) {
+@@ -856,13 +879,13 @@
+             for (i = 0; i < regcount; i++) {
+                 if (areg[prc[1+i] - 1] >= 8) {
+                     assert(i == 1 && regcount == 2 && !(addr & 7));
+-                    EI(0x03, 3, 5, 8, addr); // ld t0, addr(s0)
++                    EI(0x03, F3_LX, 5, 8, addr); // l[wd] t0, addr(s0)
+                     addr += 8;
+-                    ES(0x23, 3, 8, 5, loc + i*8); // sd t0, loc(s0)
++                    ES(0x23, F3_LX, 8, 5, loc + i*XLEN); // s[wd] t0, loc(s0)
+                 } else if (prc[1+i] == RC_FLOAT) {
+                     ES(0x27, (size / regcount) == 4 ? 2 : 3, 8, 10 + areg[1]++, loc + (fieldofs[i+1] >> 4)); // fs[wd] FAi, loc(s0)
+                 } else {
+-                    ES(0x23, 3, 8, 10 + areg[0]++, loc + i*8); // sd aX, loc(s0) // XXX
++                    ES(0x23, F3_LX, 8, 10 + areg[0]++, loc + i*XLEN); // s[wd] aX, loc(s0) // XXX
+                 }
+             }
+         }
+@@ -873,7 +896,7 @@
+     if (func_var) {
+         for (; areg[0] < 8; areg[0]++) {
+             num_va_regs++;
+-            ES(0x23, 3, 8, 10 + areg[0], -8 + num_va_regs * 8); // sd aX, loc(s0)
++            ES(0x23, F3_LX, 8, 10 + areg[0], -XLEN + num_va_regs * XLEN); // s[wd] aX, loc(s0)
+         }
+     }
+ #ifdef CONFIG_TCC_BCHECK
+@@ -927,18 +950,18 @@
+         gen_bounds_epilog();
+ #endif
+ 
+-    loc = (loc - num_va_regs * 8);
++    loc = (loc - num_va_regs * XLEN);
+     d = v = (-loc + 15) & -16;
+ 
+-    EI(0x13, 0, 2, 8, num_va_regs * 8); // addi sp, s0, num_va_regs*8
+-    EI(0x03, 3, 1, 8, -8); // ld ra, -8(s0)
+-    EI(0x03, 3, 8, 8, -16); // ld s0, -16(s0)
++    EI(0x13, 0, 2, 8, num_va_regs * XLEN); // addi sp, s0, num_va_regs*8
++    EI(0x03, F3_LX, 1, 8, -XLEN); // l[wd] ra, -XLEN(s0)
++    EI(0x03, F3_LX, 8, 8, -2 * XLEN); // l[wd] s0, -2*XLEN(s0)
+     EI(0x67, 0, 0, 1, 0); // jalr x0, 0(x1), aka ret
+ 
+     large_ofs_ind = ind;
+     if (v >= (1 << 11)) {
+         d = 16;
+-        EI(0x13, 0, 8, 2, d - num_va_regs * 8);      // addi s0, sp, d
++        EI(0x13, 0, 8, 2, d - num_va_regs * XLEN);      // addi s0, sp, d
+         o(0x37 | (5 << 7) | UPPER(v-16)); //lui t0, upper(v)
+         EI(0x13, 0, 5, 5, SIGN11(v-16)); // addi t0, t0, lo(v)
+         ER(0x33, 0, 2, 2, 5, 0x20); // sub sp, sp, t0
+@@ -948,10 +971,10 @@
+ 
+     ind = func_sub_sp_offset;
+     EI(0x13, 0, 2, 2, -d);     // addi sp, sp, -d
+-    ES(0x23, 3, 2, 1, d - 8 - num_va_regs * 8);  // sd ra, d-8(sp)
+-    ES(0x23, 3, 2, 8, d - 16 - num_va_regs * 8); // sd s0, d-16(sp)
++    ES(0x23, F3_LX, 2, 1, d - XLEN - num_va_regs * XLEN);  // s[wd] ra, d-XLEN(sp)
++    ES(0x23, F3_LX, 2, 8, d - 2 * XLEN - num_va_regs * XLEN); // s[wd] s0, d-2*XLEN(sp)
+     if (v < (1 << 11))
+-      EI(0x13, 0, 8, 2, d - num_va_regs * 8);      // addi s0, sp, d
++      EI(0x13, 0, 8, 2, d - num_va_regs * XLEN);      // addi s0, sp, d
+     else
+       gjmp_addr(large_ofs_ind);
+     if ((ind - func_sub_sp_offset) != 5*4)
+@@ -1040,12 +1063,15 @@
+ {
+     int a, b, d;
+     int func3 = 0;
+-    ll = ll ? 0 : 8;
++    /* ll は「64 bit の演算か」を表す。RV64 では 32 bit の演算に w 付きの
++       命令 (OP-32 / OP-IMM-32) を使うので opcode への足し込みへ変える。
++       RV32 では語がもともと 32 bit なので足し込みは常に 0 である */
++    ll = XLEN == 8 ? (ll ? 0 : 8) : 0;
+     if ((vtop->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST) {
+         int fc = vtop->c.i;
+         if (fc == vtop->c.i && !LOW_OVERFLOW(fc)) {
+             int cll = 0;
+-            int m = ll ? 31 : 63;
++            int m = (ll || XLEN == 4) ? 31 : 63;
+             vswap();
+             gv(RC_INT);
+             a = ireg(vtop[0].r);
+@@ -1172,10 +1198,13 @@
+     gen_opil(op, 0);
+ }
+ 
++#ifndef TCC_TARGET_RISCV32
++/* 32 bit 対象の 64 bit 演算は tccgen.c の gen_opl が組み立てる */
+ ST_FUNC void gen_opl(int op)
+ {
+     gen_opil(op, 1);
+ }
++#endif
+ 
+ ST_FUNC void gen_opf(int op)
+ {
+@@ -1279,25 +1308,28 @@
+     int r = ireg(gv(RC_INT));
+     if ((t & VT_BTYPE) == VT_SHORT) {
+         if (t & VT_UNSIGNED) {
+-            EI(0x13, 1, r, r, 48); // slli r, r, 48
+-            EI(0x13, 5, r, r, 48); // srli r, r, 48
++            EI(0x13, 1, r, r, XBITS - 16); // slli r, r, XBITS-16
++            EI(0x13, 5, r, r, XBITS - 16); // srli r, r, XBITS-16
+         } else {
+-            EI(0x13, 1, r, r, 48); // slli r, r, 48
+-            EIu(0x13, 5, r, r, 0x400 | 48); // srai r, r, 48
++            EI(0x13, 1, r, r, XBITS - 16); // slli r, r, XBITS-16
++            EIu(0x13, 5, r, r, 0x400 | (XBITS - 16)); // srai r, r, XBITS-16
+         }
+     } else {
+         if (t & VT_UNSIGNED) {
+             EI(0x13, 7, r, r, 0xff); // andi r, r, 0xff
+         } else {
+-            EI(0x13, 1, r, r, 56); // slli r, r, 56
+-            EIu(0x13, 5, r, r, 0x400 | 56); // srai r, r, 56
++            EI(0x13, 1, r, r, XBITS - 8); // slli r, r, XBITS-8
++            EIu(0x13, 5, r, r, 0x400 | (XBITS - 8)); // srai r, r, XBITS-8
+         }
+     }
+ }
+ 
+ ST_FUNC void gen_cvt_sxtw(void)
+ {
+-    int r = ireg(gv(RC_INT));
++    int r;
++    if (XLEN == 4)
++      return; /* 語が 32 bit なので int から語への符号拡張は要らない */
++    r = ireg(gv(RC_INT));
+     EI(0x1b, 0, r, r, 0); // addiw r, r, 0
+ }
+ 
+@@ -1416,14 +1448,14 @@
+     put_extern_sym(&label, cur_text_section, ind, 0);
+     o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
+     greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
+-    EI(0x03, 3, r2, r1, 0); // ld r2, x[r1]
++    EI(0x03, F3_LX, r2, r1, 0); // l[wd] r2, x[r1]
+     EI(0x13, 0, r2, r2, 1); // addi r2, r2, #1
+     greloca(cur_text_section, sv->sym, ind, R_RISCV_PCREL_HI20, 0);
+     label.c = 0; /* force new local ELF symbol */
+     put_extern_sym(&label, cur_text_section, ind, 0);
+     o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
+     greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_S, 0);
+-    ES(0x23, 3, r1, r2, 0); // sd r2, [r1]
++    ES(0x23, F3_LX, r1, r2, 0); // s[wd] r2, [r1]
+     vpop();
+ }
+ 
+@@ -1438,10 +1470,10 @@
+     if (LOW_OVERFLOW(addr)) {
+ 	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
+         ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
+-        ES(0x23, 3, 5, 2, SIGN11(addr)); // sd sp, fc(t0)
++        ES(0x23, F3_LX, 5, 2, SIGN11(addr)); // s[wd] sp, fc(t0)
+     }
+     else
+-        ES(0x23, 3, 8, 2, addr); // sd sp, fc(s0)
++        ES(0x23, F3_LX, 8, 2, addr); // s[wd] sp, fc(s0)
+ }
+ 
+ ST_FUNC void gen_vla_sp_restore(int addr)
+@@ -1449,10 +1481,10 @@
+     if (LOW_OVERFLOW(addr)) {
+ 	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
+         ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
+-        EI(0x03, 3, 2, 5, SIGN11(addr)); // ld sp, fc(t0)
++        EI(0x03, F3_LX, 2, 5, SIGN11(addr)); // l[wd] sp, fc(t0)
+     }
+     else
+-        EI(0x03, 3, 2, 8, addr); // ld sp, fc(s0)
++        EI(0x03, F3_LX, 2, 8, addr); // l[wd] sp, fc(s0)
+ }
+ 
+ ST_FUNC void gen_vla_alloc(CType *type, int align)
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/tcc.h ../../tmp/tcc/src/tcc.h
+--- a/tcc.h
++++ b/tcc.h
+@@ -401,6 +401,14 @@
+ # define ElfW_Rel ElfW(Rela)
+ # define SHT_RELX SHT_RELA
+ # define REL_SECTION_FMT ".rela%s"
++#elif defined TCC_TARGET_RISCV32
++/* RISC-V の再配置は 32 bit でも加数を項目に持つ (RELA) */
++# define ELFCLASSW ELFCLASS32
++# define ElfW(type) Elf##32##_##type
++# define ELFW(type) ELF##32##_##type
++# define ElfW_Rel ElfW(Rela)
++# define SHT_RELX SHT_RELA
++# define REL_SECTION_FMT ".rela%s"
+ #else
+ # define ELFCLASSW ELFCLASS32
+ # define ElfW(type) Elf##32##_##type
+@@ -1720,7 +1728,9 @@
+ 
+ /* ------------ riscv64-gen.c ------------ */
+ #ifdef TCC_TARGET_RISCV64
+-ST_FUNC void gen_opl(int op);
++#ifndef TCC_TARGET_RISCV32
++ST_FUNC void gen_opl(int op); /* 32 bit 対象では tccgen.c が持つ */
++#endif
+ ST_FUNC void gen_va_start(void);
+ ST_FUNC void arch_transfer_ret_regs(int);
+ ST_FUNC void gen_cvt_sxtw(void);
