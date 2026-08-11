@@ -10,7 +10,10 @@ cc3 は C コンパイラである。第 2 部の 1 の [cc2.sc](cc2.sc) を出�
 
 ## ビルド
 
-
+```
+sh tools/build.sh stage010
+# ... -> cc10b -> cc10c0 (ブートストラップ) -> cc10c
+```
 
 SHA-256: 507d89ae3e7636c93cad517f8789930a2d8c0039b4be25eecab4bbb51917724c
 

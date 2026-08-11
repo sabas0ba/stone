@@ -102,6 +102,14 @@ build_stage014() {
     { cat tmp/build/pp14.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp14.bin
     echo "built tmp/build/pp14.bin" >&2
+    # カーネルの第 14 世代 (sfs の上書きと ELF の検査。第 10 部)。
+    # libc と同じく最前線の cc14g でコンパイルし，ld14 の 'K' を付ける
+    sh tools/bundle.sh stage014/kernel14.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/kernel14.i
+    sh tools/env.sh qemu tmp/build/cc14g.bin < tmp/build/kernel14.i > tmp/build/kernel14.o
+    { printf 'K'; cat tmp/build/kernel14.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/build/kernel14.bin
+    echo "built tmp/build/kernel14.bin" >&2
     # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14g で
     # コンパイルする (外部ソースと同じ経路に載せるため)
     for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio posix/assert; do
@@ -117,12 +125,13 @@ do_stage014() {
     run_stage stage014 cc14a0.bin cc14a.bin cc14b0.bin cc14b.bin \
         cc14c0.bin cc14c.bin cc14d0.bin cc14d.bin cc14e0.bin cc14e.bin \
         cc14f0.bin cc14f.bin cc14g0.bin cc14g.bin ld14.bin pp14.bin \
+        kernel14.bin \
         l14_src_string.o l14_src_ctype.o l14_src_stdlib.o l14_src_morecore.o \
         l14_posix_sys.o l14_posix_morecore.o l14_posix_stdio.o l14_posix_assert.o \
         -- stage014/cc14.sc stage014/cc14b.sc stage014/cc14c.sc \
            stage014/cc14d.sc stage014/cc14e.sc stage014/cc14f.sc \
            stage014/cc14g.sc stage014/ld14.sc stage014/pp14.sc \
-           stage014/libc/include/*.h \
+           stage014/kernel14.c stage014/libc/include/*.h \
            stage014/libc/src/*.c stage014/libc/posix/*.c \
            tmp/build/stage010.stamp tools/build/stage014.sh tools/bundle.sh
 }

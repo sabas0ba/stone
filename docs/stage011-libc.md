@@ -53,20 +53,25 @@ syscall を獲得する Stage 12 の課題である。
 ### 2.1 置き場
 
 ```
-include/        ヘッダ (利用者から見える面)
+libc/include/   ヘッダ (利用者から見える面)
   stddef.h      size_t, NULL, offsetof
   limits.h      CHAR_BIT, INT_MAX, ...
   stdarg.h      (Stage 10 第 3 部の 2 で追加済み)
   string.h
   ctype.h
-lib/            実装 (自作の C)
+libc/src/       実装 (自作の C)
   string.c
   ctype.c
 ```
 
 ヘッダと実装を分けるのは，**利用者が見るものと処理系が持つものを分ける**
-ためである。`include/` は前処理で取り込まれ，`lib/` はコンパイルされて
-オブジェクトになる。
+ためである。`libc/include/` は前処理で取り込まれ，`libc/src/` は
+コンパイルされてオブジェクトになる。
+
+置き場は世代ごとに凍結され，`stage011/libc/` `stage012/libc/` … と
+Stage 名の下に置かれる ([artifacts.md](artifacts.md))。本章以降で
+`libc/include/x.h` と書いたものは，第 11 世代では
+`stage011/libc/include/x.h` を指す。
 
 ### 2.2 リンクの通し方
 
@@ -155,10 +160,13 @@ C89 に `restrict` は無い (C99)。`const` は Stage 10 第 2 部の 1 で
 
 ## 4. 成果物
 
-- `include/stddef.h` `include/limits.h` `include/string.h` `include/ctype.h`
-- `lib/string.c` `lib/ctype.c`
+- `libc/include/stddef.h` `libc/include/limits.h` `libc/include/string.h` `libc/include/ctype.h`
+- `libc/src/string.c` `libc/src/ctype.c`
 - `tmp/build/string.o` `tmp/build/ctype.o` (ビルド生成物)
-- 第 2 部: `include/stdlib.h` `lib/stdlib.c` `lib/morecore.c` `tmp/build/stdlib.o` `tmp/build/morecore.o` (7 章)
+- 第 2 部: `libc/include/stdlib.h` `libc/src/stdlib.c` `tmp/build/stdlib.o` (7 章)。
+  `morecore` は第 11 世代では `stdlib.c` の中の内部関数であり，独立した
+  `morecore.c` になるのは Stage 12 で `brk` を獲得してからである
+  (`stage012/libc/src/morecore.c`)
 - 第 3 部: 同上へ追加 (8 章)
 
 ## 5. 検証計画 (tests/stage011)

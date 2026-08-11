@@ -15,7 +15,7 @@ Stage 10 の成果物 (pp + cc) でビルドする。リンク済みの実行像
 オブジェクトのまま置き，利用側が必要なものだけを ld に指定する。
 
 ```
-sh tools/build.sh stage011
+sh tools/build.sh stage012
 # bundle(stddef.h string.h string.c) | pp | cc -> string.o
 ```
 

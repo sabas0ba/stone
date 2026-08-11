@@ -89,7 +89,9 @@ sh tools/build.sh stage006   # hex0 -> hex1 -> asm -> sol -> sc -> scc1 -> scc �
 
 ## 4. 検証計画 (tests/stage006)
 
-1. ビルド再現: B1 (scc1.bin)・B2 (scc.bin) の SHA-256 が scc.md 記載値と一致すること
+1. ビルド再現: B2 (scc.bin) の SHA-256 が scc.md 記載値と一致すること
+   (B1 (scc1.bin) は SHA-256 を記録せず，次項の B1 == B2 で実質的に
+   同じ検査になる)
 2. 固定点: B3 = B2(scc.sc) が B2 とビット一致すること (完了条件)。
    併せて B1 == B2 (コード生成の同一性) を確認する
 3. 同値性: Stage 5 仕様スイート (arith/fib/ptr/struct/upper) を B2 で

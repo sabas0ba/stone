@@ -16,7 +16,7 @@ morecore.o は malloc の供給源 (固定領域版) である。ヒープを `.
 ## ビルド
 
 ```
-sh tools/build.sh stage011
+sh tools/build.sh stage012
 # bundle(stddef.h morecore.c) | pp | cc -> morecore.o
 ```
 

@@ -136,6 +136,16 @@ done < tests/stage014/ledger.txt
 echo
 echo "   台帳: 通る $nok 件 / 未対応 $ngap 件 / 通るが誤り $nbad 件"
 
+# 台帳は行駆動なので，probe/ に足しただけで台帳に載せていないファイルは
+# 黙って検査されない。1:1 であることを確かめる (probe を足したのに台帳を
+# 直し忘れた，を捕まえる)
+sed 's/#.*//' tests/stage014/ledger.txt | awk 'NF { print $1 }' | sort > tmp/s14/ledger.names
+find "$prb" -name '*.c' -exec basename {} .c \; | sort > tmp/s14/probe.names
+diff -u tmp/s14/probe.names tmp/s14/ledger.names > tmp/s14/names.diff
+rc=$?
+[ "$rc" -eq 0 ] || { echo "   (- が probe/ のみ，+ が台帳のみ)"; sed -n '4,$p' tmp/s14/names.diff; }
+report $rc "台帳: probe/*.c と ledger.txt の項目が 1:1"
+
 # ---------------------------------------------------------------------------
 section "libc 第 14 世代 (第 7 部)"
 
@@ -334,5 +344,112 @@ sys.exit(0 if zlib.decompress(zz) == src else 1)'
         echo "   skip: ホストに python3 の zlib が無い (相互運用の検査)"
     fi
 fi
+
+section "第 10 部: カーネル第 14 世代 (kernel14)"
+
+want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage014/kernel14.md | cut -d' ' -f2)
+got=$(sha256sum tmp/build/kernel14.bin); got=${got%% *}
+[ -n "$want" ] && [ "$want" = "$got" ]
+report $? "build: kernel14.bin の SHA-256 が kernel14.md 記載値と一致"
+
+# 検査用のフィルタ (生のスタブだけ。libc を並べない)
+{ cat tests/stage014/user/cpfilt.c; printf '\004'; } \
+    | sh tools/env.sh qemu "$cc" > tmp/s14/cpfilt.o 2> /dev/null \
+    && { printf 'E'; cat tmp/s14/cpfilt.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/s14/cpfilt
+report $? "build: cpfilt (標準入出力を写すフィルタ)"
+
+# root/ を仕立てて指定のカーネルで走らせ，イメージを回収して展開する。
+# $1 = カーネル, $2 = 出力名, $3 = シェルへ流し込む行
+runk() {
+    sh tools/sfs.sh pack tmp/s14/root tmp/s14/fs.img "$IMGSIZE" 128 || return 1
+    rm -f tmp/s14/ram
+    dd if=/dev/null of=tmp/s14/ram bs=1 seek="$RAMSIZE" 2> /dev/null
+    dd if=tmp/s14/fs.img of=tmp/s14/ram bs=64K oflag=seek_bytes seek="$SFSOFF" \
+        conv=notrunc 2> /dev/null
+    # 末尾に EOT を置く。シェルは `exit` でも終わるが，取りこぼしたときに
+    # UART の read が永久に待つ (kernel の fd 0 はブロックする) ため，
+    # 入力の終わりを必ず伝える
+    printf '%s\004' "$3" | STONE_QEMU_RAMFILE=tmp/s14/ram \
+        sh tools/env.sh qemu "$1" > "tmp/s14/$2.out" 2>&1
+    krc=$?
+    dd if=tmp/s14/ram of=tmp/s14/fs2.img bs=64K iflag=skip_bytes,count_bytes \
+        skip="$SFSOFF" count="$IMGSIZE" 2> /dev/null
+    rm -rf "tmp/s14/out.$2"
+    sh tools/sfs.sh unpack tmp/s14/fs2.img "tmp/s14/out.$2" > /dev/null 2>&1
+    return $krc
+}
+
+# --- #44: 既存ファイルの上書きが隣接を壊さず，カーソルも巻き戻らない ---
+#
+# pack は名前順に詰めるので割付け順は a.txt, b.txt, boot, cpfilt, in.txt, sh。
+# a.txt (3 バイト = 割付け 4) を in.txt の中身で書き直すと元の割付けを
+# はみ出す。kernel13 は直後の b.txt を潰し，さらにカーソルが巻き戻って
+# 次の新規作成 (new.txt) が in.txt 自身に重なった
+rm -rf tmp/s14/root
+mkdir -p tmp/s14/root
+cp tmp/build/sh13 tmp/s14/root/sh
+cp tmp/s14/cpfilt tmp/s14/root/cpfilt
+printf 'sh\n' > tmp/s14/root/boot
+printf 'abc' > tmp/s14/root/a.txt
+printf 'KEEP-THIS-FILE-INTACT-0123456789' > tmp/s14/root/b.txt
+printf 'this is a much longer input line than four bytes\n' > tmp/s14/root/in.txt
+runk tmp/build/kernel14.bin ovw \
+    'cpfilt < in.txt > a.txt
+cpfilt < in.txt > new.txt
+exit
+'
+report $? "run: 上書きと新規作成を含むシェル行が kernel14 で通る"
+
+o=tmp/s14/out.ovw
+cmp -s "$o/a.txt" tmp/s14/root/in.txt
+report $? "sfs: 割付けを越えた上書きの内容が正しい (a.txt)"
+
+cmp -s "$o/b.txt" tmp/s14/root/b.txt
+report $? "sfs: 直後に割り付けられたファイルが無傷 (b.txt)"
+
+cmp -s "$o/in.txt" tmp/s14/root/in.txt
+report $? "sfs: 上書き後の新規作成が既存に重ならない (in.txt が無傷)"
+
+cmp -s "$o/new.txt" tmp/s14/root/in.txt
+report $? "sfs: 上書き後に作った新規ファイルの内容が正しい (new.txt)"
+
+# --- #49: 載せ先がユーザ領域の外にある ELF を拒む ---
+#
+# 正しい実行形式の p_vaddr をカーネル本体 (0x8000_0000) へ向ける。
+# kernel13 はこれをそのまま複写して自分を壊し，機械ごと止まった
+r32() { od -An -tu4 -j "$2" -N4 "$1" | tr -d ' '; }
+w32() {
+    _v=$3
+    printf "$(printf '\\%03o\\%03o\\%03o\\%03o' \
+        $((_v & 255)) $((_v >> 8 & 255)) $((_v >> 16 & 255)) $((_v >> 24 & 255)))" \
+        | dd of="$1" bs=1 seek="$2" conv=notrunc 2> /dev/null
+}
+cp tmp/s14/cpfilt tmp/s14/badelf
+ph=$(r32 tmp/s14/badelf 28)
+w32 tmp/s14/badelf $((ph + 8)) $((0x80000000))
+
+rm -rf tmp/s14/root
+mkdir -p tmp/s14/root
+cp tmp/build/sh13 tmp/s14/root/sh
+cp tmp/s14/badelf tmp/s14/root/badelf
+printf 'sh\n' > tmp/s14/root/boot
+runk tmp/build/kernel14.bin badelf 'badelf
+exit
+'
+report $? "run: 壊れた ELF を起動してもカーネルが生き残りシェルが続く"
+
+grep -q 'errno 8' tmp/s14/badelf.out
+report $? "elf: 載せ先がユーザ領域の外なら ENOEXEC (8) で拒む"
+
+# --- 退行: kernel13 で動いていたものが kernel14 でも同じ結果になる ---
+rm -rf tmp/s14/root
+mkdir -p tmp/s14/root
+cp tmp/s14/lib14 tmp/s14/root/lib14
+printf 'lib14\n' > tmp/s14/root/boot
+runk tmp/build/kernel14.bin lib14k14 ''
+rc=$?
+[ "$rc" -eq 0 ] && diff -q tmp/s14/lib14k14.out tests/stage014/expected/lib14.txt > /dev/null
+report $? "regress: lib14 が kernel14 でも kernel13 と同じ出力になる"
 
 summary

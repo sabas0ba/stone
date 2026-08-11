@@ -6,7 +6,8 @@
 #   2. 上位互換: hex1(hex0.hex) == hex0.bin
 #   3. 自己ビルド: hex1(hex1.hex) == hex1.bin
 #   4. ラベル機能: 前方・後方参照 (!/$/&) が手計算版と一致し，生成物が実行できる
-#   5. エラー系: 未定義ラベル -> 3, 重複定義 -> 4
+#   5. エラー系: 未定義ラベル -> 3, 重複定義 -> 4, 奇数オフセット -> 5
+#   6. verify 層: hex1.hex の注釈が objdump の逆アセンブルと一致
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -56,5 +57,19 @@ report $? "error: 未定義ラベルで終了コード 3"
 printf ':a 00 :a 00 .' | sh tools/env.sh qemu "$hex1" > /dev/null
 [ $? -eq 4 ]
 report $? "error: 重複定義で終了コード 4"
+
+# err5 (奇数オフセット) は「数千命令規模の入力を要する」と長く書かれて
+# きたが，B-type の参照先が 2 の倍数でなければ 3 バイトで発火する
+# (docs/stage002-hex1.md 5.3)
+printf ':a 00 !a 63 00 00 00 .' | sh tools/env.sh qemu "$hex1" > /dev/null
+[ $? -eq 5 ]
+report $? "error: 奇数オフセットの B-type 参照で終了コード 5"
+
+# 6. verify 層 (docs/stage002-hex1.md 5 章 5)。listing はロード位置からの
+# オフセットで注釈するので base に 0x80000000 を渡す
+sh verify/checklisting.sh stage002/hex1.hex "$hex1" 0x80000000 > tmp/hex1-listing.txt 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || cat tmp/hex1-listing.txt
+report "$rc" "verify: hex1.hex の注釈が objdump の逆アセンブルと一致"
 
 summary

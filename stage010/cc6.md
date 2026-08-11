@@ -12,7 +12,7 @@ cc6 は C コンパイラである。第 2 部の 4 の [cc5.sc](cc5.sc) を出�
 
 ```
 sh tools/build.sh stage010
-# ... -> cc10e -> cc10f0 (ブートストラップ) -> cc10f (= cc.bin)
+# ... -> cc10e -> cc10f0 (ブートストラップ) -> cc10f
 ```
 
 SHA-256: 8f3214b51ca257c1d97061ede0a798cc523b6754b3e70b49b3513333d15ca18f

@@ -123,7 +123,10 @@ listing とバイナリの整合は自己再生成テストで検証する (6 �
 3. 交差検証: `hex0(hello.hex) == tests/stage000/hello.bin`。hello の listing を
    hex0 言語で記述した検証入力を用意する
 4. エラー系: 不正文字で終了コード 1，奇数桁 + `end` で終了コード 2
-5. verify 層: hex0.bin を objdump で逆アセンブルし，hex0.md の listing と照合する
+5. verify 層: hex0.bin を objdump で逆アセンブルし，hex0.hex の注釈と照合する。
+   `verify/checklisting.sh` が機械照合し，テストから毎回呼ぶ (人手の目視では
+   ない)。注釈のアドレス・ニーモニック・オペランドを突き合わせるので，
+   「バイト列は正しいが注釈だけがドリフトしている」状態を捕まえられる
    (手順とスクリプトは verify/ 配下)
 
 ## 7. Stage 2 への接続

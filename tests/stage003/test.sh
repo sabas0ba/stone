@@ -41,10 +41,13 @@ sh tools/env.sh qemu "$asm" < tmp/asm-self.s > tmp/asm-self.bin \
 report $? "self: asm(asm.hex1 の転記) が asm.bin とビット一致"
 
 # 4. 実行
+# アセンブル自体の成否を独立して報告する。まとめてしまうと，アセンブラが
+# 落ちたのか生成物の実行結果が違うのかが読めない
 sh tools/env.sh qemu "$asm" < tests/stage003/run.s > tmp/run-s.bin
 rc=$?
-[ "$rc" -eq 0 ] || echo "  (assemble rc=$rc)"
-sh tools/env.sh qemu tmp/run-s.bin < /dev/null > tmp/run-s.out
+report $rc "assemble: asm(run.s) が終了コード 0 でアセンブルできる"
+
+[ "$rc" -eq 0 ] && sh tools/env.sh qemu tmp/run-s.bin < /dev/null > tmp/run-s.out
 rc=$?
 [ "$rc" -eq 0 ] && [ "$(cat tmp/run-s.out)" = "OK" ]
 report $? "run: asm(run.s) の実行 (stdout 'OK', 終了コード 0)"
@@ -69,5 +72,16 @@ report $? "error: 即値範囲外で終了コード 6"
 printf 'add x32 x1 x2 .' | sh tools/env.sh qemu "$asm" > /dev/null
 [ $? -eq 7 ]
 report $? "error: 不正レジスタで終了コード 7"
+
+# 名前の 15 バイト超過は構文の誤り (コード 1)
+printf 'averyveryverylonglabel: .' | sh tools/env.sh qemu "$asm" > /dev/null
+[ $? -eq 1 ]
+report $? "error: 名前の長さ超過で終了コード 1"
+
+# コード 5 は距離超過だけでなく奇数オフセットでも出る。ラベルを置いてから
+# 1 バイト詰めると分岐命令との差が奇数になるので，距離を稼がずに発火する
+printf 'a: byte 0 beq x0 x0 a .' | sh tools/env.sh qemu "$asm" > /dev/null
+[ $? -eq 5 ]
+report $? "error: 奇数オフセットの分岐で終了コード 5"
 
 summary

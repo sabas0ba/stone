@@ -12,7 +12,7 @@ cc8 は C コンパイラである。第 3 部の 1 の [cc7.sc](cc7.sc) を出�
 
 ```
 sh tools/build.sh stage010
-# ... -> cc10g -> cc10h0 (ブートストラップ) -> cc10h (= cc.bin)
+# ... -> cc10g -> cc10h0 (ブートストラップ) -> cc10h
 ```
 
 SHA-256: 2d3784eea93391d8291c18a9d7bfa981e984a23be2c5a592de63f57803501e14

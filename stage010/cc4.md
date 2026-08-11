@@ -10,7 +10,10 @@ cc4 は C コンパイラである。第 2 部の 2 の [cc3.sc](cc3.sc) を出�
 
 ## ビルド
 
-
+```
+sh tools/build.sh stage010
+# ... -> cc10c -> cc10d0 (ブートストラップ) -> cc10d
+```
 
 SHA-256: 180d02b1c8d5c82db6ab6e6113a5b46cca2ac5bdd8a27f0a8c6bf054ffb0f61f
 
