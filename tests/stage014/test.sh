@@ -17,7 +17,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s14
 
-cc=tmp/build/cc14f.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
+cc=tmp/build/cc14g.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage014/probe
@@ -61,21 +61,22 @@ ok=0
 for pair in cc14a.bin:stage014/cc14.md cc14b.bin:stage014/cc14b.md \
         cc14c.bin:stage014/cc14c.md cc14d.bin:stage014/cc14d.md \
         cc14e.bin:stage014/cc14e.md cc14f.bin:stage014/cc14f.md \
+        cc14g.bin:stage014/cc14g.md \
         ld14.bin:stage014/ld14.md pp14.bin:stage014/pp14.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc14a..cc14f と ld14 / pp14 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc14a..cc14g と ld14 / pp14 の SHA-256 が各 .md 記載値と一致"
 
 # 世代を触ったら必ず固定点を見る (docs/dev-notes.md 3.1)
-{ cat stage014/cc14f.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc14f.bin > tmp/s14/b3.o \
+{ cat stage014/cc14g.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc14g.bin > tmp/s14/b3.o \
     && { cat tmp/s14/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s14/b3.bin \
-    && cmp -s tmp/s14/b3.bin tmp/build/cc14f.bin
-report $? "fixpoint: cc14f が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s14/b3.bin tmp/build/cc14g.bin
+report $? "fixpoint: cc14g が自分自身を再生成する (B2 == B3)"
 
 # コード生成を触ったのは 2048 バイト以上のフレームの経路だけで，
 # 既存のソースには影響しない。cc10l と同じオブジェクトになることで示す
@@ -87,7 +88,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s14/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc14f が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc14g が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 # pp14 (第 9 部): 容量拡大の実測。長い名前と大きな入力が通り，
 # 短い入力に対しては pp と同じ出力になる
@@ -250,6 +251,87 @@ else
         report $? "interop: 圧縮出力をホストの bzip2 -d が伸長し原文と一致"
     else
         echo "   skip: ホストに bzip2 が無い (相互運用の検査)"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+section "第 9 部: 外部ソース (zlib) のビルドと実走"
+
+# 素材があるときだけ走る (docs/stage014-external.md 2.2)
+zdir=docs/external/zlib
+if [ ! -d "$zdir" ]; then
+    echo "   skip: $zdir が無い (sh tools/fetch.sh zlib で取得できる)"
+else
+    inc=stage014/libc/include
+
+    # zlib のコアを Z_SOLO (stdio・OS 非依存の構成) でコンパイルする。
+    # ソースは無改変で，設定マクロは repo 側の包み (tmp に生成) が与える。
+    # 前処理は pp14 (pp では容量が足りない。13.1)
+    zok=0
+    for f in adler32 crc32 zutil inftrees inffast inflate infback trees \
+             deflate compress uncompr; do
+        case "$f" in
+        crc32)    zdep="$zdir/zconf.h $zdir/zlib.h $zdir/zutil.h $zdir/crc32.h" ;;
+        inftrees) zdep="$zdir/zconf.h $zdir/zlib.h $zdir/zutil.h $zdir/inftrees.h" ;;
+        inffast)  zdep="$zdir/zconf.h $zdir/zlib.h $zdir/zutil.h $zdir/inftrees.h \
+                        $zdir/inflate.h $zdir/inffast.h" ;;
+        inflate|infback)
+                  zdep="$zdir/zconf.h $zdir/zlib.h $zdir/zutil.h $zdir/inftrees.h \
+                        $zdir/inflate.h $zdir/inffast.h $zdir/inffixed.h" ;;
+        trees)    zdep="$zdir/zconf.h $zdir/zlib.h $zdir/zutil.h $zdir/deflate.h \
+                        $zdir/trees.h" ;;
+        deflate)  zdep="$zdir/zconf.h $zdir/zlib.h $zdir/zutil.h $zdir/deflate.h" ;;
+        compress|uncompr)
+                  zdep="$zdir/zconf.h $zdir/zlib.h" ;;
+        *)        zdep="$zdir/zconf.h $zdir/zlib.h $zdir/zutil.h" ;;
+        esac
+        printf '#define Z_SOLO 1\n#include "%s.c"\n' "$f" > "tmp/s14/z_$f.c"
+        sh tools/bundle.sh $zdep "$zdir/$f.c" "tmp/s14/z_$f.c" 2> /dev/null \
+            | sh tools/env.sh qemu tmp/build/pp14.bin 2> /dev/null \
+            | sh tools/env.sh qemu "$cc" > "tmp/s14/z_$f.o" 2> /dev/null || zok=1
+    done
+    report $zok "build: zlib (1.3.1) のコア 11 ファイルが無改変でコンパイルできる"
+
+    # 検査ドライバ (crc32/adler32 と deflate -> inflate の往復) を組む
+    sh tools/bundle.sh "$inc/stddef.h" "$inc/stdarg.h" "$inc/stdio.h" \
+            "$inc/stdlib.h" "$zdir/zconf.h" "$zdir/zlib.h" \
+            tests/stage014/user/zt.c 2> /dev/null \
+        | sh tools/env.sh qemu tmp/build/pp14.bin 2> /dev/null \
+        | sh tools/env.sh qemu "$cc" > tmp/s14/zt.o 2> /dev/null \
+        && { printf 'E'; cat tmp/s14/zt.o \
+             tmp/s14/z_adler32.o tmp/s14/z_crc32.o tmp/s14/z_zutil.o \
+             tmp/s14/z_inftrees.o tmp/s14/z_inffast.o tmp/s14/z_inflate.o \
+             tmp/s14/z_infback.o tmp/s14/z_trees.o tmp/s14/z_deflate.o \
+             tmp/build/l14_src_string.o tmp/build/l14_src_stdlib.o \
+             tmp/build/l14_posix_sys.o tmp/build/l14_posix_morecore.o \
+             tmp/build/l14_posix_stdio.o tmp/build/l14_posix_assert.o; \
+             printf '\0'; } \
+            | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/s14/zt
+    report $? "link: 検査ドライバ + zlib + libc14 (ld14)"
+
+    rm -rf tmp/s14/root
+    mkdir -p tmp/s14/root
+    cp tmp/s14/zt tmp/s14/root/zt
+    printf 'zt\n' > tmp/s14/root/boot
+    runos14 zt
+    rc=$?
+    [ "$rc" -eq 0 ] && diff -q tmp/s14/zt.out tests/stage014/expected/zt.txt > /dev/null
+    report $? "run: crc32 / adler32 と deflate 4096 -> 2154，伸長して往復一致"
+
+    # 圧縮出力が正規の zlib ストリームであること (形式の相互運用)。
+    # ホストに python3 の zlib が無ければ飛ばす
+    if python3 -c 'import zlib' > /dev/null 2>&1; then
+        dd if=tmp/s14/ram of=tmp/s14/fs_after.img bs=64K iflag=skip_bytes \
+            skip="$SFSOFF" count=64 2> /dev/null
+        rm -rf tmp/s14/after
+        sh tools/sfs.sh unpack tmp/s14/fs_after.img tmp/s14/after > /dev/null \
+            && python3 -c 'import sys, zlib
+src = open("tmp/s14/after/src.bin", "rb").read()
+zz = open("tmp/s14/after/out.zz", "rb").read()
+sys.exit(0 if zlib.decompress(zz) == src else 1)'
+        report $? "interop: 圧縮出力をホストの zlib が伸長し原文と一致"
+    else
+        echo "   skip: ホストに python3 の zlib が無い (相互運用の検査)"
     fi
 fi
 
