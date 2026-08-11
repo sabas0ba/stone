@@ -155,7 +155,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 11 | **完了** (第 1〜3 部すべて。土台と純粋な関数・記憶域・整列と探索・数値変換) | [stage011-libc.md](stage011-libc.md) |
 | 12 | **完了** (第 1〜4 部すべて。共有領域と sfs・ld12 とカーネル・libc 環境部・stdio) (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
 | 13 | **完了** (第 1〜4 部すべて。spawn とシェル・ed・cc / ld / pp の移住・mk とゲスト内再生成)。**Phase B が終わった** | [stage013-tools.md](stage013-tools.md) |
-| 14 | **完了** (第 1〜8 部)。適合台帳・言語の拡幅 cc14a〜cc14f・libc 第 14 世代・ld14。無改変の bzip2 (libbz2 1.0.8) をビルドし，自作 OS 上で圧縮・伸長の往復一致とホスト bzip2 との相互運用を確認 | [stage014-external.md](stage014-external.md) |
+| 14 | **完了** (第 1〜9 部)。適合台帳・言語の拡幅 cc14a〜cc14g・libc 第 14 世代・ld14 / pp14。無改変の bzip2 (libbz2 1.0.8) と zlib 1.3.1 をビルドし，自作 OS 上で圧縮・伸長の往復一致とホスト側実装との相互運用を確認 | [stage014-external.md](stage014-external.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言
@@ -251,9 +251,13 @@ pp + cc14f + ld14 + libc14 でビルドして自作 OS (kernel13) 上で走ら�
 関数内 static・タグの前方参照と K&R・ビットフィールドなど)，第 7 部で
 libc 第 14 世代 (assert.h・printf の拡張・sprintf 系)，第 8 部で
 取得の仕組み (tools/fetch.sh) と cc14f / ld14 を作って bzip2 を通した。
-次は Stage 15 (tcc のセルフホスト) だが，その前に外部ソースの 2 本目
-(zlib) や bzip2 コマンド本体で幅を広げる選択肢もある
-(stage014-external.md 13 章)。
+第 9 部では 2 本目として zlib 1.3.1 を当てた。まず pp が容量で先に
+落ちる (crc32.h の表で束ねが 743 KiB，40 文字のマクロ名) ので pp14 を
+作り，cc の gap 5 件を cc14g で潰した。うち 3 件は別々の症状に見えて
+根が 1 つ (typedef 形式の構造体定義で入れ子の struct 登録がタグ名を
+上書きする) だった。zlib も無改変でビルドでき，crc32 / adler32 と
+deflate -> inflate の往復，ホスト zlib との相互運用まで確認した
+(stage014-external.md 13 章)。次は Stage 15 (tcc のセルフホスト)。
 なお `cc.bin` は cc10l のままにしてある。最新世代へ向けると Stage 11 以降の
 凍結済み成果物がすべて別のバイト列になるためで，差し替えは必要になった
 時点で判断する。
