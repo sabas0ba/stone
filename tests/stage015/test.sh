@@ -108,4 +108,43 @@ done < tests/stage015/ledger.txt
 echo
 echo "   台帳: 通る $nok 件 / 未対応 $ngap 件 / 通るが誤り $nbad 件"
 
+# ---------------------------------------------------------------------------
+section "第 5 部 その 1: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
+
+# 素材とホストの道具があるときだけ走る。ここで作るのは**ホストの gcc が
+# 作った tcc** であり，ブートストラップ鎖の一部ではない (tools/tcc.sh の
+# 頭の注意書き)。素材の無い環境 (CI) では飛ばす
+tccdir=docs/external/tcc
+if [ ! -d "$tccdir" ]; then
+    echo "   skip: $tccdir が無い (sh tools/fetch.sh tcc で取得できる)"
+elif ! command -v gcc >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1; then
+    echo "   skip: ホストに gcc / make が無い"
+elif ! command -v patch >/dev/null 2>&1; then
+    echo "   skip: ホストに patch が無い"
+else
+    # RV64 を壊していないこと。riscv32.patch は RV32 と RV64 で共通の
+    # ファイル (riscv64-gen.c) を触るので，ここは毎回見る必要がある
+    sh tools/tcc.sh riscv64 > tmp/s15/tcc-riscv64.log 2>&1
+    report $? "tcc: 上流の RV64 対象が patch 適用後もビルドできる"
+
+    sh tools/tcc.sh riscv32 > tmp/s15/tcc-riscv32.log 2>&1
+    report $? "tcc: RV32 対象の交差コンパイラ (riscv32-tcc) がビルドできる"
+
+    if [ -x tmp/tcc/build/riscv32-tcc ]; then
+        printf 'int add(int a, int b) { return a + b; }\n' > tmp/s15/tccadd.c
+        tmp/tcc/build/riscv32-tcc -c tmp/s15/tccadd.c -o tmp/s15/tccadd.o \
+            > /dev/null 2>&1
+        report $? "tcc: riscv32-tcc が C をオブジェクトへ通す"
+
+        # ELF の見出しだけを見る。ELFCLASS32 (5 バイト目 = 1) と
+        # e_machine = EM_RISCV (243) であること
+        cls=$(od -An -tu1 -j 4 -N 1 tmp/s15/tccadd.o | tr -d ' ')
+        mach=$(od -An -tu2 -j 18 -N 2 tmp/s15/tccadd.o | tr -d ' ')
+        [ "$cls" = 1 ] && [ "$mach" = 243 ]
+        report $? "tcc: 吐いたオブジェクトが ELF32 の RISC-V である (class=$cls machine=$mach)"
+    else
+        report 1 "tcc: riscv32-tcc が無いので出力を見られない"
+    fi
+fi
+
 summary
