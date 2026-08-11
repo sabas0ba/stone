@@ -549,11 +549,23 @@ build_stage015() {
     { cat tmp/build/cc15b.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15b.bin
     echo "built tmp/build/cc15b.bin" >&2
+    # 64 bit の引数 (第 2 部の続き)。前段は cc15b
+    { cat stage015/cc15c.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15b.bin > tmp/build/cc15c0.o
+    { cat tmp/build/cc15c0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15c0.bin
+    echo "built tmp/build/cc15c0.bin (bootstrap)" >&2
+    { cat stage015/cc15c.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15c0.bin > tmp/build/cc15c.o
+    { cat tmp/build/cc15c.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15c.bin
+    echo "built tmp/build/cc15c.bin" >&2
 }
 
 do_stage015() {
     run_stage stage015 cc15a0.bin cc15a.bin cc15b0.bin cc15b.bin \
-        -- stage015/cc15a.sc stage015/cc15b.sc \
+        cc15c0.bin cc15c.bin \
+        -- stage015/cc15a.sc stage015/cc15b.sc stage015/cc15c.sc \
            tmp/build/stage014.stamp tools/build.sh
 }
 
