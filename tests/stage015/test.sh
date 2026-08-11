@@ -109,7 +109,7 @@ echo
 echo "   台帳: 通る $nok 件 / 未対応 $ngap 件 / 通るが誤り $nbad 件"
 
 # ---------------------------------------------------------------------------
-section "第 5 部 その 1: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
+section "第 5 部: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
 
 # 素材とホストの道具があるときだけ走る。ここで作るのは**ホストの gcc が
 # 作った tcc** であり，ブートストラップ鎖の一部ではない (tools/tcc.sh の
@@ -130,6 +130,40 @@ else
     sh tools/tcc.sh riscv32 > tmp/s15/tcc-riscv32.log 2>&1
     report $? "tcc: RV32 対象の交差コンパイラ (riscv32-tcc) がビルドできる"
 
+    # patch は RV32 と RV64 で同じファイル (riscv64-gen.c) を触る。
+    # 「ビルドが通る」だけでは足りないので，**素の tcc と同じバイト列の
+    # オブジェクトを吐くこと**まで見る。XLEN が 8 のときは以前と同じ定数に
+    # 畳まれるはずで，畳まれていなければここで捕まる
+    sh tools/tcc.sh base > tmp/s15/tcc-base.log 2>&1
+    report $? "tcc: patch を当てない素の RV64 tcc がビルドできる (対照)"
+
+    # 対象は tcc 自身の実行時支援 (自前のヘッダだけで閉じており，RV64 の
+    # sysroot が無くてもコンパイルできる) と，その 2 の検査ソース。
+    # libtcc1.c は 64 bit 演算と浮動小数点の塊なので効きがよい
+    same=0
+    # **入力は両方とも素の木から取る。** オブジェクトにはソースの経路が
+    # 入るので，別の木を食わせると経路の差だけで違うバイト列になる
+    for f in lib/libtcc1.c lib/builtin.c lib/stdatomic.c lib/va_list.c \
+             lib/armflush.c lib/dsohandle.c; do
+        rm -f tmp/s15/tcc-a.o tmp/s15/tcc-b.o
+        src=tmp/tcc/base/src/$f
+        tmp/tcc/base/build/riscv64-tcc -c "$src" \
+            -o tmp/s15/tcc-a.o -B tmp/tcc/base/src -I tmp/tcc/base/build \
+            > /dev/null 2>&1 || { same=1; echo "   base が $f を通せない"; }
+        tmp/tcc/build/riscv64-tcc -c "$src" \
+            -o tmp/s15/tcc-b.o -B tmp/tcc/base/src -I tmp/tcc/base/build \
+            > /dev/null 2>&1 || { same=1; echo "   patch 後が $f を通せない"; }
+        cmp -s tmp/s15/tcc-a.o tmp/s15/tcc-b.o || { same=1; echo "   diff: $f"; }
+    done
+    rm -f tmp/s15/tcc-a.o tmp/s15/tcc-b.o
+    tmp/tcc/base/build/riscv64-tcc -c tests/stage015/tccprobe/int32.c \
+        -o tmp/s15/tcc-a.o -B tmp/tcc/base/src > /dev/null 2>&1 || same=1
+    tmp/tcc/build/riscv64-tcc -c tests/stage015/tccprobe/int32.c \
+        -o tmp/s15/tcc-b.o -B tmp/tcc/base/src > /dev/null 2>&1 || same=1
+    cmp -s tmp/s15/tcc-a.o tmp/s15/tcc-b.o || { same=1; echo "   diff: tccprobe/int32.c"; }
+    [ "$same" -eq 0 ]
+    report $? "tcc: patch 適用後も RV64 の生成コードがバイト単位で変わらない"
+
     if [ -x tmp/tcc/build/riscv32-tcc ]; then
         printf 'int add(int a, int b) { return a + b; }\n' > tmp/s15/tccadd.c
         tmp/tcc/build/riscv32-tcc -c tmp/s15/tccadd.c -o tmp/s15/tccadd.o \
@@ -142,6 +176,22 @@ else
         mach=$(od -An -tu2 -j 18 -N 2 tmp/s15/tccadd.o | tr -d ' ')
         [ "$cls" = 1 ] && [ "$mach" = 243 ]
         report $? "tcc: 吐いたオブジェクトが ELF32 の RISC-V である (class=$cls machine=$mach)"
+
+        # 整数の範囲を一通り吐かせ，**RV32 に無い命令が 1 つも無い**ことを
+        # 見る。逆アセンブラは不正な語を .insn と表示するので数えられる
+        # (docs/stage015-riscv32.md 7 章)
+        if ! command -v riscv64-unknown-elf-objdump > /dev/null 2>&1; then
+            echo "   skip: riscv64-unknown-elf-objdump が無い"
+        else
+            tmp/tcc/build/riscv32-tcc -c tests/stage015/tccprobe/int32.c \
+                -o tmp/s15/tccint32.o > /dev/null 2>&1
+            report $? "tcc: 整数の一通り (tccprobe/int32.c) がオブジェクトになる"
+
+            bad=$(riscv64-unknown-elf-objdump -d tmp/s15/tccint32.o \
+                  | grep -c '\.insn' || true)
+            [ "$bad" -eq 0 ]
+            report $? "tcc: 生成コードに RV32 に無い命令が無い (不正な語 $bad 個)"
+        fi
     else
         report 1 "tcc: riscv32-tcc が無いので出力を見られない"
     fi

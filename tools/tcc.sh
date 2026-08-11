@@ -7,6 +7,8 @@
 #   host      ホスト向けの tcc を作る (tmp/tcc/build/tcc)
 #   riscv64   RV64 向けの交差 tcc を作る (上流のまま。手本と対照用)
 #   riscv32   RV32 向けの交差 tcc を作る (我々が足す対象)
+#   base      patch を当てない素の RV64 tcc を作る (tmp/tcc/base/build)。
+#             patch が RV64 の生成コードを変えていないことの対照に使う
 #   clean     tmp/tcc を消す
 #
 # riscv32 は**コンパイラ本体だけ**を作る。実行時支援 (riscv32-libtcc1.a)
@@ -76,6 +78,21 @@ riscv64)
 riscv32)
     prepare_build
     make -C "$bld" riscv32-tcc
+    ;;
+base)
+    if [ ! -d "$ext" ]; then
+        echo "error: $ext が無い。'sh tools/fetch.sh tcc' で取得する" >&2
+        exit 1
+    fi
+    if [ ! -f tmp/tcc/base/build/config.mak ]; then
+        rm -rf tmp/tcc/base
+        mkdir -p tmp/tcc/base/build
+        cp -a "$ext" tmp/tcc/base/src
+        rm -rf tmp/tcc/base/src/.git
+        ( cd tmp/tcc/base/build && ../src/configure >configure.log 2>&1 ) \
+            || { cat tmp/tcc/base/build/configure.log >&2; exit 1; }
+    fi
+    make -C tmp/tcc/base/build cross-riscv64
     ;;
 clean)
     rm -rf tmp/tcc
