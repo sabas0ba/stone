@@ -7,12 +7,17 @@ RISC-V の backend (riscv64-gen.c / riscv64-link.c) は RV32 と RV64 で
 大半が共通なので，ファイルを写さず**同じファイルを XLEN で切り替える**
 形にしてある。この patch の差分がそのまま「RV32 に要る違い」である。
 
+RV32 の対応とは別に，**上流の誤りの修正が 1 つ入っている** (store が
+番地を絶対値で書くときに枠の指し手 s0 を潰す)。RV64 でも同じ誤りが
+出るので RV32 固有ではない。docs/stage015-riscv32.md 10 章。
+
 対象は -DTCC_TARGET_RISCV64 -DTCC_TARGET_RISCV32 の 2 つを定義して選ぶ。
 TCC_TARGET_RISCV64 は「RISC-V であること」を表し，TCC_TARGET_RISCV32 が
 「語長が 32 bit であること」を絞り込む。こうすると core (tccgen.c・
 tccelf.c・tccasm.c・tccdbg.c) にある 40 箇所あまりの `#ifdef
 TCC_TARGET_RISCV64` を 1 つも書き換えずに済む。
 
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
 --- a/Makefile
@@ -143,7 +148,19 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              }
              o(0x53 | (rr << 7) | (6 << 15) | ((unsigned)(0x78 | is_dbl) << 25));
              return;
-@@ -519,7 +539,7 @@
+@@ -431,7 +451,10 @@
+         fc = 0; // XXX support offsets regs
+     } else if (fr == VT_CONST) {
+         int64_t si = sv->c.i;
+-        ptrreg = 8; // s0
++        /* 番地を絶対値で書く場合の base。**s0 を使ってはいけない。**
++           s0 は枠の指し手であり，ここで潰すと後片付け (mv sp,s0 と
++           ra / s0 の復元) が壊れる。t0 は割付けの対象外なので安全 */
++        ptrreg = 5; // t0
+         si >>= 32;
+         if (si != 0) {
+ 	    load_large_constant(ptrreg, fc, si);
+@@ -519,7 +542,7 @@
          greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
          o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
          greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -152,7 +169,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          gen_bounds_call(TOK___bound_local_new);
          ind = saved_ind;
          label.c = 0; /* force new local ELF symbol */
-@@ -532,7 +552,7 @@
+@@ -532,7 +555,7 @@
      greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
      o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
      greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -161,7 +178,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      gen_bounds_call(TOK___bound_local_delete);
      o(0x65a26502); /* ld   a0,0(sp)   ld   a1,8(sp)   */
      o(0x61052542); /* fld  fa0,16(sp) addi sp,sp,32   */
-@@ -773,7 +793,7 @@
+@@ -773,7 +796,7 @@
                  vtop->r2 = r2;
              }
              if (info[nb_args - 1 - i] & 16) {
@@ -170,7 +187,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  vtop->r2 = VT_CONST;
              } else if (loadt == VT_LDOUBLE && vtop->r2 != r2) {
                  assert(vtop->r2 <= 7 && r2 <= 7);
-@@ -826,7 +846,7 @@
+@@ -826,7 +849,7 @@
      if (size > 2 * XLEN) {
          loc -= 8;
          func_vc = loc;
@@ -179,7 +196,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      }
      /* define parameters */
      while ((sym = sym->next) != NULL) {
-@@ -856,13 +876,13 @@
+@@ -856,13 +879,13 @@
              for (i = 0; i < regcount; i++) {
                  if (areg[prc[1+i] - 1] >= 8) {
                      assert(i == 1 && regcount == 2 && !(addr & 7));
@@ -196,7 +213,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  }
              }
          }
-@@ -873,7 +893,7 @@
+@@ -873,7 +896,7 @@
      if (func_var) {
          for (; areg[0] < 8; areg[0]++) {
              num_va_regs++;
@@ -205,7 +222,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          }
      }
  #ifdef CONFIG_TCC_BCHECK
-@@ -927,18 +947,18 @@
+@@ -927,18 +950,18 @@
          gen_bounds_epilog();
  #endif
  
@@ -229,7 +246,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          o(0x37 | (5 << 7) | UPPER(v-16)); //lui t0, upper(v)
          EI(0x13, 0, 5, 5, SIGN11(v-16)); // addi t0, t0, lo(v)
          ER(0x33, 0, 2, 2, 5, 0x20); // sub sp, sp, t0
-@@ -948,10 +968,10 @@
+@@ -948,10 +971,10 @@
  
      ind = func_sub_sp_offset;
      EI(0x13, 0, 2, 2, -d);     // addi sp, sp, -d
@@ -243,7 +260,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      else
        gjmp_addr(large_ofs_ind);
      if ((ind - func_sub_sp_offset) != 5*4)
-@@ -1040,12 +1060,15 @@
+@@ -1040,12 +1063,15 @@
  {
      int a, b, d;
      int func3 = 0;
@@ -261,7 +278,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              vswap();
              gv(RC_INT);
              a = ireg(vtop[0].r);
-@@ -1172,10 +1195,13 @@
+@@ -1172,10 +1198,13 @@
      gen_opil(op, 0);
  }
  
@@ -275,7 +292,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  
  ST_FUNC void gen_opf(int op)
  {
-@@ -1279,25 +1305,28 @@
+@@ -1279,25 +1308,28 @@
      int r = ireg(gv(RC_INT));
      if ((t & VT_BTYPE) == VT_SHORT) {
          if (t & VT_UNSIGNED) {
@@ -311,7 +328,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      EI(0x1b, 0, r, r, 0); // addiw r, r, 0
  }
  
-@@ -1416,14 +1445,14 @@
+@@ -1416,14 +1448,14 @@
      put_extern_sym(&label, cur_text_section, ind, 0);
      o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
      greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -328,7 +345,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      vpop();
  }
  
-@@ -1438,10 +1467,10 @@
+@@ -1438,10 +1470,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
@@ -341,7 +358,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  }
  
  ST_FUNC void gen_vla_sp_restore(int addr)
-@@ -1449,10 +1478,10 @@
+@@ -1449,10 +1481,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0

@@ -192,6 +192,22 @@ else
             [ "$bad" -eq 0 ]
             report $? "tcc: 生成コードに RV32 に無い命令が無い (不正な語 $bad 個)"
         fi
+
+        # **走らせて答を見る。** 不正命令が無いことは「命令が RV32 の
+        # ものである」ことしか言わない。正しい命令が選ばれていることは
+        # 実行しないと判らない (docs/stage015-riscv32.md 7 章)
+        tmp/tcc/build/riscv32-tcc -static -nostdlib -Wl,-Ttext=0x80000000 \
+            -o tmp/s15/run32.elf \
+            tests/stage015/tccprobe/head.S tests/stage015/tccprobe/run32.c \
+            > /dev/null 2>&1
+        report $? "tcc: 実走用の像 (head.S + run32.c) がリンクできる"
+
+        # 乗除算・シフト・幅の狭い型・繰返し・配列。char は符号なし (RISC-V の ABI)
+        want='006ae9bc:ffffff72:00000006:00300000:ffffff80:00f00000:0000eaf7:000013ba:00000054'
+        got=$(sh tools/env.sh qemu tmp/s15/run32.elf < /dev/null 2>/dev/null)
+        [ "$got" = "$want" ]
+        report $? "tcc: 吐いたものが我々の QEMU で走り，答が合う"
+        [ "$got" = "$want" ] || { echo "     期待 $want"; echo "     実測 $got"; }
     else
         report 1 "tcc: riscv32-tcc が無いので出力を見られない"
     fi
