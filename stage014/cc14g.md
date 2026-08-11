@@ -15,9 +15,9 @@ sh tools/build.sh stage014
 # cc14g0(cc14g.sc) -> cc14g     (正本。以降は固定点)
 ```
 
-SHA-256: (ビルド後に記録)
+SHA-256: c0cd490dd56b3e5b4b7aaf6a11ae7e045bbc0dbf625be96aacb3e125addcbc89
 
-- 対象: RV32IM，リトルエンディアン
+- 対象: RV32IM，リトルエンディアン，156652 バイト
 - ロードアドレス: 0x8000_0000 (QEMU virt, `-bios`)
 
 ## cc14f との差分 (すべて zlib の実測で見つかったもの)
