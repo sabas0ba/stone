@@ -16,11 +16,12 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ext="$repo_root/docs/external"
 
-# manifest: 名前 URL SHA-256 (tar.gz を仮定)
+# manifest: 名前 URL SHA-256 (書庫の形式は URL の拡張子で見分ける)
 manifest() {
     cat <<'EOF'
 bzip2 https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
 zlib https://www.zlib.net/fossils/zlib-1.3.1.tar.gz 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+tcc https://download.savannah.gnu.org/releases/tinycc/tcc-0.9.27.tar.bz2 de23af78fca90ce32dff2dd45b3432b2334740bb9bb7b05bf60fdbfc396ceb9c
 EOF
 }
 
@@ -43,8 +44,15 @@ fi
 url=${line%% *}
 want=${line##* }
 
+# 書庫の形式は URL の末尾で決める (tar.gz / tar.bz2)
+case "$url" in
+*.tar.bz2) ext_sfx=tar.bz2; taropt=-xjf ;;
+*.tar.gz|*.tgz) ext_sfx=tar.gz; taropt=-xzf ;;
+*) echo "fetch.sh: 未知の書庫形式: $url" >&2; exit 2 ;;
+esac
+
 mkdir -p "$ext"
-tarball="$ext/$name.tar.gz"
+tarball="$ext/$name.$ext_sfx"
 echo "fetch: $url" >&2
 curl -fL --proto '=https' -o "$tarball" "$url"
 got=$(sha256sum "$tarball" | cut -d' ' -f1)
@@ -57,5 +65,5 @@ if [ "$got" != "$want" ]; then
 fi
 rm -rf "$ext/$name"
 mkdir -p "$ext/$name"
-tar -xzf "$tarball" -C "$ext/$name" --strip-components=1
+tar "$taropt" "$tarball" -C "$ext/$name" --strip-components=1
 echo "fetched: $ext/$name (SHA-256 照合済み)" >&2
