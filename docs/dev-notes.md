@@ -401,11 +401,13 @@ bash verify/audit/audit.sh
   進み (`mpp = mpp + 32`) を残したため，**1 個目の仮引数だけ正しく動く**
   という壊れ方をした (位置 0 は幅に依らず一致するため)。
   症状は「関数形式マクロの 2 個目以降の引数が展開されない」。
-- **`tools/build.sh` を触ると CI が全段を作り直す。** build.sh は全 Stage の
-  スタンプの入力なので (「ビルド手順の変更で作り直す」ため)，世代を 1 つ
-  足すだけでも `tmp/build` のキャッシュが効かず鎖の全段が再ビルドになる。
-  Stage 15 で世代が増えたときに CI のジョブ上限 30 分を超え，**失敗では
-  なく cancelled** という形で現れた (GitHub Actions は timeout-minutes 超過を
-  cancelled と report する)。上限を 60 分へ上げたが，**世代を足すたびに
-  伸びる**性質は変わらない。いずれスタンプの入力を「その Stage の
-  build_stageNNN の本文だけ」へ絞る等の手当てが要る。
+- **ビルド手順は Stage ごとのファイルに分ける。** 以前は
+  `tools/build.sh` 1 枚に全 Stage の手順があり，それが全 Stage のスタンプの
+  入力だったため，**どの Stage を触っても鎖の全段が作り直し**になった。
+  Stage 15 で世代が増えたとき CI がジョブの時間上限 30 分を超え，
+  **失敗ではなく cancelled** という形で現れた (GitHub Actions は
+  timeout-minutes 超過を cancelled として report する)。
+  手順を `tools/build/<stage>.sh` へ分け，各 Stage のスタンプの入力を
+  その 1 ファイルだけにした。駆動側 (`tools/build.sh` の run_stage) は
+  入力に含めていないので，**その意味を変える改訂をしたときは
+  `STONE_FORCE_BUILD=1` で作り直す**こと。
