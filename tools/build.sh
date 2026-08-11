@@ -411,21 +411,38 @@ build_stage014() {
     { cat tmp/build/ld14.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld14.bin
     echo "built tmp/build/ld14.bin" >&2
-    # カーネルの第 14 世代 (sfs の上書きと ELF の検査)。最前線の cc14f で
-    # コンパイルし，ld14 の 'K' で前置部を付ける
+    # 第 9 部 (zlib)。前段は cc14f
+    { cat stage014/cc14g.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14f.bin > tmp/build/cc14g0.o
+    { cat tmp/build/cc14g0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14g0.bin
+    echo "built tmp/build/cc14g0.bin (bootstrap)" >&2
+    { cat stage014/cc14g.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14g0.bin > tmp/build/cc14g.o
+    { cat tmp/build/cc14g.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14g.bin
+    echo "built tmp/build/cc14g.bin" >&2
+    # pp の第 14 世代 (容量拡大。第 9 部)。同じ道具立てで作る
+    { cat stage014/pp14.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/pp14.o
+    { cat tmp/build/pp14.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp14.bin
+    echo "built tmp/build/pp14.bin" >&2
+    # カーネルの第 14 世代 (sfs の上書きと ELF の検査。第 10 部)。
+    # libc と同じく最前線の cc14g でコンパイルし，ld14 の 'K' を付ける
     sh tools/bundle.sh stage014/kernel14.c \
         | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/kernel14.i
-    sh tools/env.sh qemu tmp/build/cc14f.bin < tmp/build/kernel14.i > tmp/build/kernel14.o
+    sh tools/env.sh qemu tmp/build/cc14g.bin < tmp/build/kernel14.i > tmp/build/kernel14.o
     { printf 'K'; cat tmp/build/kernel14.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/build/kernel14.bin
     echo "built tmp/build/kernel14.bin" >&2
-    # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14f で
+    # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14g で
     # コンパイルする (外部ソースと同じ経路に載せるため)
     for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio posix/assert; do
         n=$(echo "$f" | tr / _)
         sh tools/bundle.sh stage014/libc/include/*.h "stage014/libc/$f.c" \
             | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l14_$n.i"
-        sh tools/env.sh qemu tmp/build/cc14f.bin < "tmp/build/l14_$n.i" > "tmp/build/l14_$n.o"
+        sh tools/env.sh qemu tmp/build/cc14g.bin < "tmp/build/l14_$n.i" > "tmp/build/l14_$n.o"
         echo "built tmp/build/l14_$n.o" >&2
     done
 }
@@ -508,29 +525,89 @@ do_stage013() {
 do_stage014() {
     run_stage stage014 cc14a0.bin cc14a.bin cc14b0.bin cc14b.bin \
         cc14c0.bin cc14c.bin cc14d0.bin cc14d.bin cc14e0.bin cc14e.bin \
-        cc14f0.bin cc14f.bin ld14.bin kernel14.bin \
+        cc14f0.bin cc14f.bin cc14g0.bin cc14g.bin ld14.bin pp14.bin \
+        kernel14.bin \
         l14_src_string.o l14_src_ctype.o l14_src_stdlib.o l14_src_morecore.o \
         l14_posix_sys.o l14_posix_morecore.o l14_posix_stdio.o l14_posix_assert.o \
         -- stage014/cc14.sc stage014/cc14b.sc stage014/cc14c.sc \
            stage014/cc14d.sc stage014/cc14e.sc stage014/cc14f.sc \
-           stage014/ld14.sc stage014/kernel14.c stage014/libc/include/*.h \
+           stage014/cc14g.sc stage014/ld14.sc stage014/pp14.sc \
+           stage014/kernel14.c stage014/libc/include/*.h \
            stage014/libc/src/*.c stage014/libc/posix/*.c \
-           tmp/build/stage010.stamp tmp/build/stage013.stamp \
-           tools/build.sh tools/bundle.sh
+           tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
 }
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014"
+# Stage 15 は cc の新世代 (cc15a = 64 bit 整数の土台) を Stage 14 の
+# 最前線 cc14g で作る (docs/stage015-tcc.md 6 章)
+build_stage015() {
+    { cat stage015/cc15a.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14g.bin > tmp/build/cc15a0.o
+    { cat tmp/build/cc15a0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15a0.bin
+    echo "built tmp/build/cc15a0.bin (bootstrap)" >&2
+    { cat stage015/cc15a.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15a0.bin > tmp/build/cc15a.o
+    { cat tmp/build/cc15a.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15a.bin
+    echo "built tmp/build/cc15a.bin" >&2
+    # 64 bit の演算 (第 2 部の後半)。前段は cc15a
+    { cat stage015/cc15b.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15a.bin > tmp/build/cc15b0.o
+    { cat tmp/build/cc15b0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15b0.bin
+    echo "built tmp/build/cc15b0.bin (bootstrap)" >&2
+    { cat stage015/cc15b.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15b0.bin > tmp/build/cc15b.o
+    { cat tmp/build/cc15b.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15b.bin
+    echo "built tmp/build/cc15b.bin" >&2
+}
+
+do_stage015() {
+    run_stage stage015 cc15a0.bin cc15a.bin cc15b0.bin cc15b.bin \
+        -- stage015/cc15a.sc stage015/cc15b.sc \
+           tmp/build/stage014.stamp tools/build.sh
+}
+
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015"
 target=${1:-all}
-[ "$target" = all ] && target=stage014
+[ "$target" = all ] && target=stage015
 case " $stages " in
 *" $target "*) ;;
 *)
-    echo "usage: build.sh [stage002|...|stage013|stage014|all]" >&2
+    echo "usage: build.sh [stage002|...|stage014|stage015|all]" >&2
     exit 2
     ;;
 esac
-for s in $stages; do
+# stage010 までは 1 本の鎖 (各段が直前の段の成果物を使う) なので順に作る
+for s in stage002 stage003 stage004 stage005 stage006 stage007 stage008 \
+         stage009 stage010; do
     "do_$s"
-    [ "$s" = "$target" ] && break
+    [ "$s" = "$target" ] && exit 0
 done
-exit 0
+
+# stage011 以降は依存が分かれる (do_* の入力宣言のとおり，stage011 -> stage012
+# の鎖と stage013・stage014 は，いずれも stage010 までの成果物とスタンプに
+# しか依らない)。全段が対象のときは 3 本に分けて並列に作る。各 Stage の
+# 生成物とスタンプは互いに素なので，並列にしても出来るバイト列は変わらない。
+# 途中の Stage までの指定は従来どおり順に作る
+if [ "$target" != stage014 ] && [ "$target" != stage015 ]; then
+    for s in stage011 stage012 stage013; do
+        "do_$s"
+        [ "$s" = "$target" ] && break
+    done
+    exit 0
+fi
+( do_stage011 && do_stage012 ) & lane1=$!
+do_stage013 & lane2=$!
+# stage015 は stage014 の成果物 (cc14g) を使うので同じ本の中で順に作る
+if [ "$target" = stage015 ]; then
+    ( do_stage014 && do_stage015 ) & lane3=$!
+else
+    do_stage014 & lane3=$!
+fi
+rc=0
+wait "$lane1" || rc=1
+wait "$lane2" || rc=1
+wait "$lane3" || rc=1
+exit "$rc"

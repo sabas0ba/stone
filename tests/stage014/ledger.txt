@@ -38,6 +38,11 @@ hexcase      ok   abc\n
 bitnot       ok   abc\n
 dimexpr      ok   abc0\n
 bigframe     ok   0\n
+ptrconst     ok   a0\n
+castinit     ok   ad7\n
+staticinit   ok   5\n
+caseconst    ok   123\n
+opaqueptr    ok   52\n
 
 # ---- 未対応 (cc が拒む) ----
 floatv       gap  2    浮動小数点 (float / double)

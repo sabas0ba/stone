@@ -27,13 +27,15 @@ actual=${actual%% *}
 report $? "build: asm(sol.s) の SHA-256 が sol.md 記載値と一致"
 
 # 2. 実行テスト
+# 中間物は s4- を前置し，他 Stage のテストと衝突させない (tools/test.sh が
+# Stage のテストを並列に走らせる)
 run_case() {
     name=$1
     expect=$2
-    sh tools/env.sh qemu "$sol" < "tests/stage004/$name.sol" > "tmp/$name.bin" \
-        && sh tools/env.sh qemu "tmp/$name.bin" < /dev/null > "tmp/$name.out"
+    sh tools/env.sh qemu "$sol" < "tests/stage004/$name.sol" > "tmp/s4-$name.bin" \
+        && sh tools/env.sh qemu "tmp/s4-$name.bin" < /dev/null > "tmp/s4-$name.out"
     rc=$?
-    [ "$rc" -eq 0 ] && [ "$(cat "tmp/$name.out")" = "$expect" ]
+    [ "$rc" -eq 0 ] && [ "$(cat "tmp/s4-$name.out")" = "$expect" ]
     report $? "run: $name.sol の実行"
 }
 
@@ -42,10 +44,10 @@ run_case fib "55"
 run_case ctrl "$(printf 'ABCDE\nYN')"
 
 # 3. フィルタ
-sh tools/env.sh qemu "$sol" < tests/stage004/echo.sol > tmp/echo.bin \
-    && printf 'abc xyz.' | sh tools/env.sh qemu tmp/echo.bin > tmp/echo.out
+sh tools/env.sh qemu "$sol" < tests/stage004/echo.sol > tmp/s4-echo.bin \
+    && printf 'abc xyz.' | sh tools/env.sh qemu tmp/s4-echo.bin > tmp/s4-echo.out
 rc=$?
-[ "$rc" -eq 0 ] && [ "$(cat tmp/echo.out)" = "abc xyz" ]
+[ "$rc" -eq 0 ] && [ "$(cat tmp/s4-echo.out)" = "abc xyz" ]
 report $? "filter: echo.sol ('.' まで転写)"
 
 # 4. エラー系

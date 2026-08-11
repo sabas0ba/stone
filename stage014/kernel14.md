@@ -3,7 +3,7 @@
 kernel14 は簡易 OS のカーネルの Stage 14 世代である。stage013 の
 [kernel.c](../stage013/kernel.c) を出発点に，**sfs の上書きが隣接ファイルを
 壊す問題**と **ELF ローダの境界検査の欠落**を直した。機能は足していない。
-設計は [stage014-external.md](../docs/stage014-external.md) 13 章。
+設計は [stage014-external.md](../docs/stage014-external.md) 14 章 (第 10 部)。
 
 ソース [kernel14.c](kernel14.c) が正本である。自作の C89 で書かれており，
 特権命令は一切含まない (すべて ld14 の 'K' 前置部が持つ。'K' の前置部は
@@ -13,7 +13,7 @@ ld12 / ld13 と同一である)。
 
 ```
 sh tools/build.sh stage014
-# bundle(kernel14.c) | pp | cc14f -> kernel14.o -> ld14 'K' -> kernel14.bin
+# bundle(kernel14.c) | pp | cc14g -> kernel14.o -> ld14 'K' -> kernel14.bin
 ```
 
 SHA-256: c4d24aabaf23e125f08b36d7273617b0b9828ec3ae9ba23ebdbae3e4151dce09

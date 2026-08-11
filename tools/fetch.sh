@@ -16,11 +16,17 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ext="$repo_root/docs/external"
 
-# manifest: 名前 URL SHA-256 (tar.gz を仮定)
+# manifest: 名前 URL 印
+#   書庫 (.tar.gz / .tar.bz2) なら印は SHA-256。
+#   それ以外は git の取得元とみなし，印は commit とする。git の commit は
+#   木と履歴の内容ハッシュなので，書庫の SHA-256 と同じ役目を果たす
+#   (git 自身が取得時に検証する)。**ただし git の commit は SHA-1 である**
+#   ことは意識しておく (docs/stage015-tcc.md 3 章)
 manifest() {
     cat <<'EOF'
 bzip2 https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
 zlib https://www.zlib.net/fossils/zlib-1.3.1.tar.gz 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+tcc https://github.com/TinyCC/tinycc mob:2ba12e83b3599ca8f5d50c179fe5138fe956f0c9
 EOF
 }
 
@@ -43,8 +49,40 @@ fi
 url=${line%% *}
 want=${line##* }
 
+# 書庫の形式は URL の末尾で決める (tar.gz / tar.bz2)。
+# どちらでもなければ git の取得元とみなす
+case "$url" in
+*.tar.bz2) ext_sfx=tar.bz2; taropt=-xjf ;;
+*.tar.gz|*.tgz) ext_sfx=tar.gz; taropt=-xzf ;;
+*)
+    # git: 印は「枝またはタグ:commit」。**commit を直接取りに行く**。
+    # 枝の先頭を取ると，枝が動いた瞬間に照合が壊れて取得できなくなる
+    # (mob のような開発枝は日々動く)。名札は記録のためだけに持つ
+    lbl=${want%%:*}
+    com=${want##*:}
+    echo "fetch: $url ($lbl $com)" >&2
+    rm -rf "$ext/$name"
+    mkdir -p "$ext/$name"
+    ( cd "$ext/$name" \
+      && git init -q . \
+      && git remote add origin "$url" \
+      && git fetch -q --depth 1 origin "$com" \
+      && git checkout -q FETCH_HEAD )
+    got=$(cd "$ext/$name" && git rev-parse HEAD)
+    if [ "$got" != "$com" ]; then
+        rm -rf "$ext/$name"
+        echo "fetch.sh: commit が一致しない" >&2
+        echo "  期待: $com" >&2
+        echo "  実際: $got" >&2
+        exit 1
+    fi
+    echo "fetched: $ext/$name (commit 照合済み)" >&2
+    exit 0
+    ;;
+esac
+
 mkdir -p "$ext"
-tarball="$ext/$name.tar.gz"
+tarball="$ext/$name.$ext_sfx"
 echo "fetch: $url" >&2
 curl -fL --proto '=https' -o "$tarball" "$url"
 got=$(sha256sum "$tarball" | cut -d' ' -f1)
@@ -57,5 +95,5 @@ if [ "$got" != "$want" ]; then
 fi
 rm -rf "$ext/$name"
 mkdir -p "$ext/$name"
-tar -xzf "$tarball" -C "$ext/$name" --strip-components=1
+tar "$taropt" "$tarball" -C "$ext/$name" --strip-components=1
 echo "fetched: $ext/$name (SHA-256 照合済み)" >&2

@@ -76,6 +76,8 @@ Stage 14 の完了条件は「無改変の外部ソースをビルドし，正�
 | 第 6 部 **(完了)** | ビットフィールド (cc14e) |
 | 第 7 部 **(完了)** | libc の不足を埋める (第 14 世代: assert.h・printf の拡張・sprintf) |
 | 第 8 部 **(完了)** | 外部ソースを 1 本選び，取得の仕組みを作り，ビルドして動かす (bzip2 / cc14f / ld14) |
+| 第 9 部 **(完了)** | 外部ソースの 2 本目: zlib 1.3.1 (pp14 / cc14g) |
+| 第 10 部 **(完了)** | カーネルの第 14 世代: sfs の上書きと ELF の検査 (kernel14) |
 
 第 2 部・第 3 部の順序と粒度は，第 1 部の結果 (4 章) が決める。
 
@@ -416,12 +418,83 @@ libbz2 + libc14 とリンクされ (ld14 の 'E')，kernel13 の上で走る:
 
 検査は素材があるときだけ走る (2.2)。tests/stage014/test.sh 参照。
 
-## 13. 第 9 部: カーネルの第 14 世代 (kernel14)
+## 13. 第 9 部: zlib を当てる
+
+2 本目は zlib 1.3.1 (取得済み)。コア 10 ファイル (adler32 / crc32 /
+zutil / inftrees / inffast / inflate / trees / deflate / compress /
+uncompr) を `Z_SOLO` (stdio・割付け非依存の構成) で当てた。gz* 系
+(ファイル入出力層) は対象外である。
+
+### 13.1 pp が先に落ちる (pp14)
+
+| 落ちた箇所 | 症状 |
+|---|---|
+| 束ねの合計が 743 KiB (crc32.h の表) | pp の入力上限 256 KiB で終了 6 |
+| 40 文字のマクロ名 (`INFLATE_ALLOW_INVALID_DISTANCE_TOOFAR_ARRR`) | 識別子上限 31 バイトで終了 6 |
+
+pp の新世代 **pp14** ([../stage014/pp14.sc](../stage014/pp14.sc)) で
+容量だけを広げた: 入力・展開アリーナ 1 MiB，マクロ本体 256 KiB，
+マクロ数 1024，識別子・マクロ名 63 バイト (スロット 64 バイト)。
+仕組みは pp と同一。ビルドは cc.bin + ld.bin (ld14 と同じ道具立て)。
+
+教訓: 名前スロットの幅を変えるときは**読む側 (gfind 相当) と書く側
+(スロット割付けの進み幅) の両方**を変えること。片方だけ変えると
+2 個目以降の仮引数が引けなくなる回帰を作った (開発中に検出・修正済み)。
+
+### 13.2 cc の gap (cc14g で解消)
+
+台帳に追加した 5 件 (発見時の実測は cc14f。いずれも cc14g で ok になった):
+
+| 台帳 | 内容 | zlib での出所 |
+|---|---|---|
+| ptrconst | `char * const` (ポインタ修飾の後置) | z_errmsg |
+| castinit | 大域初期化子の中のキャスト | `(char *)"..."` / `(const ct_data *)0` |
+| staticinit | 関数内 static の初期化子 | inflate_table の表・inffixed.h |
+| caseconst | case ラベルの定数式 | inflate の状態機械 (列挙定数) |
+| opaqueptr | typedef 形式の構造体定義の入れ子 struct 登録 | z_stream / deflate_state / ct_data |
+
+このうち opaqueptr は当初 3 つの別の gap に見えたが (不透明構造体への
+ポインタメンバ・無名 struct/union メンバ・タグ形のメンバ宣言)，
+**根は 1 つ**である: `ptype()` の struct 分岐がタグ名を大域バッファ
+`snam` に置いたまま `strudef()` を呼ぶため，メンバの型に `struct X` が
+現れると snam が上書きされ，直後の `sfind2()` が**内側の struct を
+引いてしまう**。typedef はその誤った番号を記録するので，以降その
+typedef 名でのメンバ参照がすべて型エラー (5) になる。タグ形で書き直すと
+毎回引き直すので通る，という非対称が診断の鍵だった。
+
+加えて**大域初期化子の定数式** (`{ tab, 256 + 1 }`) も要る (castinit と
+同じ初期化子の値読みに畳込み評価器 ccond を差し込む)。
+
+### 13.3 cc14g と実走
+
+cc14g ([../stage014/cc14g.md](../stage014/cc14g.md)) で 13.2 の 5 件を
+潰した。コード生成には触れていない (回帰テストで sh / ed / mk が cc10l と
+同じ .o になることを確認)。
+
+[../tests/stage014/user/zt.c](../tests/stage014/user/zt.c) が
+zlib コア + libc14 とリンクされ (ld14 の 'E')，kernel13 の上で走る:
+
+1. 既知の 4096 バイトの **crc32 / adler32** を計る
+2. `deflate` (level 6, Z_FINISH) で 2154 バイトへ圧縮
+3. `inflate` で伸長し，往復一致を確認
+4. 圧縮結果を sfs へ書き出し，**ホストの zlib でも伸長**して原文と
+   一致することを確認 (形式の相互運用)。crc32 / adler32 の値も
+   ホスト側の zlib と一致する
+
+コンパイルするのは無改変のコア 11 ファイル (adler32 / crc32 / zutil /
+inftrees / inffast / inflate / infback / trees / deflate / compress /
+uncompr)。`Z_SOLO` は repo 側の包みが与え，**zlib のソースは 1 バイトも
+書き換えない**。gz* 系 (ファイル入出力層) は対象外である。
+
+icnt (16383) やフレーム上限は zlib では余裕があった。第 8 部で広げた
+器がそのまま効いている。
+
+## 14. 第 10 部: カーネルの第 14 世代 (kernel14)
 
 2026-08 の監査が挙げた 2 つの穴を塞ぐ。**機能は足していない**——
 どちらも「踏むと原因の判りにくい壊れ方をする」ものである。
 
-### 13.1 sfs の上書きが隣接ファイルを壊した
+### 14.1 sfs の上書きが隣接ファイルを壊した
 
 `sfswrite` (kernel13) は表項目に割付け容量を持たず，`off + pos` へ
 無条件に書き，伸長時はカーソルを `off + pos + n` へ無条件に置いていた。
@@ -456,7 +529,7 @@ libbz2 + libc14 とリンクされ (ld14 の 'E')，kernel13 の上で走る:
 1 セッションぶんには十分である。詰め直しが要るなら，イメージを
 ホストで pack し直すのがいちばん安い。
 
-### 13.2 loadelf に境界検査がなかった
+### 14.2 loadelf に境界検査がなかった
 
 `loadelf` はマジック 2 バイトだけを見て `p_vaddr` / `p_filesz` /
 `p_memsz` をそのまま信じて複写していた。壊れた ELF を spawn すると
@@ -478,22 +551,21 @@ libbz2 + libc14 とリンクされ (ld14 の 'E')，kernel13 の上で走る:
 つなぎ替えの解決より後にあり，起動に失敗しても出力ファイルだけが
 切り詰められていた。検査を前へ移し，`elfok` も親を壊す前に済ませる。
 
-### 13.3 結果
+### 14.3 結果
 
 | 生成物 | 由来 | 道具立て |
 |---|---|---|
-| `kernel14.bin` | stage014/kernel14.c | pp + cc14f + ld14 ('K') |
+| `kernel14.bin` | stage014/kernel14.c | pp + cc14g + ld14 ('K') |
 
 kernel13 は凍結したまま残る ([artifacts.md](artifacts.md))。Stage 13 の
 テストは kernel13 で走り続け，kernel14 は tests/stage014 が受け持つ。
 
-## 14. 次の一歩
+## 15. 次の一歩
 
 Stage 14 の部割りはこれで完了である。以降の候補:
 
-- 外部ソースの 2 本目 (zlib 1.3.1 は取得済み。規模 2.2 万行)
 - bzip2 の**コマンド** (bzip2.c) のビルド。浮動小数点 (圧縮率の表示) と
   signal / isatty / chmod など OS への要求が残っている
-- 台帳に残る gap (浮動小数点・long long) を要求する素材が現れた時点で
-  対応を判断する
+- Stage 15 (tcc のセルフホスト) への着手
+- 台帳に残る gap (浮動小数点・long long) は素材が要求した時点で判断する
 

@@ -8,13 +8,13 @@
 
 ```
 sh tools/build.sh stage014
-# bundle(include/*.h <src>) | pp | cc14f -> l14_*.o
+# bundle(include/*.h <src>) | pp | cc14g -> l14_*.o
 ```
 
-**最前線の cc でコンパイルする** (l13 までは cc10l。第 8 部からは cc14f)。
+**最前線の cc でコンパイルする** (l13 までは cc10l。第 9 部からは cc14g)。
 外部ソースと同じ経路に載せるためである。生成物は `l14_` を前置して呼ぶ。
-cc14f は 2048 バイト未満のフレームの関数に cc14e と同一のコードを出すので，
-第 7 部当時とオブジェクトは変わらない。
+cc14f / cc14g はコード生成を変えていないので，第 7 部当時と
+オブジェクトは変わらない。
 
 ## 第 13 世代からの差分
 
@@ -57,7 +57,7 @@ seek も無い (`posix/stdio.c` の `fopen`)。したがって**既存ファイ�
 [stage012-os.md](../docs/stage012-os.md) 5.4)。
 
 kernel14 で sfs の上書きが隣接ファイルを壊さなくなった
-([stage014-external.md](../docs/stage014-external.md) 13.1) が，これは
+([stage014-external.md](../docs/stage014-external.md) 14.1) が，これは
 別の話である。上書きが安全になっただけで，`"a"` が追記になるわけでは
 ない。`"a"` を C89 どおりにするには `lseek` (または `O_APPEND`) を
 カーネルへ足し，libc 側で使う必要がある。**現状は「`"a"` は非対応」と

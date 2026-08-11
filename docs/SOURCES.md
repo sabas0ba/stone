@@ -10,17 +10,26 @@
 ## 外部プログラムのソース (Stage 14 以降の入力)
 
 処理系への**入力**として読む外部ソース (docs/stage014-external.md 2.1)。
-取得は `tools/fetch.sh <名前>` で行い，SHA-256 の照合まで自動で済む。
+取得は `tools/fetch.sh <名前>` で行い，印の照合まで自動で済む。
 一次資料と同じく実体は `docs/external/` に置き，repo には取り込まない。
 
-| 名前 | 内容 | 取得元 | SHA-256 |
+| 名前 | 内容 | 取得元 | 印 (SHA-256 / git commit) |
 |---|---|---|---|
 | bzip2 | bzip2 1.0.8 (最初の 1 本の候補) | https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz | ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269 |
 | zlib | zlib 1.3.1 (候補) | https://www.zlib.net/fossils/zlib-1.3.1.tar.gz | 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23 |
+| tcc | Tiny C Compiler (Stage 15 の対象)。開発枝 mob を commit で固定 | https://github.com/TinyCC/tinycc | commit 2ba12e83b3599ca8f5d50c179fe5138fe956f0c9 |
 
-SHA-256 は公開されている配布告知の値を記録し，最初の取得 (2026-08-10)
-で照合が成立したことをもって確定した (fetch.sh は不一致なら取得物を
-消して失敗する)。zlib の取得元は当初 www.zlib.net/zlib-1.3.1.tar.gz
-だったが，zlib.net は新版が出ると旧版を fossils/ へ移す (404 になる)
-ため恒久 URL の方を記録している。
+SHA-256 は公開されている配布告知の値を記録し，**最初の取得で照合が
+成立することをもって確定とする** (fetch.sh は不一致なら取得物を消して
+失敗する)。bzip2 と zlib は 2026-08-10 の取得で確定した。
+
+**tcc だけは書庫ではなく git で取る。** savannah の配布ファイルは要求ごとに
+別のミラーへ転送し，転送先が一定しないため取得元を固定できない。git なら
+取得元が 1 つに決まり，commit が木の内容ハッシュとして印になる (git 自身が
+取得時に検証する)。ただし **git の commit は SHA-1** であり，書庫の
+SHA-256 より印としては弱い (docs/stage015-tcc.md 3 章)。
+
+zlib の取得元は当初 www.zlib.net/zlib-1.3.1.tar.gz だったが，zlib.net は
+新版が出ると旧版を fossils/ へ移す (404 になる) ため恒久 URL の方を
+記録している。
 

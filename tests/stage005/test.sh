@@ -34,13 +34,15 @@ actual=${actual%% *}
 report $? "build: sol(sc.sol) の SHA-256 が sc.md 記載値と一致"
 
 # 2. 仕様テストスイート (コンパイルして実行し出力を確認)
+# 中間物は s5- を前置し，他 Stage のテストと衝突させない (tools/test.sh が
+# Stage のテストを並列に走らせる)
 run_case() {
     name=$1
     expect=$2
-    csc "tests/stage005/$name.sc" "tmp/$name.bin" \
-        && sh tools/env.sh qemu "tmp/$name.bin" < /dev/null > "tmp/$name.out"
+    csc "tests/stage005/$name.sc" "tmp/s5-$name.bin" \
+        && sh tools/env.sh qemu "tmp/s5-$name.bin" < /dev/null > "tmp/s5-$name.out"
     rc=$?
-    [ "$rc" -eq 0 ] && [ "$(cat "tmp/$name.out")" = "$expect" ]
+    [ "$rc" -eq 0 ] && [ "$(cat "tmp/s5-$name.out")" = "$expect" ]
     report $? "spec: $name.sc"
 }
 
@@ -50,10 +52,10 @@ run_case ptr "oooHI"
 run_case struct "oopt"
 
 # 3. フィルタ
-csc tests/stage005/upper.sc tmp/upper.bin \
-    && printf 'hello World 123.' | sh tools/env.sh qemu tmp/upper.bin > tmp/upper.out
+csc tests/stage005/upper.sc tmp/s5-upper.bin \
+    && printf 'hello World 123.' | sh tools/env.sh qemu tmp/s5-upper.bin > tmp/s5-upper.out
 rc=$?
-[ "$rc" -eq 0 ] && [ "$(cat tmp/upper.out)" = "HELLO WORLD 123" ]
+[ "$rc" -eq 0 ] && [ "$(cat tmp/s5-upper.out)" = "HELLO WORLD 123" ]
 report $? "filter: upper.sc ('.' まで転写・大文字化)"
 
 # 4. エラー系
