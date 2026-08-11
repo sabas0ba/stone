@@ -79,6 +79,41 @@ printf 'int main() { return 2 + 3 * 4; }\004' | sh tools/env.sh qemu tmp/build/s
 [ "$(stat -c%s tmp/u1a.bin)" -lt "$(stat -c%s tmp/u4.bin)" ]
 report $? "codegen: occ の出力が scc の出力より小さい"
 
+# 4KiB を超える分岐 (occ の主眼。docs/stage007-occ.md 3 章)。
+# 旧実装 (sc/scc) は B-type 即値 (±4KiB) の範囲検査をせずに beq を直接
+# 出すため，本体が 4KiB を超える if を silent に誤コンパイルする。occ は
+# 「逆条件の B-type で 1 語跳び越え + jal」に落として制限を外した。
+#
+# occ.sc 自身は「旧コード生成でも ±4KiB に収まるよう」大きなループ本体を
+# 関数へ分割して書いてあるので (同 3 章)，固定点検証ではこの経路を通らない。
+# ここだけが唯一の検査になる。
+#
+# **条件を偽にして本体を跨がせる**のが要点である。真にして本体へ落ちる形だと
+# 分岐そのものが取られず，飛び先が壊れていても素通りしてしまう (検査になら
+# ない)。同じソースを scc でコンパイルすると，切り詰められた飛び先へ跳んで
+# 戻らなくなる —— それが occ を作った理由である
+{
+    echo 'int main() {'
+    echo '  int x;'
+    echo '  x = 5;'
+    echo '  if (x == 0) {'
+    i=0
+    while [ $i -lt 1200 ]; do echo '    x = x + 1;'; i=$((i + 1)); done
+    echo '  }'
+    echo '  return x + 2;'
+    echo '}'
+} > tmp/bigbr.sc
+csc tmp/bigbr.sc tmp/bigbr.bin
+rc=$?
+# 本体が 4KiB を超えていること自体を確かめる (超えていなければ検査になら
+# ない)。生成物全体の大きさで代用する
+[ "$rc" -eq 0 ] && [ "$(stat -c%s tmp/bigbr.bin)" -gt 4096 ]
+report $? "branch: 本体 4KiB 超の if を含むソースがコンパイルでき，出力が 4KiB を超える"
+
+sh tools/env.sh qemu tmp/bigbr.bin < /dev/null > /dev/null
+[ $? -eq 7 ]
+report $? "branch: 4KiB 超の本体を跨ぐ分岐が正しく飛ぶ (終了コード 7)"
+
 # 5. エラー系
 esc() {
     printf "$1\004" | sh tools/env.sh qemu "$occ" > /dev/null

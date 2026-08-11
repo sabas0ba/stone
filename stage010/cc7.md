@@ -12,7 +12,7 @@ cc7 は C コンパイラである。第 2 部の 5 の [cc6.sc](cc6.sc) を出�
 
 ```
 sh tools/build.sh stage010
-# ... -> cc10f -> cc10g0 (ブートストラップ) -> cc10g (= cc.bin)
+# ... -> cc10f -> cc10g0 (ブートストラップ) -> cc10g
 ```
 
 SHA-256: 0d3bd9960daf7edefedd8afd4bb5a610a8cc7a61b66d73c8405e8195c1f10e25

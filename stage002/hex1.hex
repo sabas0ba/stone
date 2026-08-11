@@ -14,7 +14,7 @@
 #   +0x700 read_byte    バッファからの hex ペア読取り (template 用)
 #   +0x780 emit_byte    1 バイト出力 (pass2 のみ UART へ)
 #   +0x7c0 emit_word    32bit 語を LE で 4 バイト出力
-#   +0x840 exit/err     終了コード設定と test finisher 書込み
+#   +0x800 exit/err     終了コード設定と test finisher 書込み
 #
 # レジスタ割当:
 #   x1  link (parse_name/lookup/emit_word 呼出し)   x16 シンボル表 次エントリ

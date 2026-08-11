@@ -109,12 +109,15 @@ build_stage009() {
     echo "built tmp/build/pp.bin" >&2
 }
 
-# Stage 10 は 3 部に分かれ，各部のコンパイラが次の部をビルドする。
-# 生成物は世代ごとに名前を持ち (cc10a = 第 1 部, cc10b = 第 2 部)，
-# 最新世代を cc.bin として複製する (docs/stage010-c89.md 2.1)。
+# Stage 10 は 3 部と補遺に分かれ，各部のコンパイラが次の部をビルドする。
+# 生成物は世代ごとに名前を持ち (cc10a = 第 1 部, cc10b..cc10f = 第 2 部,
+# cc10g..cc10j = 第 3 部, cc10k/cc10l = 補遺)，最新世代 (cc10l) を
+# cc.bin として複製する (docs/stage010-c89.md 2.1)。
 #
 #   cc8   -> cc10a0 -> cc10a  (第 1 部。cc10a0 == cc10a)
-#   cc10a -> cc10b           (第 2 部)
+#   cc10a -> cc10b            (第 2 部の 1。1 段目を置かない唯一の世代)
+#   cc10b -> cc10c0 -> cc10c  (第 2 部の 2)
+#   ... 以降も同じ形で cc10l まで続く (各世代の .md を参照)
 build_stage010() {
     { cat stage010/cc.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc8.bin > tmp/build/cc10a0.o
@@ -408,6 +411,14 @@ build_stage014() {
     { cat tmp/build/ld14.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld14.bin
     echo "built tmp/build/ld14.bin" >&2
+    # カーネルの第 14 世代 (sfs の上書きと ELF の検査)。最前線の cc14f で
+    # コンパイルし，ld14 の 'K' で前置部を付ける
+    sh tools/bundle.sh stage014/kernel14.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/kernel14.i
+    sh tools/env.sh qemu tmp/build/cc14f.bin < tmp/build/kernel14.i > tmp/build/kernel14.o
+    { printf 'K'; cat tmp/build/kernel14.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/build/kernel14.bin
+    echo "built tmp/build/kernel14.bin" >&2
     # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14f で
     # コンパイルする (外部ソースと同じ経路に載せるため)
     for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio posix/assert; do
@@ -497,12 +508,15 @@ do_stage013() {
 do_stage014() {
     run_stage stage014 cc14a0.bin cc14a.bin cc14b0.bin cc14b.bin \
         cc14c0.bin cc14c.bin cc14d0.bin cc14d.bin cc14e0.bin cc14e.bin \
+        cc14f0.bin cc14f.bin ld14.bin kernel14.bin \
         l14_src_string.o l14_src_ctype.o l14_src_stdlib.o l14_src_morecore.o \
         l14_posix_sys.o l14_posix_morecore.o l14_posix_stdio.o l14_posix_assert.o \
         -- stage014/cc14.sc stage014/cc14b.sc stage014/cc14c.sc \
-           stage014/cc14d.sc stage014/cc14e.sc stage014/libc/include/*.h \
+           stage014/cc14d.sc stage014/cc14e.sc stage014/cc14f.sc \
+           stage014/ld14.sc stage014/kernel14.c stage014/libc/include/*.h \
            stage014/libc/src/*.c stage014/libc/posix/*.c \
-           tmp/build/stage010.stamp tools/build.sh tools/bundle.sh
+           tmp/build/stage010.stamp tmp/build/stage013.stamp \
+           tools/build.sh tools/bundle.sh
 }
 
 stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014"

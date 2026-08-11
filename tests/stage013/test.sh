@@ -103,6 +103,21 @@ done
 [ "$ok" -eq 0 ]
 report $? "build: ld13.bin / kernel13.bin / sh13 / ed13 / bundle13 / ldin13 の SHA-256 が各 .md 記載値と一致"
 
+# libc のオブジェクトも記録値と照合する。道具へリンクされるものは実行結果で
+# 間接的に守られるが，どの道具にもリンクされない ctype.o は記録した SHA-256 を
+# 誰も見ていなかった (記録だけがあって検査が無い状態)
+ok=0
+[ "$buildrc" -eq 0 ] || ok=1
+for f in string ctype stdlib morecore; do
+    doc=stage013/libc/src/$f.md
+    [ -f "$doc" ] || { ok=1; continue; }
+    want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "$doc" | cut -d' ' -f2)
+    got=$(sha256sum "tmp/build/l13_src_$f.o"); got=${got%% *}
+    [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "build: libc 純粋部 (string / ctype / stdlib / morecore) の .o が各 .md 記載値と一致"
+
 # pp / cc / ld のコマンド版は素材が凍結された .o なので 1 つの .md にまとめてある
 ok=0
 [ "$buildrc" -eq 0 ] || ok=1

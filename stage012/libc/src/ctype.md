@@ -13,7 +13,7 @@ ctype.o はフリースタンディング libc の一部で，文字の分類と
 Stage 10 の成果物 (pp + cc) でビルドする。
 
 ```
-sh tools/build.sh stage011
+sh tools/build.sh stage012
 # bundle(ctype.h ctype.c) | pp | cc -> ctype.o
 ```
 

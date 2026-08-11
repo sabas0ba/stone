@@ -12,7 +12,7 @@ cc9 は C コンパイラである。第 3 部の 2 の [cc8.sc](cc8.sc) を出�
 
 ```
 sh tools/build.sh stage010
-# ... -> cc10h -> cc10i0 (ブートストラップ) -> cc10i (= cc.bin)
+# ... -> cc10h -> cc10i0 (ブートストラップ) -> cc10i
 ```
 
 SHA-256: b8fed83c7fcf5da18af4cdcec614d1be3ca9b9085192256d1a96de983938c43a

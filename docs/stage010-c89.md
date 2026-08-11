@@ -97,7 +97,13 @@ Stage 10 のコンパイラは Stage 8 の `cc` の後継である。ソース�
 | `tmp/build/cc10d.bin` | stage010/cc4.sc | 第 2 部の 3 (識別子と配列) |
 | `tmp/build/cc10e.bin` | stage010/cc5.sc | 第 2 部の 4 (整数型) |
 | `tmp/build/cc10f.bin` | stage010/cc6.sc | 第 2 部の 5 (関数ポインタと static) |
-| `tmp/build/cc.bin` | — | **現行の C コンパイラ**。最新世代の別名 (複製) |
+| `tmp/build/cc10g.bin` | stage010/cc7.sc | 第 3 部の 1 (初期化子) |
+| `tmp/build/cc10h.bin` | stage010/cc8.sc | 第 3 部の 2 (可変長引数) |
+| `tmp/build/cc10i.bin` | stage010/cc9.sc | 第 3 部の 3 (構造体の値) |
+| `tmp/build/cc10j.bin` | stage010/cc10.sc | 第 3 部の 4 (構造体の返却) |
+| `tmp/build/cc10k.bin` | stage010/cc11.sc | 補遺 (文字エスケープ。19 章) |
+| `tmp/build/cc10l.bin` | stage010/cc12.sc | 補遺 2 (配列への単項 `&`。20 章)。Stage 10 の最終世代 |
+| `tmp/build/cc.bin` | — | **現行の C コンパイラ**。最新世代 (cc10l) の別名 (複製) |
 
 各部のソースは凍結し，次の部はその 1 つ前の部のコンパイラでビルドする。
 
@@ -108,6 +114,12 @@ cc10b -> cc10c0 -> cc10c      (第 2 部の 2)
 cc10c -> cc10d0 -> cc10d      (第 2 部の 3。cc10d0 == cc10d)
 cc10d -> cc10e0 -> cc10e      (第 2 部の 4。コード生成が変わるので一致しない)
 cc10e -> cc10f0 -> cc10f      (第 2 部の 5)
+cc10f -> cc10g0 -> cc10g      (第 3 部の 1)
+cc10g -> cc10h0 -> cc10h      (第 3 部の 2)
+cc10h -> cc10i0 -> cc10i      (第 3 部の 3)
+cc10i -> cc10j0 -> cc10j      (第 3 部の 4)
+cc10j -> cc10k0 -> cc10k      (補遺)
+cc10k -> cc10l0 -> cc10l      (補遺 2。= cc.bin)
 ```
 
 こうすると，各段が次の段を書きやすくする。第 2 部のソースは第 1 部で
@@ -338,10 +350,10 @@ Stage 8 の cc から変更しない ([stage005-sc.md](stage005-sc.md) 2.8)。
 
 ## 7. 検証計画 (tests/stage010)
 
-1. **ビルド再現**: `cc.bin` の SHA-256 が `stage010/cc.md` の記載値と一致する
-2. **セルフホストの健全性**: `cc1.bin == cc.bin`。第 1 部はコード生成規則を
-   変えないので，cc8 が作った 1 段目と，それが自分自身を再コンパイルした
-   ものはバイト単位で一致しなければならない
+1. **ビルド再現**: `cc10a.bin` の SHA-256 が `stage010/cc.md` の記載値と一致する
+2. **セルフホストの健全性**: `cc10a0.bin == cc10a.bin`。第 1 部はコード生成
+   規則を変えないので，cc8 が作った 1 段目 (`cc10a0`) と，それが自分自身を
+   再コンパイルしたもの (`cc10a`) はバイト単位で一致しなければならない
 3. **固定点**: `cc.bin` で `stage010/cc.sc` を再コンパイルした結果が
    `cc.bin` と一致する (B2 == B3)
 4. **同値性**: Stage 5 の仕様スイートと Stage 8 の分割コンパイル例が

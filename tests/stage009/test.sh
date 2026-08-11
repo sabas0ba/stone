@@ -117,4 +117,34 @@ errcase 5 '#error' '#error boom'
 errcase 1 '未知の指令' '#nosuch 1'
 errcase 1 '未終端のブロックコメント' 'a /* unterminated'
 
+# docs/stage009-pp.md 3.4 が明示する 2 つの規則。どちらも「そう決めた」
+# 仕様なので，実装が偶然そうなっているだけの状態にしない
+ifcase() {
+    want=$1
+    label=$2
+    input=$3
+    printf '%s\004' "$input" > tmp/s9/ifcase.in
+    got=$(sh tools/env.sh qemu "$pp" < tmp/s9/ifcase.in 2> /dev/null \
+        | tr -d '\004' | tr -s ' \t\n' ' ' | sed 's/^ *//; s/ *$//')
+    [ "$got" = "$want" ]
+    report $? "cond: $label (-> '$want')"
+}
+
+# 0 除算・剰余は 0 と定める (短絡しないので defined(N) && N > 3 のような
+# 式で右辺が必ず評価されるため。同 3.4)
+ifcase yes '0 による除算は 0' '#if 1 / 0 == 0
+yes
+#endif'
+ifcase yes '0 による剰余は 0' '#if 1 % 0 == 0
+yes
+#endif'
+# defined は括弧なしでも書ける
+ifcase yes '括弧なしの defined' '#define N 1
+#if defined N
+yes
+#endif'
+ifcase yes '括弧なしの defined (未定義側)' '#if !defined N
+yes
+#endif'
+
 summary

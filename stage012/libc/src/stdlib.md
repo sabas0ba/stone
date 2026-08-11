@@ -15,7 +15,7 @@ stdlib.o はフリースタンディング libc の一部で，記憶域の管�
 Stage 10 の成果物 (pp + cc) でビルドする。
 
 ```
-sh tools/build.sh stage011
+sh tools/build.sh stage012
 # bundle(stddef.h stdlib.h stdlib.c) | pp | cc -> stdlib.o
 ```
 
