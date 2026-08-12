@@ -109,6 +109,26 @@ echo
 echo "   台帳: 通る $nok 件 / 未対応 $ngap 件 / 通るが誤り $nbad 件"
 
 # ---------------------------------------------------------------------------
+section "第 3 部: 浮動小数点の実行時支援 (docs/stage015-tcc.md 10 章)"
+
+# rtfp.c は浮動小数点の型を使わずに書いてあるので，第 2 部までの cc で
+# 通る。ここでは**実行時支援そのもの**を単体で確かめる。処理系が float /
+# double を読めるようにするのは後続の世代 (cc15f 以降)
+sh tools/bundle.sh "$hdr" tests/stage015/probe/fpsoft.c 2> /dev/null \
+    | sh tools/env.sh qemu "$pp" > tmp/s15/fpsoft.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/fpsoft.i > tmp/s15/fpsoft.o 2> /dev/null
+report $? "fp: rtfp.c の検査ソースがコンパイルできる"
+
+{ cat tmp/s15/fpsoft.o tmp/build/rtfp.o; printf '\0'; } \
+    | sh tools/env.sh qemu "$ld" > tmp/s15/fpsoft.bin 2> /dev/null
+report $? "fp: 実行時支援とリンクできる"
+
+# 期待値はホストの double から作った表。加減乗除を 21 組ぶん照合する
+out=$(sh tools/env.sh qemu tmp/s15/fpsoft.bin < /dev/null 2> /dev/null)
+[ "$out" = ok ]
+report $? "fp: 加減乗除がホストの double とビット一致する"
+[ "$out" = ok ] || echo "$out" | head -5
+
 section "第 5 部: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
 
 # 素材とホストの道具があるときだけ走る。ここで作るのは**ホストの gcc が
