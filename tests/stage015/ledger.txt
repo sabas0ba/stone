@@ -20,6 +20,9 @@ llarg        ok   0123456789abcdef12:0123456789abcdf034\n
 llret        ok   0123456789abcdf0:02468acf13579bde:fffffffffffffffe\n
 llmul        ok   0000000300000000:01b69b4bd8f72d93:02468acf13579bde\n
 lldiv        ok   0000002142f30249:0000000000000001:ffffffdebd0cfdb7:ffffffffffffffff:5555555555555555:0000000000000000\n
+llinit       ok   1122334455667788:99aabbccddeeff00:0000000000000003:fedcba9876543211:ffffffffffffffff\n
+llcond       ok   10101ac5\n
+llargp       ok   0000000000000007:fffffffffffffffb:00000000fffffffd:ffffffff89abcdef\n
 
 # ---- 未対応 (cc が拒む) ----
 # 第 2 部の内訳 (docs/stage015-tcc.md 6.2) はこれで一通り埋まった。

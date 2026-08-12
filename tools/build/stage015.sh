@@ -62,6 +62,17 @@ build_stage015() {
     { cat tmp/build/cc15e.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15e.bin
     echo "built tmp/build/cc15e.bin" >&2
+    # 第 2 部の穴 3 つの修正 (第 3 部 その 2)。前段は cc15e
+    { cat stage015/cc15f.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15e.bin > tmp/build/cc15f0.o
+    { cat tmp/build/cc15f0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15f0.bin
+    echo "built tmp/build/cc15f0.bin (bootstrap)" >&2
+    { cat stage015/cc15f.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15f0.bin > tmp/build/cc15f.o
+    { cat tmp/build/cc15f.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15f.bin
+    echo "built tmp/build/cc15f.bin" >&2
     # 実行時支援 (64 bit の除算の実体)。cc15e 自身でコンパイルする。
     # ブロックコメントを含むので pp を通す (cc は // しか解さない)
     sh tools/bundle.sh stage015/rt64.c \
@@ -80,9 +91,9 @@ build_stage015() {
 do_stage015() {
     run_stage stage015 cc15a0.bin cc15a.bin cc15b0.bin cc15b.bin \
         cc15c0.bin cc15c.bin cc15d0.bin cc15d.bin \
-        cc15e0.bin cc15e.bin rt64.o rtfp.o \
+        cc15e0.bin cc15e.bin cc15f0.bin cc15f.bin rt64.o rtfp.o \
         -- stage015/cc15a.sc stage015/cc15b.sc stage015/cc15c.sc \
-           stage015/cc15d.sc stage015/cc15e.sc stage015/rt64.c \
-           stage015/rtfp.c \
+           stage015/cc15d.sc stage015/cc15e.sc stage015/cc15f.sc \
+           stage015/rt64.c stage015/rtfp.c \
            tmp/build/stage014.stamp tools/build/stage015.sh
 }
