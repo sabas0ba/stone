@@ -193,6 +193,11 @@ else
             report $? "tcc: 生成コードに RV32 に無い命令が無い (不正な語 $bad 個)"
         fi
 
+        # 実行時支援 (riscv32-libtcc1.a) が通ること。可変桁の 64 bit
+        # シフトなどはここを呼ぶ (docs/stage015-riscv32.md 12 章)
+        make -C tmp/tcc/build cross-riscv32 > tmp/s15/tcc-lib.log 2>&1
+        report $? "tcc: RV32 の実行時支援 (riscv32-libtcc1.a) がビルドできる"
+
         # **走らせて答を見る。** 不正命令が無いことは「命令が RV32 の
         # ものである」ことしか言わない。正しい命令が選ばれていることは
         # 実行しないと判らない (docs/stage015-riscv32.md 7 章)
@@ -208,6 +213,26 @@ else
         [ "$got" = "$want" ]
         report $? "tcc: 吐いたものが我々の QEMU で走り，答が合う"
         [ "$got" = "$want" ] || { echo "     期待 $want"; echo "     実測 $got"; }
+
+        # 呼出し規約 (その 3)。実行時支援を並べて走らせる
+        tccrun() {
+            nm=$1; want=$2
+            tmp/tcc/build/riscv32-tcc -static -nostdlib \
+                -Wl,-Ttext=0x80000000 -o "tmp/s15/$nm.elf" \
+                tests/stage015/tccprobe/head.S \
+                "tests/stage015/tccprobe/$nm.c" \
+                tmp/tcc/build/riscv32-libtcc1.a > /dev/null 2>&1 || {
+                report 1 "tcc: $nm がリンクできない"
+                return
+            }
+            got=$(sh tools/env.sh qemu "tmp/s15/$nm.elf" < /dev/null 2>/dev/null)
+            [ "$got" = "$want" ]
+            report $? "tcc: $nm が我々の QEMU で走り，答が合う"
+            [ "$got" = "$want" ] || { echo "     期待 $want"; echo "     実測 $got"; }
+        }
+        tccrun ll32 '000462d5080063b1:0000000100000002:00000000ffffffff:0000002471c71c5c:00000001:00000181:0000000200000006'
+        tccrun llcmp32 '00000001:00000000:00000001:00000001:00000001:00000001:00000001:00000001'
+        tccrun struct32 '000002c5:00000032:00000041:000010e1'
     else
         report 1 "tcc: riscv32-tcc が無いので出力を見られない"
     fi
