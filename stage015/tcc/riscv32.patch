@@ -23,6 +23,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/Makefile ../../tmp/tcc/src/Makefile
 diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/Makefile ../../tmp/tcc/src/Makefile
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/Makefile ../../tmp/tcc/src/Makefile
 --- a/Makefile
 +++ b/Makefile
 @@ -117,6 +117,7 @@

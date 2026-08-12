@@ -234,6 +234,40 @@ else
         tccrun llcmp32 '00000001:00000000:00000001:00000001:00000001:00000001:00000001:00000001'
         tccrun struct32 '000002c5:00000032:00000041:000010e1'
         tccrun float32 '40700000:3fc00000:400e000000000000:3ff8000000000000:3fd0000000000000:00000001:c01c000000000000:fffffff9:4271f71fb04cb000:d4a51000:3f000000:3fe0000000000000'
+
+        # 実物の C (その 5)。bzip2 1.0.8 の libbz2 を無改変で通す。
+        # 素材があるときだけ走る
+        bzdir=docs/external/bzip2
+        if [ ! -d "$bzdir" ]; then
+            echo "   skip: $bzdir が無い (sh tools/fetch.sh bzip2 で取得できる)"
+        else
+            mkdir -p tmp/s15/bz
+            bzok=0
+            for f in blocksort huffman crctable randtable compress decompress bzlib; do
+                rm -f "tmp/s15/bz/$f.o"
+                tmp/tcc/build/riscv32-tcc -c -DBZ_NO_STDIO=1 -nostdinc \
+                    -I stage014/libc/include -I "$bzdir" -B tmp/tcc/src \
+                    -o "tmp/s15/bz/$f.o" "$bzdir/$f.c" > /dev/null 2>&1 || bzok=1
+            done
+            [ "$bzok" -eq 0 ]
+            report $? "tcc: libbz2 (1.0.8) の 7 ファイルを riscv32-tcc が無改変で通す"
+
+            tmp/tcc/build/riscv32-tcc -static -nostdlib -nostdinc \
+                -I stage014/libc/include -I "$bzdir" -B tmp/tcc/src \
+                -Wl,-Ttext=0x80000000 -o tmp/s15/bz32.elf \
+                tests/stage015/tccprobe/head.S tests/stage015/tccprobe/bz32.c \
+                tmp/s15/bz/*.o tmp/tcc/build/riscv32-libtcc1.a > /dev/null 2>&1
+            report $? "tcc: libbz2 + 検査ドライバがリンクできる"
+
+            # 圧縮の返り値・長さ・検査和，伸長の返り値・長さ，一致した文字数。
+            # 長さ 0x14b と検査和 86cd7fff は**ホストの bzip2 と同じ値**である
+            # (docs/stage015-riscv32.md 14 章)
+            want='00000000:0000014b:86cd7fff:00000000:00001000:00001000'
+            got=$(sh tools/env.sh qemu tmp/s15/bz32.elf < /dev/null 2>/dev/null)
+            [ "$got" = "$want" ]
+            report $? "tcc: bzip2 が我々の QEMU で圧縮・伸長し，ホストと同じバイト列を出す"
+            [ "$got" = "$want" ] || { echo "     期待 $want"; echo "     実測 $got"; }
+        fi
     else
         report 1 "tcc: riscv32-tcc が無いので出力を見られない"
     fi
