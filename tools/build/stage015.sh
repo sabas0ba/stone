@@ -106,6 +106,17 @@ build_stage015() {
     { cat tmp/build/cc15i.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15i.bin
     echo "built tmp/build/cc15i.bin" >&2
+    # 浮動小数点の仮引数と実引数 (第 3 部の締め)。前段は cc15i
+    { cat stage015/cc15j.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15i.bin > tmp/build/cc15j0.o
+    { cat tmp/build/cc15j0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15j0.bin
+    echo "built tmp/build/cc15j0.bin (bootstrap)" >&2
+    { cat stage015/cc15j.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15j0.bin > tmp/build/cc15j.o
+    { cat tmp/build/cc15j.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15j.bin
+    echo "built tmp/build/cc15j.bin" >&2
     # 実行時支援 (64 bit の除算の実体)。cc15e 自身でコンパイルする。
     # ブロックコメントを含むので pp を通す (cc は // しか解さない)
     sh tools/bundle.sh stage015/rt64.c \
@@ -126,10 +137,11 @@ do_stage015() {
         cc15c0.bin cc15c.bin cc15d0.bin cc15d.bin \
         cc15e0.bin cc15e.bin cc15f0.bin cc15f.bin \
         cc15g0.bin cc15g.bin cc15h0.bin cc15h.bin \
-        cc15i0.bin cc15i.bin rt64.o rtfp.o \
+        cc15i0.bin cc15i.bin cc15j0.bin cc15j.bin rt64.o rtfp.o \
         -- stage015/cc15a.sc stage015/cc15b.sc stage015/cc15c.sc \
            stage015/cc15d.sc stage015/cc15e.sc stage015/cc15f.sc \
            stage015/cc15g.sc stage015/cc15h.sc stage015/cc15i.sc \
+           stage015/cc15j.sc \
            stage015/rt64.c stage015/rtfp.c \
            tmp/build/stage014.stamp tools/build/stage015.sh
 }
