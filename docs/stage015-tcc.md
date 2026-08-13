@@ -405,3 +405,48 @@ float の 24 bit の 2 倍 + 2 以上あるので，加減乗除では二重丸�
   ことを見た
 - 処理系の側は台帳に載せる。実行時支援を並べて走らせ，出た bit の
   並びを期待値と突き合わせる
+
+## 11. 第 4 部の設計: libc の不足 (作業中)
+
+### 11.1 実測 (2026-08-12)
+
+tcc の中核 11 ファイルが参照する libc 関数を数えた。libc14 に**既に
+ある**もの (memmove / qsort / realloc / calloc / bsearch / strtol など) を
+除くと，足すべきは次に絞れた。
+
+| 群 | 関数 | 備考 |
+|---|---|---|
+| printf 系 | snprintf (17)・vsnprintf・精度 `%.*s`・`%*s`・`%X`・`%i`・`%llu` / `%lld`・`%f` (統計出力) | **`%llu` は tccpp の数値文字列化で実行時に走る** |
+| strto 系 | strtoul (7)・strtoull・strtoll・strtod・strtof・strtold | strtold は long double = double なので strtod |
+| 非局所 | setjmp (1)・longjmp (1) | エラー回復にだけ使われる。**本物は作らない** (11.2) |
+| OS | **lseek (6)**・getcwd・getenv・time・localtime・unlink・remove・fdopen・fseek / ftell | lseek は .o / .a の読込みで実行時に走る → **kernel15 が要る** |
+| 他 | sscanf ("%d.%d.%d" 1 箇所)・strdup・strerror・ldexp・fabs | |
+
+### 11.2 割り切り (意図した設計)
+
+- **setjmp は 0 を返し，longjmp は報告して exit(1)。** tcc の longjmp は
+  コンパイルエラーからの回復にだけ使われ，自己ホストが食わせるのは
+  正しいソースだけなので走らない。走ったら黙って続けず大声で止まる
+- **time は常に 0。** 時計が無い。毎回同じ値は固定点 (T2 == T3) には
+  好都合である
+- **unlink は何もしない。** sfs に削除は無いが，fopen("w") が上書き
+  するので目的は果たされる
+
+### 11.3 前提: cc15k (可変部の 2 語)
+
+`printf("%llu", x)` は **long long を可変部に積む**。cc15j までは拒む
+(第 2 部の残置制限)。cc15k で入れる: 可変部の 2 語の値は**上位語を先に**
+積む (積んだ順の逆がメモリの昇順なので，下位語が低い番地に来る)。
+float は既定の実引数拡張で double へ格上げ。va_arg は語数ぶん進める
+(stage015 の stdarg.h)。構造体は従来どおり拒む。
+
+### 11.4 部品と置き場所
+
+| 部品 | 状態 |
+|---|---|
+| cc15k (可変部の 2 語) | ソース済み (stage015/cc15k.sc)。ビルド・固定点・配線は未 |
+| stage015/libc/ (libc15 = libc14 の複製 + 拡張) | stdarg.h / setjmp.h / math.h / time.h / src/misc15.c 済み |
+| stdio.c の printf 拡張 (精度・%X・%llu・%f) と snprintf / vsnprintf / fdopen | 未 |
+| stdlib.c の strtoul / strtoull / strtoll / strtod | 未 |
+| kernel15 (SYS_LSEEK = 62) + sys.c の lseek + stdio の fseek / ftell | 未 |
+| ビルド配線 (l15_* を cc15k で) と検査 | 未 |
