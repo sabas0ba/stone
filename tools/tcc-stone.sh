@@ -127,8 +127,67 @@ EOF
     fi
 }
 
+# T2 の作業場 (tcc のソース一式 + T1 + ヘッダ) を組む。
+# 平らな名前空間なので stdarg.h / stddef.h は **tcc 自身のもの**を置く
+# (我々の stdarg.h は cc 専用の隠しローカル __va_ptr を使うため)
+t2tree() {
+    prepare
+    [ -f "$out/tcc1.bin" ] || do_t1
+    rm -rf "$out/t2fs"
+    mkdir -p "$out/t2fs/sys"
+    for f in tcc.c libtcc.c tccpp.c tccgen.c tccdbg.c tccasm.c tccelf.c \
+             tccrun.c tcctools.c riscv64-gen.c riscv64-link.c riscv64-asm.c \
+             tcc.h libtcc.h elf.h stab.h stab.def dwarf.h tcctok.h \
+             riscv64-tok.h; do
+        cp "$src/$f" "$out/t2fs/"
+    done
+    cp "$src"/include/*.h "$out/t2fs/"
+    for h in $inc/*.h; do
+        b=$(basename "$h")
+        case $b in stdarg.h|stddef.h) continue ;; esac
+        cp "$h" "$out/t2fs/"
+    done
+    cp "$inc/sys/time.h" "$out/t2fs/sys/time.h"
+    cp stage015/tcc/config-stone.h "$out/t2fs/config.h"
+    cp "$out/tcc1.bin" "$out/t2fs/tcc1"
+}
+
+# 作業場で 1 つコマンドを走らせ，結果のファイル木を $out/t2out へ出す。
+# 引数はカーネルの boot 行に書ける 8 語まで
+t2exec() {
+    printf '%s\n' "$1" > "$out/t2fs/boot"
+    sh tools/sfs.sh pack "$out/t2fs" "$out/t2fs.img" 8388608 128 > /dev/null
+    rm -f "$out/t2ram"
+    dd if=/dev/null of="$out/t2ram" bs=1 seek=134217728 2> /dev/null
+    dd if="$out/t2fs.img" of="$out/t2ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_RAMFILE="$out/t2ram" sh tools/env.sh qemu tmp/build/kernel16.bin \
+        < /dev/null
+    rc=$?
+    dd if="$out/t2ram" of="$out/t2fs2.img" bs=64K iflag=skip_bytes \
+        skip=67108864 count=128 2> /dev/null
+    rm -rf "$out/t2out"
+    sh tools/sfs.sh unpack "$out/t2fs2.img" "$out/t2out" > /dev/null
+    return $rc
+}
+
+# T1 に tcc 自身を翻訳させ，ホストの riscv32-tcc の出力と突き合わせる。
+# **まだ一致しない** (docs/stage015-tcc.md 12.12)
+do_t2() {
+    t2tree
+    t2exec 'tcc1 -I/ -c tcc.c -o tcc2.o' 2>&1 | grep -v 'warning\|In file included' || true
+    [ -f "$out/t2out/tcc2.o" ] || { echo "error: tcc2.o が出ていない" >&2; exit 1; }
+    ( cd "$out/t2fs" && ../../../tmp/tcc/build/riscv32-tcc -nostdinc -I. \
+        -c tcc.c -o ../t2ref.o ) 2> /dev/null
+    echo "T1 の出力: $(wc -c < "$out/t2out/tcc2.o") バイト" >&2
+    echo "ホスト   : $(wc -c < "$out/t2ref.o") バイト" >&2
+    cmp -s "$out/t2out/tcc2.o" "$out/t2ref.o" \
+        && echo "一致した" >&2 || echo "まだ食い違う (12.12)" >&2
+}
+
 case "${1:-t1}" in
 t1)  do_t1 ;;
 run) do_run ;;
-*)   echo "usage: tcc-stone.sh [t1|run]" >&2; exit 1 ;;
+t2)  do_t2 ;;
+*)   echo "usage: tcc-stone.sh [t1|run|t2]" >&2; exit 1 ;;
 esac
