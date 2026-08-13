@@ -10,11 +10,11 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s15
 
-cc=tmp/build/cc15j.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15k.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
-hdr=stage013/libc/include/stdarg.h
+hdr=stage015/libc/include/stdarg.h   # va_arg が語数ぶん進む版 (cc15k の 2 語の可変部に要る)
 
 ensure_build stage015
 
@@ -53,20 +53,21 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15c.bin:stage015/cc15c.md cc15d.bin:stage015/cc15d.md \
         cc15e.bin:stage015/cc15e.md cc15f.bin:stage015/cc15f.md \
         cc15g.bin:stage015/cc15g.md cc15h.bin:stage015/cc15h.md \
-        cc15i.bin:stage015/cc15i.md cc15j.bin:stage015/cc15j.md; do
+        cc15i.bin:stage015/cc15i.md cc15j.bin:stage015/cc15j.md \
+        cc15k.bin:stage015/cc15k.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15j の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15k の SHA-256 が各 .md 記載値と一致"
 
-{ cat stage015/cc15j.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc15j.bin > tmp/s15/b3.o \
+{ cat stage015/cc15k.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc15k.bin > tmp/s15/b3.o \
     && { cat tmp/s15/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s15/b3.bin \
-    && cmp -s tmp/s15/b3.bin tmp/build/cc15j.bin
-report $? "fixpoint: cc15j が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s15/b3.bin tmp/build/cc15k.bin
+report $? "fixpoint: cc15k が自分自身を再生成する (B2 == B3)"
 
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
@@ -77,7 +78,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15j が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15k が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合 (64 bit の土台)"
 
@@ -130,6 +131,38 @@ out=$(sh tools/env.sh qemu tmp/s15/fpsoft.bin < /dev/null 2> /dev/null)
 [ "$out" = ok ]
 report $? "fp: 加減乗除がホストの double とビット一致する"
 [ "$out" = ok ] || echo "$out" | head -5
+
+section "第 4 部: libc15 と kernel15 (docs/stage015-tcc.md 11 章)"
+
+# lib15 を libc15 一式 + 実行時支援とリンクし，kernel15 (lseek 持ち) の
+# 上で走らせて期待出力と突き合わせる
+sh tools/bundle.sh stage015/libc/include/*.h tests/stage015/user/lib15.c \
+    2> /dev/null \
+    | sh tools/env.sh qemu "$pp" > tmp/s15/lib15.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/lib15.i > tmp/s15/lib15.o 2> /dev/null \
+    && { printf 'E'; cat tmp/s15/lib15.o \
+         tmp/build/l15_src_string.o tmp/build/l15_src_stdlib.o \
+         tmp/build/l15_src_misc15.o tmp/build/l15_posix_sys.o \
+         tmp/build/l15_posix_morecore.o tmp/build/l15_posix_stdio.o \
+         tmp/build/l15_posix_assert.o tmp/build/rt64.o tmp/build/rtfp.o; \
+         printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/s15/lib15
+report $? "build: lib15 (libc15 一式 + rt64 + rtfp をリンク)"
+
+rm -rf tmp/s15/root
+mkdir -p tmp/s15/root
+cp tmp/s15/lib15 tmp/s15/root/lib15
+printf 'lib15\n' > tmp/s15/root/boot
+sh tools/sfs.sh pack tmp/s15/root tmp/s15/fs.img 4194304 128 > /dev/null \
+    && rm -f tmp/s15/ram \
+    && dd if=/dev/null of=tmp/s15/ram bs=1 seek=134217728 2> /dev/null \
+    && dd if=tmp/s15/fs.img of=tmp/s15/ram bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE=tmp/s15/ram sh tools/env.sh qemu \
+        tmp/build/kernel15.bin < /dev/null > tmp/s15/lib15.out 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -q tmp/s15/lib15.out tests/stage015/expected/lib15.txt > /dev/null
+report $? "run: printf %llu / snprintf / strto / sscanf / setjmp / lseek が kernel15 で通る"
 
 section "第 5 部: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
 
