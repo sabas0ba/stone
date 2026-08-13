@@ -12,9 +12,11 @@
 #ifndef _SETJMP_H
 #define _SETJMP_H
 
-typedef int jmp_buf[1];
+/* cc は配列の typedef を持たないので，jmp_buf は 1 語の整数にする。
+ * 本物の巻き戻しをしないのでこれで足りる (中身は使われない) */
+typedef int jmp_buf;
 
-#define setjmp(env) ((env)[0] = 0)
+#define setjmp(env) ((env) = 0)
 void longjmp(jmp_buf env, int val);
 
 #endif

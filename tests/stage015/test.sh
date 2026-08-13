@@ -132,6 +132,38 @@ out=$(sh tools/env.sh qemu tmp/s15/fpsoft.bin < /dev/null 2> /dev/null)
 report $? "fp: 加減乗除がホストの double とビット一致する"
 [ "$out" = ok ] || echo "$out" | head -5
 
+section "第 4 部: libc15 と kernel15 (docs/stage015-tcc.md 11 章)"
+
+# lib15 を libc15 一式 + 実行時支援とリンクし，kernel15 (lseek 持ち) の
+# 上で走らせて期待出力と突き合わせる
+sh tools/bundle.sh stage015/libc/include/*.h tests/stage015/user/lib15.c \
+    2> /dev/null \
+    | sh tools/env.sh qemu "$pp" > tmp/s15/lib15.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/lib15.i > tmp/s15/lib15.o 2> /dev/null \
+    && { printf 'E'; cat tmp/s15/lib15.o \
+         tmp/build/l15_src_string.o tmp/build/l15_src_stdlib.o \
+         tmp/build/l15_src_misc15.o tmp/build/l15_posix_sys.o \
+         tmp/build/l15_posix_morecore.o tmp/build/l15_posix_stdio.o \
+         tmp/build/l15_posix_assert.o tmp/build/rt64.o tmp/build/rtfp.o; \
+         printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/s15/lib15
+report $? "build: lib15 (libc15 一式 + rt64 + rtfp をリンク)"
+
+rm -rf tmp/s15/root
+mkdir -p tmp/s15/root
+cp tmp/s15/lib15 tmp/s15/root/lib15
+printf 'lib15\n' > tmp/s15/root/boot
+sh tools/sfs.sh pack tmp/s15/root tmp/s15/fs.img 4194304 128 > /dev/null \
+    && rm -f tmp/s15/ram \
+    && dd if=/dev/null of=tmp/s15/ram bs=1 seek=134217728 2> /dev/null \
+    && dd if=tmp/s15/fs.img of=tmp/s15/ram bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE=tmp/s15/ram sh tools/env.sh qemu \
+        tmp/build/kernel15.bin < /dev/null > tmp/s15/lib15.out 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -q tmp/s15/lib15.out tests/stage015/expected/lib15.txt > /dev/null
+report $? "run: printf %llu / snprintf / strto / sscanf / setjmp / lseek が kernel15 で通る"
+
 section "第 5 部: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
 
 # 素材とホストの道具があるときだけ走る。ここで作るのは**ホストの gcc が

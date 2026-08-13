@@ -135,6 +135,22 @@ build_stage015() {
     sh tools/env.sh qemu tmp/build/cc15e.bin < tmp/build/rt64.i > tmp/build/rt64.o
     echo "built tmp/build/rt64.o" >&2
 
+    # カーネル第 15 世代 (lseek。第 4 部)。libc と同じく最前線で作る
+    sh tools/bundle.sh stage015/kernel15.c \
+        | sh tools/env.sh qemu tmp/build/pp.bin > tmp/build/kernel15.i
+    sh tools/env.sh qemu tmp/build/cc15k.bin < tmp/build/kernel15.i > tmp/build/kernel15.o
+    { printf 'K'; cat tmp/build/kernel15.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/build/kernel15.bin
+    echo "built tmp/build/kernel15.bin" >&2
+    # 第 15 世代の libc (第 4 部の実測ぶん)。最前線の cc15k でコンパイル
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert; do
+        n=$(echo "$f" | tr / _)
+        sh tools/bundle.sh stage015/libc/include/*.h "stage015/libc/$f.c" \
+            | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l15_$n.i"
+        sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l15_$n.i" > "tmp/build/l15_$n.o"
+        echo "built tmp/build/l15_$n.o" >&2
+    done
     # 浮動小数点の実行時支援 (第 3 部)。浮動小数点の型を使わずに書いてある
     # ので，第 2 部までの cc でそのまま通る (docs/stage015-tcc.md 10.3)
     sh tools/bundle.sh stage015/rtfp.c \
@@ -149,11 +165,16 @@ do_stage015() {
         cc15e0.bin cc15e.bin cc15f0.bin cc15f.bin \
         cc15g0.bin cc15g.bin cc15h0.bin cc15h.bin \
         cc15i0.bin cc15i.bin cc15j0.bin cc15j.bin \
-        cc15k0.bin cc15k.bin rt64.o rtfp.o \
+        cc15k0.bin cc15k.bin rt64.o rtfp.o kernel15.bin \
+        l15_src_string.o l15_src_ctype.o l15_src_stdlib.o l15_src_morecore.o \
+        l15_src_misc15.o l15_posix_sys.o l15_posix_morecore.o \
+        l15_posix_stdio.o l15_posix_assert.o \
         -- stage015/cc15a.sc stage015/cc15b.sc stage015/cc15c.sc \
            stage015/cc15d.sc stage015/cc15e.sc stage015/cc15f.sc \
            stage015/cc15g.sc stage015/cc15h.sc stage015/cc15i.sc \
            stage015/cc15j.sc stage015/cc15k.sc \
+           stage015/kernel15.c stage015/libc/include/*.h \
+           stage015/libc/src/*.c stage015/libc/posix/*.c \
            stage015/rt64.c stage015/rtfp.c \
            tmp/build/stage014.stamp tools/build/stage015.sh
 }
