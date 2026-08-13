@@ -313,6 +313,7 @@ else
         tccrun() {
             nm=$1; want=$2
             tmp/tcc/build/riscv32-tcc -static -nostdlib \
+                -I tmp/tcc/src/include \
                 -Wl,-Ttext=0x80000000 -o "tmp/s15/$nm.elf" \
                 tests/stage015/tccprobe/head.S \
                 "tests/stage015/tccprobe/$nm.c" \
@@ -329,6 +330,7 @@ else
         tccrun llcmp32 '00000001:00000000:00000001:00000001:00000001:00000001:00000001:00000001'
         tccrun struct32 '000002c5:00000032:00000041:000010e1'
         tccrun float32 '40700000:3fc00000:400e000000000000:3ff8000000000000:3fd0000000000000:00000001:c01c000000000000:fffffff9:4271f71fb04cb000:d4a51000:3f000000:3fe0000000000000'
+        tccrun vfp32 '4008000000000000:3ff0000000000000:4072e80000000000:3ffc000000000000'
 
         # 実物の C (その 5)。bzip2 1.0.8 の libbz2 を無改変で通す。
         # 素材があるときだけ走る

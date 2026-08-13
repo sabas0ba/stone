@@ -17,13 +17,7 @@ TCC_TARGET_RISCV64 は「RISC-V であること」を表し，TCC_TARGET_RISCV32
 tccelf.c・tccasm.c・tccdbg.c) にある 40 箇所あまりの `#ifdef
 TCC_TARGET_RISCV64` を 1 つも書き換えずに済む。
 
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc tcc/Makefile ../../tmp/tcc/src/Makefile
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/Makefile ../../tmp/tcc/src/Makefile
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/Makefile ../../tmp/tcc/src/Makefile
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/Makefile ../../tmp/tcc/src/Makefile
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/Makefile ../../tmp/tcc/src/Makefile
 --- a/Makefile
 +++ b/Makefile
 @@ -117,6 +117,7 @@
@@ -51,7 +45,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  
  TCCDEFS_H$(subst yes,,$(CONFIG_predefs)) = tccdefs_.h
  
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/lib/Makefile ../../tmp/tcc/src/lib/Makefile
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/lib/Makefile ../../tmp/tcc/src/lib/Makefile
 --- a/lib/Makefile
 +++ b/lib/Makefile
 @@ -74,6 +74,8 @@
@@ -63,7 +57,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  
  OBJ-extra = $(filter $(EXTRA_O),$(OBJ-$T))
  OBJ-libtcc1 = $(addprefix $(X),$(filter-out $(OBJ-extra),$(OBJ-$T)))
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/lib/riscv32.c ../../tmp/tcc/src/lib/riscv32.c
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/lib/riscv32.c ../../tmp/tcc/src/lib/riscv32.c
 --- a/lib/riscv32.c
 +++ b/lib/riscv32.c
 @@ -0,0 +1,148 @@
@@ -215,7 +209,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
 +{
 +    return (float)__floatdidf(a);
 +}
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/riscv64-gen.c ../../tmp/tcc/src/riscv64-gen.c
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/riscv64-gen.c ../../tmp/tcc/src/riscv64-gen.c
 --- a/riscv64-gen.c
 +++ b/riscv64-gen.c
 @@ -21,12 +21,21 @@
@@ -511,7 +505,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              }
          }
      }
-@@ -733,7 +801,7 @@
+@@ -733,10 +801,24 @@
                  assert(!r2);
                  r2 = 1 + TREG_RA;
              }
@@ -520,7 +514,24 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  assert(r2);
                  r2--;
              } else if (r2) {
-@@ -744,7 +812,7 @@
++                if (!(vtop->r & VT_LVAL)) {
++                    /* 計算した 2 語の値を整数レジスタ対で渡す場合
++                       (RV32 の可変部の double)。値は記憶域に無く，
++                       RV32 には浮動小数点レジスタから整数レジスタ 2 本
++                       への直接の移動も無いので，いったんフレーム上の
++                       一時領域へ落として左辺値にする */
++                    int a2 = 0, s2 = type_size(&vtop->type, &a2);
++                    loc = (loc - s2) & -(a2 < XLEN ? XLEN : a2);
++                    vset(&vtop->type, VT_LOCAL | VT_LVAL, loc);
++                    vswap();
++                    vstore();
++                    vpop();
++                    vset(&origtype, VT_LOCAL | VT_LVAL, loc);
++                }
+                 test_lvalue();
+                 vpushv(vtop);
+             }
+@@ -744,7 +826,7 @@
              gv(r < 8 ? RC_R(r) : RC_F(r - 8));
              vtop->type = origtype;
  
@@ -529,7 +540,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  r2--;
                  assert(r2 < 16 || r2 == TREG_RA);
                  vswap();
-@@ -773,9 +841,9 @@
+@@ -773,9 +855,9 @@
                  vtop->r2 = r2;
              }
              if (info[nb_args - 1 - i] & 16) {
@@ -541,7 +552,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  assert(vtop->r2 <= 7 && r2 <= 7);
                  /* XXX we'd like to have 'gv' move directly into
                     the right class instead of us fixing it up.  */
-@@ -814,7 +882,7 @@
+@@ -814,7 +896,7 @@
      CType *type;
  
      sym = func_type->ref;
@@ -550,7 +561,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      func_sub_sp_offset = ind;
      ind += 5 * 4;
  
-@@ -824,9 +892,9 @@
+@@ -824,9 +906,9 @@
         implicit pointer parameter */
      size = type_size(&func_vt, &align);
      if (size > 2 * XLEN) {
@@ -562,7 +573,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      }
      /* define parameters */
      while ((sym = sym->next) != NULL) {
-@@ -837,7 +905,7 @@
+@@ -837,7 +919,7 @@
          size = type_size(type, &align);
          if (size > 2 * XLEN) {
              type = &char_pointer_type;
@@ -571,7 +582,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          }
          reg_pass(type, prc, fieldofs, 1);
          regcount = prc[0];
-@@ -851,18 +919,28 @@
+@@ -851,18 +933,28 @@
              param_addr = addr;
              addr += size;
          } else {
@@ -605,7 +616,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  }
              }
          }
-@@ -873,7 +951,7 @@
+@@ -873,7 +965,7 @@
      if (func_var) {
          for (; areg[0] < 8; areg[0]++) {
              num_va_regs++;
@@ -614,7 +625,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          }
      }
  #ifdef CONFIG_TCC_BCHECK
-@@ -888,8 +966,8 @@
+@@ -888,8 +980,8 @@
      int align, size = type_size(vt, &align), nregs;
      int prc[3], fieldofs[3];
      *ret_align = 1;
@@ -625,7 +636,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
        return 0;
      reg_pass(vt, prc, fieldofs, 1);
      nregs = prc[0];
-@@ -927,18 +1005,18 @@
+@@ -927,18 +1019,18 @@
          gen_bounds_epilog();
  #endif
  
@@ -649,7 +660,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          o(0x37 | (5 << 7) | UPPER(v-16)); //lui t0, upper(v)
          EI(0x13, 0, 5, 5, SIGN11(v-16)); // addi t0, t0, lo(v)
          ER(0x33, 0, 2, 2, 5, 0x20); // sub sp, sp, t0
-@@ -948,10 +1026,10 @@
+@@ -948,10 +1040,10 @@
  
      ind = func_sub_sp_offset;
      EI(0x13, 0, 2, 2, -d);     // addi sp, sp, -d
@@ -663,7 +674,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      else
        gjmp_addr(large_ofs_ind);
      if ((ind - func_sub_sp_offset) != 5*4)
-@@ -1040,12 +1118,15 @@
+@@ -1040,12 +1132,15 @@
  {
      int a, b, d;
      int func3 = 0;
@@ -681,7 +692,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              vswap();
              gv(RC_INT);
              a = ireg(vtop[0].r);
-@@ -1106,6 +1187,30 @@
+@@ -1106,6 +1201,30 @@
              }
          }
      }
@@ -712,7 +723,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      gv2(RC_INT, RC_INT);
      a = ireg(vtop[-1].r);
      b = ireg(vtop[0].r);
-@@ -1164,6 +1269,32 @@
+@@ -1164,6 +1283,32 @@
      case TOK_UDIV:
          ER(0x33 | ll, 5, d, a, b, 1); // divu d, a, b
          break;
@@ -745,7 +756,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      }
  }
  
-@@ -1172,15 +1303,18 @@
+@@ -1172,15 +1317,18 @@
      gen_opil(op, 0);
  }
  
@@ -765,7 +776,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          CType type = vtop[0].type;
          int func = 0;
          int cond = -1;
-@@ -1213,8 +1347,8 @@
+@@ -1213,8 +1361,8 @@
      }
  
      gv2(RC_FLOAT, RC_FLOAT);
@@ -776,7 +787,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      rs1 = freg(vtop[-1].r);
      rs2 = freg(vtop->r);
      vtop--;
-@@ -1279,25 +1413,28 @@
+@@ -1279,25 +1427,28 @@
      int r = ireg(gv(RC_INT));
      if ((t & VT_BTYPE) == VT_SHORT) {
          if (t & VT_UNSIGNED) {
@@ -812,7 +823,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      EI(0x1b, 0, r, r, 0); // addiw r, r, 0
  }
  
-@@ -1306,7 +1443,7 @@
+@@ -1306,7 +1457,7 @@
      int rr = ireg(gv(RC_INT)), dr;
      int u = vtop->type.t & VT_UNSIGNED;
      int l = (vtop->type.t & VT_BTYPE) == VT_LLONG;
@@ -821,7 +832,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          int func = l ?
            (u ? TOK___floatunditf : TOK___floatditf) :
            (u ? TOK___floatunsitf : TOK___floatsitf);
-@@ -1317,13 +1454,27 @@
+@@ -1317,13 +1468,27 @@
          vtop->type.t = t;
          vtop->r = REG_IRET;
          vtop->r2 = TREG_R(1);
@@ -850,7 +861,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      }
  }
  
-@@ -1332,7 +1483,7 @@
+@@ -1332,7 +1497,7 @@
      int ft = vtop->type.t & VT_BTYPE;
      int l = (t & VT_BTYPE) == VT_LLONG;
      int u = t & VT_UNSIGNED;
@@ -859,7 +870,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          int func = l ?
            (u ? TOK___fixunstfdi : TOK___fixtfdi) :
            (u ? TOK___fixunstfsi : TOK___fixtfsi);
-@@ -1342,6 +1493,20 @@
+@@ -1342,6 +1507,20 @@
          vpushi(0);
          vtop->type.t = t;
          vtop->r = REG_IRET;
@@ -880,7 +891,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      } else {
          int rr = freg(gv(RC_FLOAT)), dr;
          vtop--;
-@@ -1349,7 +1514,7 @@
+@@ -1349,7 +1528,7 @@
          vtop++;
          vtop->r = dr;
          dr = ireg(dr);
@@ -889,7 +900,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      }
  }
  
-@@ -1359,8 +1524,8 @@
+@@ -1359,8 +1538,8 @@
      dt &= VT_BTYPE;
      if (st == dt)
        return;
@@ -900,7 +911,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
              (st == VT_FLOAT ? TOK___extendsftf2 : TOK___extenddftf2) :
              (dt == VT_FLOAT ? TOK___trunctfsf2 : TOK___trunctfdf2);
          /* We can't use gfunc_call, as func_old_type works like vararg
-@@ -1368,7 +1533,7 @@
+@@ -1368,7 +1547,7 @@
             integers.  But we really need them in the float argument registers
             for extendsftf2/extenddftf2.  So, do it explicitely.  */
          save_regs(1);
@@ -909,7 +920,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
            gv(RC_F(0));
          else {
              gv(RC_R(0));
-@@ -1383,16 +1548,16 @@
+@@ -1383,16 +1562,16 @@
          vtop -= 2;
          vpushi(0);
          vtop->type.t = dt;
@@ -930,7 +941,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
            EI(0x53, 0, freg(rd), freg(rs), 0x21 << 5); // fcvt.d.s RD, RS (no rm)
          else
            EI(0x53, 7, freg(rd), freg(rs), (0x20 << 5) | 1); // fcvt.s.d RD, RS (dyn rm)
-@@ -1416,14 +1581,14 @@
+@@ -1416,14 +1595,14 @@
      put_extern_sym(&label, cur_text_section, ind, 0);
      o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
      greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -947,7 +958,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      vpop();
  }
  
-@@ -1438,10 +1603,10 @@
+@@ -1438,10 +1617,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
@@ -960,7 +971,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  }
  
  ST_FUNC void gen_vla_sp_restore(int addr)
-@@ -1449,10 +1614,10 @@
+@@ -1449,10 +1628,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
@@ -973,7 +984,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  }
  
  ST_FUNC void gen_vla_alloc(CType *type, int align)
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/tcc.h ../../tmp/tcc/src/tcc.h
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/tcc.h ../../tmp/tcc/src/tcc.h
 --- a/tcc.h
 +++ b/tcc.h
 @@ -401,6 +401,14 @@
@@ -1002,7 +1013,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  ST_FUNC void gen_va_start(void);
  ST_FUNC void arch_transfer_ret_regs(int);
  ST_FUNC void gen_cvt_sxtw(void);
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/tccgen.c ../../tmp/tcc/src/tccgen.c
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/tccgen.c ../../tmp/tcc/src/tccgen.c
 --- a/tccgen.c
 +++ b/tccgen.c
 @@ -237,7 +237,9 @@
@@ -1073,7 +1084,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
                  b = gvtst(0, 0);
              }
          }
-diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' tcc/tcctok.h ../../tmp/tcc/src/tcctok.h
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/tcctok.h ../../tmp/tcc/src/tcctok.h
 --- a/tcctok.h
 +++ b/tcctok.h
 @@ -239,6 +239,14 @@
