@@ -17,6 +17,8 @@
 
 #define AT_FDCWD (-100)
 
-int open(char *path, int flags);
+/* 第 3 引数 (mode) は O_CREAT のとき渡される。sfs に許可は無いので
+ * 受けて捨てる。tcc は 2 引数と 3 引数の両方で呼ぶ */
+int open(char *path, int flags, ...);
 
 #endif

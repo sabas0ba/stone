@@ -39,7 +39,10 @@ static int wrap(int r) {
   return r;
 }
 
-int open(char *path, int flags) {
+int open(char *path, int flags, ...) {
+  /* mode (O_CREAT のときの第 3 引数) は読まずに捨てる。sfs に許可は
+   * 無く，可変部を読まなくても呼出し規約上の害は無い (呼び手が積んで
+   * 呼び手が下ろす) */
   return wrap(sys_openat(AT_FDCWD, path, flags, 0));
 }
 
