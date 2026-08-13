@@ -43,6 +43,10 @@ int open(char *path, int flags, ...) {
   /* mode (O_CREAT のときの第 3 引数) は読まずに捨てる。sfs に許可は
    * 無く，可変部を読まなくても呼出し規約上の害は無い (呼び手が積んで
    * 呼び手が下ろす) */
+  /* ルート直下しか無いので，先頭の '/' の並びは剥がして裸の名前にする
+   * (tcc が -I/ から "//tccdefs.h" の形の経路を作る。第 6 部の実測) */
+  while (*path == '/')
+    path = path + 1;
   return wrap(sys_openat(AT_FDCWD, path, flags, 0));
 }
 
