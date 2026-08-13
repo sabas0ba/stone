@@ -14,7 +14,7 @@ cc=tmp/build/cc15k.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
-hdr=stage013/libc/include/stdarg.h
+hdr=stage015/libc/include/stdarg.h   # va_arg が語数ぶん進む版 (cc15k の 2 語の可変部に要る)
 
 ensure_build stage015
 
