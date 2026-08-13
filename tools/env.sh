@@ -17,16 +17,6 @@
 #   STONE_REBUILD         build: 像が最新でもビルドし直す (env/ をいじりながら試すとき)
 set -eu
 
-if [ "${STONE_ENGINE:-}" = host ]; then
-    repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-    cmd=${1:-}; shift || true
-    case "$cmd" in
-    qemu) exec sh "$repo_root/tools/run-qemu.sh" "$@" ;;
-    run)  cd "$repo_root" && exec "$@" ;;
-    build) exit 0 ;;
-    esac
-fi
-
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 engine=${STONE_ENGINE:-}
 image=${STONE_IMAGE:-stone-env}
