@@ -10,7 +10,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s15
 
-cc=tmp/build/cc15l.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15m.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -55,20 +55,21 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15g.bin:stage015/cc15g.md cc15h.bin:stage015/cc15h.md \
         cc15i.bin:stage015/cc15i.md cc15j.bin:stage015/cc15j.md \
         cc15k.bin:stage015/cc15k.md cc15l.bin:stage015/cc15l.md \
-        pp15.bin:stage015/pp15.md; do
+        cc15m.bin:stage015/cc15m.md pp15.bin:stage015/pp15.md \
+        pp16.bin:stage015/pp16.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15l と pp15 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15m と pp15 / pp16 の SHA-256 が各 .md 記載値と一致"
 
-{ cat stage015/cc15l.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc15l.bin > tmp/s15/b3.o \
+{ cat stage015/cc15m.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc15m.bin > tmp/s15/b3.o \
     && { cat tmp/s15/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s15/b3.bin \
-    && cmp -s tmp/s15/b3.bin tmp/build/cc15l.bin
-report $? "fixpoint: cc15l が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s15/b3.bin tmp/build/cc15m.bin
+report $? "fixpoint: cc15m が自分自身を再生成する (B2 == B3)"
 
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
@@ -79,7 +80,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15l が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15m が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合 (64 bit の土台)"
 
@@ -164,6 +165,44 @@ sh tools/sfs.sh pack tmp/s15/root tmp/s15/fs.img 4194304 128 > /dev/null \
 r=$?
 [ "$r" -eq 0 ] && diff -q tmp/s15/lib15.out tests/stage015/expected/lib15.txt > /dev/null
 report $? "run: printf %llu / snprintf / strto / sscanf / setjmp / lseek が kernel15 で通る"
+
+section "第 6 部: tcc の自己ホスト (docs/stage015-tcc.md 12 章)"
+
+# cc15m で入れた言語の穴を 1 つずつ確かめる (33 検査を 1 行で出す)
+sh tools/bundle.sh tests/stage015/probe/gap15m.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/gap15m.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/gap15m.i > tmp/s15/gap15m.o 2> /dev/null \
+    && { cat tmp/s15/gap15m.o tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu "$ld" > tmp/s15/gap15m.bin 2> /dev/null
+report $? "build: gap15m (cc15m の言語機能の検査) がビルドできる"
+
+out=$(sh tools/env.sh qemu tmp/s15/gap15m.bin < /dev/null 2> /dev/null)
+[ "$out" = "abcdefghijklmnopqrstuvwxyzABCDEFG" ]
+report $? "run: cc15m の言語機能 33 件がすべて正しい"
+[ "$out" = "abcdefghijklmnopqrstuvwxyzABCDEFG" ] || echo "   got: $out"
+
+# pp16 の再帰抑止 (自己参照マクロを実引数に渡す)
+sh tools/bundle.sh tests/stage015/probe/hyg16.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin 2> /dev/null \
+    | tr -d '\004' | grep -v '^ *$' > tmp/s15/hyg16.out
+diff -q tmp/s15/hyg16.out tests/stage015/expected/hyg16.txt > /dev/null 2>&1
+report $? "pp16: 自己参照マクロの実引数が gcc と同じ展開になる"
+
+# pp16 は既存のソースの前処理結果を変えない
+ok=0
+for f in src/misc15 posix/stdio posix/sys; do
+    n=$(echo "$f" | tr / _)
+    sh tools/bundle.sh stage015/libc/include/*.h \
+        "sys/time.h=stage015/libc/include/sys/time.h" "stage015/libc/$f.c" \
+        > "tmp/s15/h_$n.bundle" 2> /dev/null
+    sh tools/env.sh qemu tmp/build/pp15.bin < "tmp/s15/h_$n.bundle" \
+        > "tmp/s15/h_$n.old" 2> /dev/null
+    sh tools/env.sh qemu tmp/build/pp16.bin < "tmp/s15/h_$n.bundle" \
+        > "tmp/s15/h_$n.new" 2> /dev/null
+    cmp -s "tmp/s15/h_$n.old" "tmp/s15/h_$n.new" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "pp16: 既存のソースの前処理結果が pp15 と変わらない"
 
 section "第 5 部: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
 

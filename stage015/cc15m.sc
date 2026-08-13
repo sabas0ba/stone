@@ -4112,11 +4112,14 @@ int stmt() {
     // 兄弟の複文は同じ領域を使い回せる
     n = lcnt;
     b0 = cloff;
+    d = lblk;
+    lblk = lcnt;            // ここから内側。外側と同名を宣言してよい
     while (istype()) plocal();
     while (tok != o_rc) stmt();
     next();
     lcnt = n;
     cloff = b0;
+    lblk = d;
     return 0;
   }
   // 「名前 :」ならラベル。式の始まりと見分けるには 1 トークン先が要る

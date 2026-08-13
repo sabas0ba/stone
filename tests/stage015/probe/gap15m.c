@@ -64,9 +64,9 @@ int main() {
   u |= 0x0F0ULL;               chk('a', u == 0x1000000F1ULL);
   u += 0x100000000ULL;         chk('b', u == 0x2000000F1ULL);
   u <<= 8;                     chk('c', u == 0x2000000F100ULL);
-  u >>= 16;                    chk('d', u == 0x02000000FULL);
-  u *= 3;                      chk('e', u == 0x06000002DULL);
-  u /= 7;                      chk('f', u == 0xdb6db74ULL);
+  u >>= 16;                    chk('d', u == 0x2000000ULL);
+  u *= 3;                      chk('e', u == 0x6000000ULL);
+  u /= 7;                      chk('f', u == 0xdb6db6ULL);
   s = -16;
   s >>= 2;                     chk('g', s == -4);
   s &= 0xFFLL;                 chk('h', s == 0xFC);
