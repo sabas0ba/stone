@@ -119,7 +119,7 @@ Stage 14 第 1 部と同じやり方で**実測して台帳に落とす**のが�
 | 第 1 部 **(完了)** | 素材の取得と**要求の実測** (8 章)。tcc が使う言語機能・libc・OS 機能を数えた |
 | 第 2 部 **(完了)** | `long long` (64 bit 整数演算)。cc15a〜cc15e と実行時支援 rt64.c |
 | 第 3 部 **(完了)** | 浮動小数点 (ソフト浮動小数点)。rtfp.c と cc15f〜cc15j |
-| 第 4 部 | libc の不足を埋める (第 1 部の実測が決める) |
+| 第 4 部 **(完了)** | libc の不足を埋める (11 章)。cc15k・libc15・kernel15 |
 | 第 5 部 **(完了)** | **RV32 の backend を書く** ([stage015-riscv32.md](stage015-riscv32.md))。上流の tcc に riscv32 の対象を足す patch 1 枚。整数・呼出し規約・浮動小数点が通り，bzip2 が我々の QEMU でホストと同じバイト列を出す |
 | 第 6 部 | 自己ホスト。我々の処理系で tcc をビルドし (T1)，T1 が tcc を作り (T2)，T2 が tcc を作る (T3)。**T2 == T3** |
 
@@ -440,13 +440,20 @@ tcc の中核 11 ファイルが参照する libc 関数を数えた。libc14 �
 float は既定の実引数拡張で double へ格上げ。va_arg は語数ぶん進める
 (stage015 の stdarg.h)。構造体は従来どおり拒む。
 
-### 11.4 部品と置き場所
+### 11.4 部品と置き場所 (すべて完了)
 
 | 部品 | 状態 |
 |---|---|
-| cc15k (可変部の 2 語) | ソース済み (stage015/cc15k.sc)。ビルド・固定点・配線は未 |
-| stage015/libc/ (libc15 = libc14 の複製 + 拡張) | stdarg.h / setjmp.h / math.h / time.h / src/misc15.c 済み |
-| stdio.c の printf 拡張 (精度・%X・%llu・%f) と snprintf / vsnprintf / fdopen | 未 |
-| stdlib.c の strtoul / strtoull / strtoll / strtod | 未 |
-| kernel15 (SYS_LSEEK = 62) + sys.c の lseek + stdio の fseek / ftell | 未 |
-| ビルド配線 (l15_* を cc15k で) と検査 | 未 |
+| [cc15k](../stage015/cc15k.md) (可変部の 2 語) | **完了** (固定点・台帳 llvarg) |
+| stage015/libc/ (libc15 = libc14 の複製 + 拡張) | **完了** (9 ファイルすべて cc15k で通る) |
+| stdio.c の printf 拡張・snprintf / vsnprintf / fdopen / fseek / ftell | **完了** |
+| stdlib.c の strtoul / strtoull / strtoll / strtod | **完了** |
+| kernel15 (SYS_LSEEK = 62) + sys.c の lseek | **完了** |
+| ビルド配線と検査 (lib15 の実走) | **完了** (検査 37 件) |
+
+既知の逸脱を 2 つ記録する。
+
+- **%X が小文字で出る。** tcc では -d の逆アセンブル表示にしか使われず，
+  生成コードには影響しない
+- **strtod の丸めがホストより粗い** (10 の冪を 2 分で掛ける)。リテラル
+  変換 (cc15h) と同じ類の妥協である
