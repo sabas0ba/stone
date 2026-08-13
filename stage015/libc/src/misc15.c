@@ -82,6 +82,16 @@ int remove(char *path)
     return unlink(path);
 }
 
+/* realpath: ルート直下しか無いので正規化は複写と同じ (第 6 部の実測:
+ * tcc が -I や依存出力の経路の正規化に使う) */
+char *realpath(char *path, char *resolved)
+{
+    if (resolved == NULL)
+        return strdup(path);
+    strcpy(resolved, path);
+    return resolved;
+}
+
 char *strdup(char *s)
 {
     size_t n = strlen(s) + 1;

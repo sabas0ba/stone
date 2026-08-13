@@ -13,7 +13,8 @@
  * (long long / double) を占める。下位語が低い番地に来るように積まれる
  * (cc15k) ので，2 語の型はそのまま 8 バイト読みでよい。
  *
- * 制限: va_copy は C99 のもので，C89 には無い。
+ * va_copy は C99 のものだが tcc が使う (第 6 部の実測)。va_list は
+ * 単なるポインタなので代入で写せる。
  */
 #ifndef _STDARG_H
 #define _STDARG_H
@@ -23,5 +24,6 @@ typedef char *va_list;
 #define va_start(ap, last) ((ap) = __va_ptr)
 #define va_arg(ap, type)   (*(type *)(((ap) += ((sizeof(type) + 3) & ~3)) - ((sizeof(type) + 3) & ~3)))
 #define va_end(ap)         ((void)0)
+#define va_copy(dst, src)  ((dst) = (src))
 
 #endif
