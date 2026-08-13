@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <time.h>
+#include <sys/time.h>
 
 /* ---- setjmp / longjmp (setjmp.h の注記を見よ) ---- */
 
@@ -29,6 +30,16 @@ time_t time(time_t *t)
 {
     if (t != NULL)
         *t = 0;
+    return 0;
+}
+
+int gettimeofday(struct timeval *tv, void *tz)
+{
+    (void)tz;
+    if (tv != NULL) {
+        tv->tv_sec = 0;
+        tv->tv_usec = 0;
+    }
     return 0;
 }
 

@@ -457,3 +457,40 @@ float は既定の実引数拡張で double へ格上げ。va_arg は語数ぶ�
   生成コードには影響しない
 - **strtod の丸めがホストより粗い** (10 の冪を 2 分で掛ける)。リテラル
   変換 (cc15h) と同じ類の妥協である
+
+## 12. 第 6 部の実測: 自己ホスト (作業中)
+
+T1 (我々の鎖が作る tcc) への道は「tcc.c を ONE_SOURCE で
+pp → cc15k → ld に通す」である。突き当たった穴を順に記録する。
+
+### 12.1 pp の容量 (→ pp15)
+
+前処理の最初の実測 (2026-08-13) で pp14 は tcc に 2 つの意味で足りない
+ことが分かった。
+
+- **マクロ表 1024 が足りない。** tcc の中核が `#define` する数は 2767。
+  elf.h だけで 2240 ある (機械別の再配置番号の羅列)
+- **入力 1 MiB が足りない。** ONE_SOURCE の束ねは約 1.3 MB ある
+
+[pp15.sc](../stage015/pp15.sc) は pp14 の複製に容量だけ足した世代である
+(前例: cc14f の IR 倍増)。マクロ表 1024 → 4096，仮引数の畑 32 Ki → 128 Ki，
+入力とアリーナ 1 MiB → 4 MiB。
+
+### 12.2 束ねの名前に斜線 (tools/bundle.sh)
+
+`#include <sys/time.h>` は束ねのメンバ名と全文一致で探すが，bundle.sh は
+basename を名前にするので斜線を含む名前が作れなかった。`名前=パス` の形を
+足した (既存の呼出しはそのまま)。
+
+### 12.3 ヘッダの穴 (libc15 へ追補)
+
+| ヘッダ | 使い手 | 中身 |
+|---|---|---|
+| sys/time.h | tcc.c の -bench 計時 | gettimeofday は 0 固定 (time と同じ理由) |
+| inttypes.h | elf.h の固定幅整数 | int8_t〜uint64_t。ILP32 なので int = 32 bit |
+
+### 12.4 stone 用の config.h (stage015/tcc/config-stone.h)
+
+上流の configure はホストでしか動かないので手で固定する。
+riscv32 対象 (第 5 部の 2 定義)・CONFIG_TCC_STATIC (dlfcn.h が無い)・
+CONFIG_TCC_SEMLOCK 0 (単一プロセス。semaphore.h が無い)。

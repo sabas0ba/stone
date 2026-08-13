@@ -146,7 +146,8 @@ build_stage015() {
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
              posix/sys posix/morecore posix/stdio posix/assert; do
         n=$(echo "$f" | tr / _)
-        sh tools/bundle.sh stage015/libc/include/*.h "stage015/libc/$f.c" \
+        sh tools/bundle.sh stage015/libc/include/*.h \
+            "sys/time.h=stage015/libc/include/sys/time.h" "stage015/libc/$f.c" \
             | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l15_$n.i"
         sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l15_$n.i" > "tmp/build/l15_$n.o"
         echo "built tmp/build/l15_$n.o" >&2
