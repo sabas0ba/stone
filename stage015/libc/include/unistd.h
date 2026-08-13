@@ -12,6 +12,9 @@
 
 #include <stddef.h>
 
+/* 符号つきの大きさ (POSIX)。第 6 部の実測: tcc の full_read が使う */
+typedef int ssize_t;
+
 int read(int fd, void *buf, size_t n);
 int write(int fd, void *buf, size_t n);
 int close(int fd);
