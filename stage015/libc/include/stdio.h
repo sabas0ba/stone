@@ -47,6 +47,16 @@ int getchar(void);
 int putchar(int c);
 int puts(char *s);
 int printf(char *fmt, ...);
+int snprintf(char *buf, size_t size, char *fmt, ...);
+int vsnprintf(char *buf, size_t size, char *fmt, va_list ap);
+int sscanf(char *s, char *fmt, ...);
+long ftell(FILE *f);
+int fseek(FILE *f, long off, int whence);
+FILE *fdopen(int fd, char *mode);
+int remove(char *path);
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
 int sprintf(char *buf, char *fmt, ...);
 int vfprintf(FILE *f, char *fmt, va_list ap);
 int vsprintf(char *buf, char *fmt, va_list ap);

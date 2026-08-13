@@ -24,6 +24,13 @@ void *realloc(void *p, size_t n);
 
 typedef struct { int quot; int rem; } div_t;
 
+unsigned long strtoul(char *s, char **endptr, int base);
+unsigned long long strtoull(char *s, char **endptr, int base);
+long long strtoll(char *s, char **endptr, int base);
+long long atoll(char *s);
+double strtod(char *s, char **endptr);
+float strtof(char *s, char **endptr);
+#define strtold strtod
 void qsort(void *base, size_t nmemb, size_t size, int (*cmp)(void *, void *));
 void *bsearch(void *key, void *base, size_t nmemb, size_t size,
               int (*cmp)(void *, void *));

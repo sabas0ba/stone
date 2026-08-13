@@ -25,6 +25,7 @@ int sys_close(int fd);
 int sys_brk(unsigned addr);
 int sys_ecall(int n, int a, int b, int c);
 
+#define SYS_LSEEK 62
 #define SYS_SPAWN 500
 
 int errno;
@@ -80,4 +81,9 @@ int spawn(char *path, char **argv, char *in, char *out) {
   sa[2] = in;
   sa[3] = out;
   return wrap(sys_ecall(SYS_SPAWN, (int)sa, 0, 0));
+}
+
+long lseek(int fd, long off, int whence)
+{
+    return (long)wrap(sys_ecall(SYS_LSEEK, fd, (int)off, whence));
 }

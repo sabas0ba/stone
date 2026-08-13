@@ -276,3 +276,155 @@ div_t div(int numer, int denom)
   r.rem = numer % denom;
   return r;
 }
+
+/* ---- 第 4 部 (libc15) で足した変換 ---- */
+
+unsigned long strtoul(char *s, char **endptr, int base)
+{
+    /* 負号を除けば strtol と同じ読み方。あちらは上限で丸めるが，
+     * こちらは 32 bit で回る (C の unsigned の規則どおり) */
+    unsigned long v;
+    int neg;
+    int d;
+
+    while (*s == ' ' || *s == '\t') s = s + 1;
+    neg = 0;
+    if (*s == '+') s = s + 1;
+    else if (*s == '-') { neg = 1; s = s + 1; }
+    if ((base == 0 || base == 16) && s[0] == '0'
+        && (s[1] == 'x' || s[1] == 'X')) {
+        base = 16;
+        s = s + 2;
+    } else if (base == 0) {
+        if (*s == '0') base = 8;
+        else base = 10;
+    }
+    v = 0;
+    while (1) {
+        d = *s;
+        if (d >= '0' && d <= '9') d = d - '0';
+        else if (d >= 'a' && d <= 'z') d = d - 'a' + 10;
+        else if (d >= 'A' && d <= 'Z') d = d - 'A' + 10;
+        else break;
+        if (d >= base) break;
+        v = v * (unsigned)base + (unsigned)d;
+        s = s + 1;
+    }
+    if (endptr != NULL) *endptr = s;
+    if (neg) return 0 - v;
+    return v;
+}
+
+unsigned long long strtoull(char *s, char **endptr, int base)
+{
+    unsigned long long v;
+    int neg;
+    int d;
+
+    while (*s == ' ' || *s == '\t') s = s + 1;
+    neg = 0;
+    if (*s == '+') s = s + 1;
+    else if (*s == '-') { neg = 1; s = s + 1; }
+    if ((base == 0 || base == 16) && s[0] == '0'
+        && (s[1] == 'x' || s[1] == 'X')) {
+        base = 16;
+        s = s + 2;
+    } else if (base == 0) {
+        if (*s == '0') base = 8;
+        else base = 10;
+    }
+    v = 0;
+    while (1) {
+        d = *s;
+        if (d >= '0' && d <= '9') d = d - '0';
+        else if (d >= 'a' && d <= 'z') d = d - 'a' + 10;
+        else if (d >= 'A' && d <= 'Z') d = d - 'A' + 10;
+        else break;
+        if (d >= base) break;
+        v = v * (unsigned long long)base + (unsigned long long)d;
+        s = s + 1;
+    }
+    if (endptr != NULL) *endptr = s;
+    if (neg) return 0ULL - v;
+    return v;
+}
+
+long long strtoll(char *s, char **endptr, int base)
+{
+    return (long long)strtoull(s, endptr, base);
+}
+
+long long atoll(char *s)
+{
+    return strtoll(s, NULL, 10);
+}
+
+/* 10 進の浮動小数点。仮数を 64 bit で読み，10 の冪を掛けるか割るか
+ * する。冪は 2 分で組むので丸めは数回入る (ホストの strtod の 0.5 ulp
+ * より粗い。既知の妥協: docs/stage015-tcc.md 10 章)。
+ * 16 進浮動小数点と inf / nan の綴りはまだ読まない */
+double strtod(char *s, char **endptr)
+{
+    unsigned long long sig;
+    int neg;
+    int fdig;
+    int xv;
+    int xneg;
+    int e;
+    double d;
+    double p;
+
+    while (*s == ' ' || *s == '\t') s = s + 1;
+    neg = 0;
+    if (*s == '+') s = s + 1;
+    else if (*s == '-') { neg = 1; s = s + 1; }
+    sig = 0;
+    fdig = 0;
+    while (*s >= '0' && *s <= '9') {
+        if (sig < 1844674407370955161ULL)
+            sig = sig * 10ULL + (unsigned long long)(*s - '0');
+        s = s + 1;
+    }
+    if (*s == '.') {
+        s = s + 1;
+        while (*s >= '0' && *s <= '9') {
+            if (sig < 1844674407370955161ULL) {
+                sig = sig * 10ULL + (unsigned long long)(*s - '0');
+                fdig = fdig + 1;
+            }
+            s = s + 1;
+        }
+    }
+    xv = 0;
+    xneg = 0;
+    if (*s == 'e' || *s == 'E') {
+        s = s + 1;
+        if (*s == '+') s = s + 1;
+        else if (*s == '-') { xneg = 1; s = s + 1; }
+        while (*s >= '0' && *s <= '9') {
+            if (xv < 10000) xv = xv * 10 + (*s - '0');
+            s = s + 1;
+        }
+        if (xneg) xv = 0 - xv;
+    }
+    if (endptr != NULL) *endptr = s;
+    d = (double)(long long)sig;     /* sig < 2^63 なので符号つきで足りる */
+    e = xv - fdig;
+    p = 10.0;
+    if (e < 0) e = 0 - e;
+    while (e > 0) {
+        if (e & 1) {
+            if (xv - fdig < 0) d = d / p;
+            else d = d * p;
+        }
+        p = p * p;
+        e = e >> 1;
+    }
+    if (neg) return 0.0 - d;
+    return d;
+}
+
+float strtof(char *s, char **endptr)
+{
+    return (float)strtod(s, endptr);
+}

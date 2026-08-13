@@ -198,14 +198,67 @@ static int pnum(FILE *f, unsigned v, unsigned base, int w, int pad) {
 
 /* sprintf の書込み先。NULL でなければ FILE ではなくここへ書く */
 static char *cap;
+static int caplim;              /* snprintf の残り容量 (-1 = 無制限) */
 
 static int emitc(FILE *f, int c) {
   if (cap != NULL) {
+    if (caplim == 0) return c;  /* 溢れたぶんは数えるだけ (C99 の規則) */
+    if (caplim > 0) caplim = caplim - 1;
     *cap = (char)c;
     cap = cap + 1;
     return c;
   }
   return fputc(c, f);
+}
+
+/* 64 bit の数を基数 k で出す (第 4 部)。pnum の 64 bit 版 */
+static int pnum64(FILE *f, unsigned long long v, unsigned k, int w, int pad) {
+  char tmp[24];
+  int n;
+  int i;
+  unsigned d;
+  n = 0;
+  if (v == 0ULL) { tmp[n] = '0'; n = 1; }
+  while (v != 0ULL) {
+    d = (unsigned)(v % (unsigned long long)k);
+    if (d < 10) tmp[n] = (char)('0' + d);
+    else tmp[n] = (char)('a' + d - 10);
+    v = v / (unsigned long long)k;
+    n = n + 1;
+  }
+  i = n;
+  while (i < w) { emitc(f, pad); i = i + 1; }
+  while (n > 0) { n = n - 1; emitc(f, tmp[n]); }
+  return i;
+}
+
+/* 浮動小数点を %f の形 (小数 prec 桁・四捨五入なしの切捨て寄り) で出す。
+ * -bench の統計表示にしか使われないので簡素でよい (実測 11.1) */
+static int pflt(FILE *f, double v, int prec) {
+  int n;
+  long long ip;
+  double fr;
+  int i;
+  int d;
+  n = 0;
+  if (v < 0.0) { emitc(f, '-'); v = 0.0 - v; n = 1; }
+  ip = (long long)v;
+  n = n + pnum64(f, (unsigned long long)ip, 10, 0, ' ');
+  if (prec <= 0) return n;
+  emitc(f, '.');
+  n = n + 1;
+  fr = v - (double)ip;
+  i = 0;
+  while (i < prec) {
+    fr = fr * 10.0;
+    d = (int)fr;
+    if (d > 9) d = 9;
+    emitc(f, '0' + d);
+    fr = fr - (double)d;
+    i = i + 1;
+    n = n + 1;
+  }
+  return n;
 }
 
 /* 実装する変換は %d %u %x %c %s %% と，幅 (0 詰め・- 左詰め)，
@@ -220,6 +273,9 @@ static int vfpr(FILE *f, char *fmt, va_list ap) {
   int cnt;
   int n;
   int k;
+  int prec;
+  int nl;
+  long long lv;
 
   cnt = 0;
   i = 0;
@@ -234,10 +290,51 @@ static int vfpr(FILE *f, char *fmt, va_list ap) {
       i = i + 1;
     }
     w = 0;
-    while (fmt[i] >= '0' && fmt[i] <= '9') { w = w * 10 + (fmt[i] - '0'); i = i + 1; }
-    /* long は int と同じ幅なので l は読み捨てる (%ld %lu %lx) */
-    while (fmt[i] == 'l') i = i + 1;
-    if (fmt[i] == 'd') {
+    if (fmt[i] == '*') { w = va_arg(ap, int); i = i + 1; if (w < 0) { left = 1; w = 0 - w; } }
+    else while (fmt[i] >= '0' && fmt[i] <= '9') { w = w * 10 + (fmt[i] - '0'); i = i + 1; }
+    /* 精度。%s では最大長，%f では小数の桁数。数値では読み捨てる */
+    prec = 0 - 1;
+    if (fmt[i] == '.') {
+      i = i + 1;
+      prec = 0;
+      if (fmt[i] == '*') { prec = va_arg(ap, int); i = i + 1; }
+      else while (fmt[i] >= '0' && fmt[i] <= '9') { prec = prec * 10 + (fmt[i] - '0'); i = i + 1; }
+    }
+    /* l は 1 個なら int と同じ幅。2 個 (ll) は 64 bit (第 4 部) */
+    nl = 0;
+    while (fmt[i] == 'l') { nl = nl + 1; i = i + 1; }
+    if (nl >= 2 && (fmt[i] == 'd' || fmt[i] == 'i')) {
+      lv = va_arg(ap, long long);
+      n = 0;
+      if (lv < 0) {
+        emitc(f, '-');
+        n = 1 + pnum64(f, 0ULL - (unsigned long long)lv, 10, left ? 0 : w - 1, pad);
+      } else {
+        n = pnum64(f, (unsigned long long)lv, 10, left ? 0 : w, pad);
+      }
+      while (n < w) { emitc(f, ' '); n = n + 1; }
+      cnt = cnt + n;
+      i = i + 1;
+      continue;
+    }
+    if (nl >= 2 && (fmt[i] == 'u' || fmt[i] == 'x' || fmt[i] == 'X')) {
+      k = 10;
+      if (fmt[i] != 'u') k = 16;
+      n = pnum64(f, va_arg(ap, unsigned long long), (unsigned)k, left ? 0 : w, pad);
+      while (n < w) { emitc(f, ' '); n = n + 1; }
+      cnt = cnt + n;
+      i = i + 1;
+      continue;
+    }
+    if (fmt[i] == 'f' || fmt[i] == 'g' || fmt[i] == 'e') {
+      /* 可変部の float は double へ格上げされて届く (cc15k)。
+       * %g / %e も %f の形で出す (統計表示にしか使われない) */
+      if (prec < 0) prec = 6;
+      cnt = cnt + pflt(f, va_arg(ap, double), prec);
+      i = i + 1;
+      continue;
+    }
+    if (fmt[i] == 'd' || fmt[i] == 'i') {
       v = va_arg(ap, int);
       n = 0;
       if (v < 0) {
@@ -249,9 +346,9 @@ static int vfpr(FILE *f, char *fmt, va_list ap) {
       }
       while (n < w) { emitc(f, ' '); n = n + 1; }
       cnt = cnt + n;
-    } else if (fmt[i] == 'u' || fmt[i] == 'x') {
+    } else if (fmt[i] == 'u' || fmt[i] == 'x' || fmt[i] == 'X' || fmt[i] == 'p') {
       k = 10;
-      if (fmt[i] == 'x') k = 16;
+      if (fmt[i] != 'u') k = 16;
       n = pnum(f, (unsigned)va_arg(ap, int), (unsigned)k, left ? 0 : w, pad);
       while (n < w) { emitc(f, ' '); n = n + 1; }
       cnt = cnt + n;
@@ -262,10 +359,11 @@ static int vfpr(FILE *f, char *fmt, va_list ap) {
       s = va_arg(ap, char *);
       n = 0;
       while (s[n]) n = n + 1;
+      if (prec >= 0 && n > prec) n = prec;
       k = 0;
       if (!left) { while (n + k < w) { emitc(f, ' '); k = k + 1; } }
       v = 0;
-      while (s[v]) { emitc(f, s[v]); v = v + 1; }
+      while (v < n) { emitc(f, s[v]); v = v + 1; }
       if (left) { while (n + k < w) { emitc(f, ' '); k = k + 1; } }
       cnt = cnt + n + k;
     } else if (fmt[i] == '%') {
@@ -287,9 +385,42 @@ int vfprintf(FILE *f, char *fmt, va_list ap) {
 int vsprintf(char *buf, char *fmt, va_list ap) {
   int n;
   cap = buf;
+  caplim = 0 - 1;
   n = vfpr(NULL, fmt, ap);
   *cap = 0;
   cap = NULL;
+  return n;
+}
+
+/* n には終端の 0 を含む (C99 の snprintf の規則)。返り値は
+ * 「入り切ったとしたら書いた長さ」で，切り詰めの検出に使える */
+int vsnprintf(char *buf, size_t size, char *fmt, va_list ap) {
+  int n;
+  if (size == 0) {
+    static char sink;
+    int m;
+    cap = &sink;                /* 書かずに数えるだけ (caplim = 0) */
+    caplim = 0;
+    m = vfpr(NULL, fmt, ap);
+    cap = NULL;
+    caplim = 0 - 1;
+    return m;
+  }
+  cap = buf;
+  caplim = (int)size - 1;
+  n = vfpr(NULL, fmt, ap);
+  *cap = 0;
+  cap = NULL;
+  caplim = 0 - 1;
+  return n;
+}
+
+int snprintf(char *buf, size_t size, char *fmt, ...) {
+  va_list ap;
+  int n;
+  va_start(ap, fmt);
+  n = vsnprintf(buf, size, fmt, ap);
+  va_end(ap);
   return n;
 }
 
@@ -318,4 +449,50 @@ int printf(char *fmt, ...) {
   n = vfpr(stdout, fmt, ap);
   va_end(ap);
   return n;
+}
+
+/* ---- 第 4 部: 位置つきの入出力 ---- */
+
+long lseek(int fd, long off, int whence);
+
+long ftell(FILE *f)
+{
+    long p;
+    p = lseek(f->fd, 0, SEEK_CUR);
+    if (p < 0)
+        return p;
+    if (f->back >= 0)
+        return p - 1;           /* 押し戻した 1 文字ぶん手前にいる */
+    return p;
+}
+
+int fseek(FILE *f, long off, int whence)
+{
+    f->eof = 0;
+    f->back = -1;               /* ungetc の押し戻しは捨てる */
+    if (lseek(f->fd, off, whence) < 0)
+        return 0 - 1;
+    return 0;
+}
+
+/* 既に開いている fd を FILE で包む。fopen と同じ表から空きを取る */
+FILE *fdopen(int fd, char *mode)
+{
+    int k;
+    (void)mode;
+    __stdfile(0);
+    if (fd < 0)
+        return NULL;
+    if (fd < 3)
+        return &files[fd];
+    for (k = 3; k < NFILE; k++) {
+        if (files[k].fd < 0) {
+            files[k].fd = fd;
+            files[k].back = -1;
+            files[k].eof = 0;
+            files[k].err = 0;
+            return &files[k];
+        }
+    }
+    return NULL;
 }
