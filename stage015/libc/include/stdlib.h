@@ -24,17 +24,20 @@ void *realloc(void *p, size_t n);
 
 typedef struct { int quot; int rem; } div_t;
 
-unsigned long strtoul(char *s, char **endptr, int base);
-unsigned long long strtoull(char *s, char **endptr, int base);
-long long strtoll(char *s, char **endptr, int base);
+unsigned long strtoul(const char *s, char **endptr, int base);
+unsigned long long strtoull(const char *s, char **endptr, int base);
+long long strtoll(const char *s, char **endptr, int base);
 long long atoll(char *s);
-double strtod(char *s, char **endptr);
-float strtof(char *s, char **endptr);
-#define strtold strtod
+double strtod(const char *s, char **endptr);
+float strtof(const char *s, char **endptr);
+/* long double は double と同じ 8 バイトである (cc も tcc の RV32 も)。
+ * ただし tcc は型としては別に数えるので，マクロで strtod に潰すと
+ * tcc.h の extern 宣言と型が食い違う。実体のある関数として持つ */
+long double strtold(const char *s, char **endptr);
 void qsort(void *base, size_t nmemb, size_t size, int (*cmp)(void *, void *));
 void *bsearch(void *key, void *base, size_t nmemb, size_t size,
               int (*cmp)(void *, void *));
-long strtol(char *s, char **endptr, int base);
+long strtol(const char *s, char **endptr, int base);
 int atoi(char *s);
 int abs(int n);
 div_t div(int numer, int denom);

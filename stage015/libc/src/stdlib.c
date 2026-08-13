@@ -204,7 +204,7 @@ static int digval(int c)
 /* 溢れは LONG_MAX / LONG_MIN への飽和のみで表す (errno は Stage 12 まで
  * 無い)。蓄積は unsigned で行う。負のときの上限 2147483648 は long に
  * 収まらないためである */
-long strtol(char *s, char **endptr, int base)
+long strtol(const char *s, char **endptr, int base)
 {
   char *p;
   int neg;
@@ -279,7 +279,7 @@ div_t div(int numer, int denom)
 
 /* ---- 第 4 部 (libc15) で足した変換 ---- */
 
-unsigned long strtoul(char *s, char **endptr, int base)
+unsigned long strtoul(const char *s, char **endptr, int base)
 {
     /* 負号を除けば strtol と同じ読み方。あちらは上限で丸めるが，
      * こちらは 32 bit で回る (C の unsigned の規則どおり) */
@@ -315,7 +315,7 @@ unsigned long strtoul(char *s, char **endptr, int base)
     return v;
 }
 
-unsigned long long strtoull(char *s, char **endptr, int base)
+unsigned long long strtoull(const char *s, char **endptr, int base)
 {
     unsigned long long v;
     int neg;
@@ -349,7 +349,7 @@ unsigned long long strtoull(char *s, char **endptr, int base)
     return v;
 }
 
-long long strtoll(char *s, char **endptr, int base)
+long long strtoll(const char *s, char **endptr, int base)
 {
     return (long long)strtoull(s, endptr, base);
 }
@@ -363,7 +363,7 @@ long long atoll(char *s)
  * する。冪は 2 分で組むので丸めは数回入る (ホストの strtod の 0.5 ulp
  * より粗い。既知の妥協: docs/stage015-tcc.md 10 章)。
  * 16 進浮動小数点と inf / nan の綴りはまだ読まない */
-double strtod(char *s, char **endptr)
+double strtod(const char *s, char **endptr)
 {
     unsigned long long sig;
     int neg;
@@ -424,7 +424,13 @@ double strtod(char *s, char **endptr)
     return d;
 }
 
-float strtof(char *s, char **endptr)
+float strtof(const char *s, char **endptr)
 {
     return (float)strtod(s, endptr);
+}
+
+/* strtold: long double は double と同じ幅なので strtod をそのまま返す */
+long double strtold(const char *s, char **endptr)
+{
+    return strtod(s, endptr);
 }
