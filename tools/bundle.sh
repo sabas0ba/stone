@@ -8,11 +8,17 @@
 # #include で参照できる (依存を先に，本体を後に並べる)。
 #
 # 使用法: bundle.sh util.h main.c | qemu pp.bin > main.i
+#
+# 名前は basename が既定だが，"名前=パス" の形で明示できる。
+# #include <sys/time.h> のように斜線を含む名前はこの形でしか作れない。
 set -eu
 
 printf '#!stone-bundle\n'
 for f in "$@"; do
-    name=$(basename -- "$f")
+    case $f in
+    *=*) name=${f%%=*}; f=${f#*=} ;;
+    *)   name=$(basename -- "$f") ;;
+    esac
     size=$(wc -c < "$f" | tr -d ' \t')
     printf '@%s %s\n' "$name" "$size"
     cat -- "$f"

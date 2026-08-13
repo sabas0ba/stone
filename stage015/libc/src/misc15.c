@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <time.h>
+#include <sys/time.h>
 
 /* ---- setjmp / longjmp (setjmp.h の注記を見よ) ---- */
 
@@ -29,6 +30,16 @@ time_t time(time_t *t)
 {
     if (t != NULL)
         *t = 0;
+    return 0;
+}
+
+int gettimeofday(struct timeval *tv, void *tz)
+{
+    (void)tz;
+    if (tv != NULL) {
+        tv->tv_sec = 0;
+        tv->tv_usec = 0;
+    }
     return 0;
 }
 
@@ -69,6 +80,16 @@ int unlink(char *path)
 int remove(char *path)
 {
     return unlink(path);
+}
+
+/* realpath: ルート直下しか無いので正規化は複写と同じ (第 6 部の実測:
+ * tcc が -I や依存出力の経路の正規化に使う) */
+char *realpath(char *path, char *resolved)
+{
+    if (resolved == NULL)
+        return strdup(path);
+    strcpy(resolved, path);
+    return resolved;
 }
 
 char *strdup(char *s)

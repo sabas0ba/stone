@@ -128,6 +128,24 @@ build_stage015() {
     { cat tmp/build/cc15k.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15k.bin
     echo "built tmp/build/cc15k.bin" >&2
+    # 容量の世代 (第 6 部。tcc の翻訳単位が cc15k の器を溢れさせる)。
+    # 前段は cc15k
+    { cat stage015/cc15l.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15k.bin > tmp/build/cc15l0.o
+    { cat tmp/build/cc15l0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15l0.bin
+    echo "built tmp/build/cc15l0.bin (bootstrap)" >&2
+    { cat stage015/cc15l.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15l0.bin > tmp/build/cc15l.o
+    { cat tmp/build/cc15l.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15l.bin
+    echo "built tmp/build/cc15l.bin" >&2
+    # 同じく容量の世代の pp (マクロ表とアリーナ。docs/stage015-tcc.md 12.1)
+    { cat stage015/pp15.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15l.bin > tmp/build/pp15.o
+    { cat tmp/build/pp15.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp15.bin
+    echo "built tmp/build/pp15.bin" >&2
     # 実行時支援 (64 bit の除算の実体)。cc15e 自身でコンパイルする。
     # ブロックコメントを含むので pp を通す (cc は // しか解さない)
     sh tools/bundle.sh stage015/rt64.c \
@@ -146,7 +164,8 @@ build_stage015() {
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
              posix/sys posix/morecore posix/stdio posix/assert; do
         n=$(echo "$f" | tr / _)
-        sh tools/bundle.sh stage015/libc/include/*.h "stage015/libc/$f.c" \
+        sh tools/bundle.sh stage015/libc/include/*.h \
+            "sys/time.h=stage015/libc/include/sys/time.h" "stage015/libc/$f.c" \
             | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l15_$n.i"
         sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l15_$n.i" > "tmp/build/l15_$n.o"
         echo "built tmp/build/l15_$n.o" >&2
@@ -165,14 +184,16 @@ do_stage015() {
         cc15e0.bin cc15e.bin cc15f0.bin cc15f.bin \
         cc15g0.bin cc15g.bin cc15h0.bin cc15h.bin \
         cc15i0.bin cc15i.bin cc15j0.bin cc15j.bin \
-        cc15k0.bin cc15k.bin rt64.o rtfp.o kernel15.bin \
+        cc15k0.bin cc15k.bin cc15l0.bin cc15l.bin pp15.bin \
+        rt64.o rtfp.o kernel15.bin \
         l15_src_string.o l15_src_ctype.o l15_src_stdlib.o l15_src_morecore.o \
         l15_src_misc15.o l15_posix_sys.o l15_posix_morecore.o \
         l15_posix_stdio.o l15_posix_assert.o \
         -- stage015/cc15a.sc stage015/cc15b.sc stage015/cc15c.sc \
            stage015/cc15d.sc stage015/cc15e.sc stage015/cc15f.sc \
            stage015/cc15g.sc stage015/cc15h.sc stage015/cc15i.sc \
-           stage015/cc15j.sc stage015/cc15k.sc \
+           stage015/cc15j.sc stage015/cc15k.sc stage015/cc15l.sc \
+           stage015/pp15.sc \
            stage015/kernel15.c stage015/libc/include/*.h \
            stage015/libc/src/*.c stage015/libc/posix/*.c \
            stage015/rt64.c stage015/rtfp.c \
