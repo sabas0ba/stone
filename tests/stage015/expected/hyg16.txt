@@ -1,0 +1,2 @@
+void f(void) { w32(pad((s1->sec), 4), (0)) ; s1->sec  = 1; }
+void g(void) { w32(pad((s1->sec), 4), (1))  ; }
