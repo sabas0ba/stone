@@ -54,7 +54,15 @@ overall_fail=$fail
 # ビルド再現の検査 (生成物の SHA-256 と .md の照合) は各 Stage が従来どおり行う
 echo "== build =="
 sh tools/build.sh all > tmp/test-buildall.log 2>&1
-report $? "build: 全 Stage の生成物 (log: tmp/test-buildall.log)"
+buildrc=$?
+report $buildrc "build: 全 Stage の生成物 (log: tmp/test-buildall.log)"
+# 落ちたら記録の末尾をその場に出す。CI では tmp/ が残らないので，
+# これが無いと何が起きたか判らない (第 6 部で実際に困った)
+if [ "$buildrc" -ne 0 ]; then
+    echo "--- tmp/test-buildall.log の末尾 40 行 ---"
+    tail -40 tmp/test-buildall.log
+    echo "--- ここまで ---"
+fi
 overall_fail=$fail
 export STONE_PREBUILT=1
 
