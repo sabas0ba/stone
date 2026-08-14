@@ -5,7 +5,10 @@ name: ci
 on:
   push:
     branches: [main]
+  # draft の間は走らせない (下の if)。ready にした時点で 1 度だけ走るよう
+  # ready_for_review を種類に足す
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   # 週次はキャッシュを使わずゼロから全段を再ビルドし，.md 記載の SHA-256 の
   # 再現性そのものを検証する (docs/dev-notes.md 1.3)
   schedule:
@@ -24,6 +27,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    # draft の PR では走らせない。作業中の push でキャッシュと計算時間を
+    # 使い切らないための措置で，見せるための draft は draft のまま置ける
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     # 鎖は世代を足すたびに長くなる。さらに tools/build.sh は全 Stage の
     # スタンプの入力なので (build.sh 参照)，ビルド手順を触る変更では
     # tmp/build のキャッシュがあっても全段を作り直す。Stage 15 の世代を
