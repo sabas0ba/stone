@@ -27,7 +27,7 @@ prepare() {
     need docs/external/tcc "sh tools/fetch.sh tcc"
     [ -d "$src" ] || sh tools/tcc.sh src
     mkdir -p "$out"
-    for f in cc15m.bin pp16.bin ld15.bin; do
+    for f in cc15n.bin pp16.bin ld15.bin; do
         need "tmp/build/$f" "sh tools/build.sh stage015"
     done
 }
@@ -58,7 +58,7 @@ do_t1() {
     bundle > "$out/tcc.bundle"
     sh tools/env.sh qemu tmp/build/pp16.bin < "$out/tcc.bundle" > "$out/tcc.i"
     echo "preprocessed: $(wc -l < "$out/tcc.i") 行" >&2
-    sh tools/env.sh qemu tmp/build/cc15m.bin < "$out/tcc.i" > "$out/tcc.o"
+    sh tools/env.sh qemu tmp/build/cc15n.bin < "$out/tcc.i" > "$out/tcc.o"
     echo "compiled: $(wc -c < "$out/tcc.o") バイト" >&2
     # libc15 を同じ世代でコンパイルする
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
@@ -67,7 +67,7 @@ do_t1() {
         sh tools/bundle.sh $inc/*.h "sys/time.h=$inc/sys/time.h" \
             "stage015/libc/$f.c" \
             | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/l_$n.i"
-        sh tools/env.sh qemu tmp/build/cc15m.bin < "$out/l_$n.i" > "$out/l_$n.o"
+        sh tools/env.sh qemu tmp/build/cc15n.bin < "$out/l_$n.i" > "$out/l_$n.o"
     done
     { printf 'E'; cat "$out/tcc.o" \
         "$out/l_src_string.o" "$out/l_src_ctype.o" "$out/l_src_stdlib.o" \
