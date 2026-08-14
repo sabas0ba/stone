@@ -140,7 +140,19 @@ build_stage015() {
     { cat tmp/build/cc15l.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15l.bin
     echo "built tmp/build/cc15l.bin" >&2
-    # 整数定数の型 (C89 6.1.3.2)。前段は cc15m
+    # tcc が使う C の機能 (第 6 部その 2。docs/stage015-tcc.md 12.6)。
+    # 前段は cc15l
+    { cat stage015/cc15m.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15l.bin > tmp/build/cc15m0.o
+    { cat tmp/build/cc15m0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15m0.bin
+    echo "built tmp/build/cc15m0.bin (bootstrap)" >&2
+    { cat stage015/cc15m.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15m0.bin > tmp/build/cc15m.o
+    { cat tmp/build/cc15m.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15m.bin
+    echo "built tmp/build/cc15m.bin" >&2
+    # 整数定数の型 (C89 6.1.3.2。docs/stage015-tcc.md 12.14)。前段は cc15m
     { cat stage015/cc15n.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc15m.bin > tmp/build/cc15n0.o
     { cat tmp/build/cc15n0.o; printf '\0'; } \
@@ -153,22 +165,10 @@ build_stage015() {
     echo "built tmp/build/cc15n.bin" >&2
     # 同じく容量の世代の pp (マクロ表とアリーナ。docs/stage015-tcc.md 12.1)
     { cat stage015/pp15.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15l.bin > tmp/build/pp15.o
+        | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/pp15.o
     { cat tmp/build/pp15.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp15.bin
     echo "built tmp/build/pp15.bin" >&2
-    # tcc が使う C の機能 (第 6 部その 2。docs/stage015-tcc.md 12.6)。
-    # 前段は cc15l
-    { cat stage015/cc15m.sc stage015/cc15n.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15l.bin > tmp/build/cc15m0.o
-    { cat tmp/build/cc15m0.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15m0.bin
-    echo "built tmp/build/cc15m0.bin (bootstrap)" >&2
-    { cat stage015/cc15m.sc stage015/cc15n.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15m0.bin > tmp/build/cc15m.o
-    { cat tmp/build/cc15m.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15m.bin
-    echo "built tmp/build/cc15m.bin" >&2
     # 再帰抑止を直した pp (docs/stage015-tcc.md 12.7)
     { cat stage015/pp16.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/pp16.o
