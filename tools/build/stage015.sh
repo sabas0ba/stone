@@ -140,6 +140,17 @@ build_stage015() {
     { cat tmp/build/cc15l.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15l.bin
     echo "built tmp/build/cc15l.bin" >&2
+    # 整数定数の型 (C89 6.1.3.2)。前段は cc15m
+    { cat stage015/cc15n.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15m.bin > tmp/build/cc15n0.o
+    { cat tmp/build/cc15n0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15n0.bin
+    echo "built tmp/build/cc15n0.bin (bootstrap)" >&2
+    { cat stage015/cc15n.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15n0.bin > tmp/build/cc15n.o
+    { cat tmp/build/cc15n.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15n.bin
+    echo "built tmp/build/cc15n.bin" >&2
     # 同じく容量の世代の pp (マクロ表とアリーナ。docs/stage015-tcc.md 12.1)
     { cat stage015/pp15.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc15l.bin > tmp/build/pp15.o
@@ -148,25 +159,25 @@ build_stage015() {
     echo "built tmp/build/pp15.bin" >&2
     # tcc が使う C の機能 (第 6 部その 2。docs/stage015-tcc.md 12.6)。
     # 前段は cc15l
-    { cat stage015/cc15m.sc; printf '\004'; } \
+    { cat stage015/cc15m.sc stage015/cc15n.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc15l.bin > tmp/build/cc15m0.o
     { cat tmp/build/cc15m0.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15m0.bin
     echo "built tmp/build/cc15m0.bin (bootstrap)" >&2
-    { cat stage015/cc15m.sc; printf '\004'; } \
+    { cat stage015/cc15m.sc stage015/cc15n.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc15m0.bin > tmp/build/cc15m.o
     { cat tmp/build/cc15m.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15m.bin
     echo "built tmp/build/cc15m.bin" >&2
     # 再帰抑止を直した pp (docs/stage015-tcc.md 12.7)
     { cat stage015/pp16.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15m.bin > tmp/build/pp16.o
+        | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/pp16.o
     { cat tmp/build/pp16.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp16.bin
     echo "built tmp/build/pp16.bin" >&2
     # tcc の .o (約 1 MB・シンボル数千) を受けるリンカ (12.8)
     { cat stage015/ld15.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15m.bin > tmp/build/ld15.o
+        | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/ld15.o
     { cat tmp/build/ld15.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld15.bin
     echo "built tmp/build/ld15.bin" >&2
@@ -209,7 +220,7 @@ do_stage015() {
         cc15g0.bin cc15g.bin cc15h0.bin cc15h.bin \
         cc15i0.bin cc15i.bin cc15j0.bin cc15j.bin \
         cc15k0.bin cc15k.bin cc15l0.bin cc15l.bin pp15.bin \
-        cc15m0.bin cc15m.bin pp16.bin ld15.bin \
+        cc15m0.bin cc15m.bin cc15n0.bin cc15n.bin pp16.bin ld15.bin \
         rt64.o rtfp.o kernel15.bin \
         l15_src_string.o l15_src_ctype.o l15_src_stdlib.o l15_src_morecore.o \
         l15_src_misc15.o l15_posix_sys.o l15_posix_morecore.o \
@@ -218,7 +229,7 @@ do_stage015() {
            stage015/cc15d.sc stage015/cc15e.sc stage015/cc15f.sc \
            stage015/cc15g.sc stage015/cc15h.sc stage015/cc15i.sc \
            stage015/cc15j.sc stage015/cc15k.sc stage015/cc15l.sc \
-           stage015/cc15m.sc stage015/pp15.sc stage015/pp16.sc \
+           stage015/cc15m.sc stage015/cc15n.sc stage015/pp15.sc stage015/pp16.sc \
            stage015/ld15.sc \
            stage015/kernel15.c stage015/libc/include/*.h \
            stage015/libc/src/*.c stage015/libc/posix/*.c \
