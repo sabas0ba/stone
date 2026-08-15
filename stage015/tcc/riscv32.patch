@@ -900,18 +900,25 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      }
  }
  
-@@ -1359,8 +1538,8 @@
+@@ -1359,8 +1538,15 @@
      dt &= VT_BTYPE;
      if (st == dt)
        return;
 -    if (dt == VT_LDOUBLE || st == VT_LDOUBLE) {
 -        int func = (dt == VT_LDOUBLE) ?
++    /* RV32 (ilp32) では long double は double そのものである
++       (LDOUBLE_SIZE 8)。VT_DOUBLE と VT_LDOUBLE は別のトークンなので
++       上の st == dt では抜けられないが，変換は要らない。ここで抜けないと
++       下の fcvt.d.s (単精度 -> 倍精度) が double の値に掛かり，
++       NaN ボクシングの規則で正準 NaN になる。 */
++    if (IS_DBL(st) && IS_DBL(dt))
++      return;
 +    if (IS_LDBL(dt) || IS_LDBL(st)) {
 +        int func = IS_LDBL(dt) ?
              (st == VT_FLOAT ? TOK___extendsftf2 : TOK___extenddftf2) :
              (dt == VT_FLOAT ? TOK___trunctfsf2 : TOK___trunctfdf2);
          /* We can't use gfunc_call, as func_old_type works like vararg
-@@ -1368,7 +1547,7 @@
+@@ -1368,7 +1554,7 @@
             integers.  But we really need them in the float argument registers
             for extendsftf2/extenddftf2.  So, do it explicitely.  */
          save_regs(1);
@@ -920,7 +927,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
            gv(RC_F(0));
          else {
              gv(RC_R(0));
-@@ -1383,16 +1562,16 @@
+@@ -1383,16 +1569,16 @@
          vtop -= 2;
          vpushi(0);
          vtop->type.t = dt;
@@ -941,7 +948,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
            EI(0x53, 0, freg(rd), freg(rs), 0x21 << 5); // fcvt.d.s RD, RS (no rm)
          else
            EI(0x53, 7, freg(rd), freg(rs), (0x20 << 5) | 1); // fcvt.s.d RD, RS (dyn rm)
-@@ -1416,14 +1595,14 @@
+@@ -1416,14 +1602,14 @@
      put_extern_sym(&label, cur_text_section, ind, 0);
      o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
      greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
@@ -958,7 +965,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      vpop();
  }
  
-@@ -1438,10 +1617,10 @@
+@@ -1438,10 +1624,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
@@ -971,7 +978,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  }
  
  ST_FUNC void gen_vla_sp_restore(int addr)
-@@ -1449,10 +1628,10 @@
+@@ -1449,10 +1635,10 @@
      if (LOW_OVERFLOW(addr)) {
  	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
          ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0

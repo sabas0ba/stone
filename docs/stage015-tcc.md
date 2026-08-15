@@ -1047,3 +1047,49 @@ while (*s >= '0' && *s <= '9') {
 1 なので 18 桁あれば必ず正しい値へ丸まり，tcc が使う定数 (2^64 / 2^96)
 はどちらもこの形である。**T2 == T3 は自己一致しか要求しない**ので，
 一般の値の数 ULP は妨げにならない。
+
+### 12.26 T2 == tccH。残りは backend の long double (2026-08-15)
+
+strtod を直した後の実測。
+
+**T2 は tccH とバイト一致した (470,988 バイト)。**
+
+つまり，我々の手書きの鎖が作った tcc (T1) が翻訳した tcc は，
+**参照実装 (ホストの gcc が作った交差 tcc) が翻訳したものと 1 バイトも
+違わない**。第 2〜4 部で足した cc の機能が，tcc という 30,000 行規模の
+実物に対して正しいことの，これ以上ない裏付けである。
+
+それでも T2 != T3 で，差は 28 バイト。すべて浮動小数点定数で，T3 側が
+一律に `0x7FF8000000000000` (正準 NaN) になっていた。
+
+**tccH も同じ NaN を出す。** つまり我々の cc の誤りではなく，
+[riscv32.patch](../stage015/tcc/riscv32.patch) の欠陥である
+(T2 == tccH なので当然そうなる)。
+
+原因は `gen_cvt_ftof` (riscv64-gen.c)。
+
+```c
+    if (st == dt) return;                  /* VT_DOUBLE と VT_LDOUBLE は別 */
+    if (IS_LDBL(dt) || IS_LDBL(st)) { ... } /* RV32 では両方とも偽 */
+    ...
+    if (IS_DBL(dt))
+      EI(0x53, 0, freg(rd), freg(rs), 0x21 << 5);   // fcvt.d.s (単精度 -> 倍精度)
+```
+
+RV32 (ilp32) では `long double` は double そのものである
+(`LDOUBLE_SIZE 8`)。ところが `VT_DOUBLE` と `VT_LDOUBLE` は別のトークン
+なので最初の `st == dt` で抜けられず，**すでに double の値に
+`fcvt.d.s` が掛かる**。RISC-V は単精度の値が NaN ボクシングされている
+ことを要求するので，double の bit 列はボクシングされておらず，結果は
+正準 NaN になる。観測した `0x7FF8000000000000` と完全に一致する。
+
+```c
+    /* RV32 では long double は double そのもの。変換は要らない */
+    if (IS_DBL(st) && IS_DBL(dt))
+      return;
+```
+
+これは第 5 部で入れ損ねていた RV32 の対応である。裸で走らせる第 5 部の
+検査 (float32 / vfp32) には `long double` が出てこなかったので表に
+出なかった。**tcc 自身が `long double` を使う** (libtcc1.c の `XFtype`，
+tccpp.c の `CValue.ld`) ので，自己ホストで初めて当たった。
