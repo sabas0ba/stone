@@ -238,6 +238,36 @@ out=$(sh tools/env.sh qemu tmp/s15/strinit.bin < /dev/null 2> /dev/null)
 report $? "run: 局所の構造体を式で初期化する 6 形がすべて正しい"
 [ "$out" = "abcdef" ] || echo "   got: $out"
 
+# strtod (tcc が 10 進の浮動小数点定数の変換に使う。12.25)
+sh tools/bundle.sh stage015/libc/include/*.h \
+    "sys/time.h=stage015/libc/include/sys/time.h" \
+    tests/stage015/probe/strtod.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/strtod.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/strtod.i > tmp/s15/strtod.o 2> /dev/null \
+    && { printf 'E'; cat tmp/s15/strtod.o \
+         tmp/build/l15_src_string.o tmp/build/l15_src_ctype.o \
+         tmp/build/l15_src_stdlib.o tmp/build/l15_src_misc15.o \
+         tmp/build/l15_posix_sys.o tmp/build/l15_posix_morecore.o \
+         tmp/build/l15_posix_stdio.o tmp/build/l15_posix_assert.o \
+         tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/s15/strtod 2> /dev/null
+report $? "build: strtod の検査がビルドできる"
+
+rm -rf tmp/s15/sdroot
+mkdir -p tmp/s15/sdroot
+cp tmp/s15/strtod tmp/s15/sdroot/sd
+printf 'sd\n' > tmp/s15/sdroot/boot
+sh tools/sfs.sh pack tmp/s15/sdroot tmp/s15/sd.img 1048576 32 > /dev/null \
+    && rm -f tmp/s15/sdram \
+    && dd if=/dev/null of=tmp/s15/sdram bs=1 seek=134217728 2> /dev/null \
+    && dd if=tmp/s15/sd.img of=tmp/s15/sdram bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+out=$(STONE_QEMU_RAMFILE=tmp/s15/sdram sh tools/env.sh qemu \
+    tmp/build/kernel16.bin < /dev/null 2>&1)
+[ "$out" = "abcdefg" ]
+report $? "run: strtod が 2 の冪 (2^32 / 2^64 / 2^96) を正しく変換する"
+[ "$out" = "abcdefg" ] || echo "   got: $out"
+
 # 整数定数の型 (cc15n)。0x80000000 は unsigned int である
 sh tools/bundle.sh tests/stage015/probe/litu.c 2> /dev/null \
     | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/litu.i 2> /dev/null \

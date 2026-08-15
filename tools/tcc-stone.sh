@@ -304,7 +304,7 @@ do_t3() {
     [ -f "$out/tcc2.bin" ] || do_t2b
     t2tree                              # 作業場を作り直す (中身は T2 と同一)
     cp "$out/tcc2.bin" "$out/t2fs/tcc2"
-    t2script | sed 's/^tcc1 /tcc2 /; s/ -o tcc2$/ -o tcc3/' > "$out/t3.sh"
+    t2script | sed 's/^tcc1 /tcc2 /; s/-o tcc2 /-o tcc3 /' > "$out/t3.sh"
     t2sh "$out/t3.sh" 2>&1 | grep -v 'warning\|In file included' || true
     [ -f "$out/t2out/tcc3" ] || { echo "error: tcc3 ができていない" >&2; exit 1; }
     cp "$out/t2out/tcc3" "$out/tcc3.bin"
