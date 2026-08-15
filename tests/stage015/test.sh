@@ -166,6 +166,18 @@ r=$?
 [ "$r" -eq 0 ] && diff -q tmp/s15/lib15.out tests/stage015/expected/lib15.txt > /dev/null
 report $? "run: printf %llu / snprintf / strto / sscanf / setjmp / lseek が kernel15 で通る"
 
+# kernel16 (PT_LOAD を全部載せる。第 6 部) が従来の 'E' 形式をこれまで
+# どおり読めることを見る。像は上と同じものを使う
+rm -f tmp/s15/ram16
+dd if=/dev/null of=tmp/s15/ram16 bs=1 seek=134217728 2> /dev/null \
+    && dd if=tmp/s15/fs.img of=tmp/s15/ram16 bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE=tmp/s15/ram16 sh tools/env.sh qemu \
+        tmp/build/kernel16.bin < /dev/null > tmp/s15/lib15-k16.out 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -q tmp/s15/lib15-k16.out tests/stage015/expected/lib15.txt > /dev/null
+report $? "run: 同じ像が kernel16 でも同じ出力になる ('E' 形式の後方互換)"
+
 section "第 6 部: tcc の自己ホスト (docs/stage015-tcc.md 12 章)"
 
 # cc15m で入れた言語の穴を 1 つずつ確かめる (33 検査を 1 行で出す)

@@ -814,3 +814,28 @@ tcc で libc15 自身を翻訳して初めて出た)。
 | `strdup` の宣言が無い (実体は misc15.c) | string.h へ足す |
 | stdio.c の `emitc` が定義より前で使われる | 前方宣言を足す |
 | tcc の ABI に `exit` の実体が無い | tccrt/start.S へ足す |
+
+### 12.19 実行環境が揃った: tccH が OS の上で動いた (2026-08-15)
+
+`tools/tcc-stone.sh th` が通った。
+
+```
+tccH は OS の上でホストの riscv32-tcc と同じ .o を出した
+```
+
+我々の OS (kernel16) の上で tcc が走り，`in.c` を翻訳して，ホストの
+`riscv32-tcc` と**バイト一致する** `.o` を出した。これで次のものが
+実測で揃ったことになる。
+
+- `tccrt/start.S` —— 起動部・syscall スタブ・`exit`
+- libc15 を tcc の ABI で翻訳したもの (9 ファイル)
+- 実行時支援 (`lib/riscv32.c` + `lib/libtcc1.c`)。64 bit の除算・
+  シフト・浮動小数点との変換
+- kernel16 の ELF 読み (PT_LOAD 3 本を全部載せる)
+- U モードでの浮動小数点 (mstatus.FS は M モードの初期値のまま使える)
+
+**残る変数は我々の cc だけになった。** 以後 T2 が動かなければ，原因は
+我々の cc の誤訳である，と最初から言い切れる。
+
+なお kernel16 はこれまで鎖に載っておらず，手元の `tmp` でしか作って
+いなかった。`tools/build/stage015c.sh` へ繋いだ (cc15n / ld15 で作る)。
