@@ -150,6 +150,58 @@ t2tree() {
     cp "$inc/sys/time.h" "$out/t2fs/sys/time.h"
     cp stage015/tcc/config-stone.h "$out/t2fs/config.h"
     cp "$out/tcc1.bin" "$out/t2fs/tcc1"
+    # 実行環境の材料。T1 自身に翻訳・アセンブルさせる
+    cp stage015/tccrt/start.S "$out/t2fs/"
+    cp "$src"/lib/libtcc1.c "$src"/lib/riscv32.c "$out/t2fs/"
+    for f in src/string src/ctype src/stdlib src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert; do
+        cp "stage015/libc/$f.c" "$out/t2fs/"
+    done
+    cp tmp/build/sh13 "$out/t2fs/sh"
+}
+
+# 作業場でシェルにスクリプトを食わせる (boot 行は 8 語までなので，
+# 手順が 1 行に収まらないものはこちらを使う)。sh は 1 行 9 語まで。
+t2sh() {
+    printf 'sh\n' > "$out/t2fs/boot"
+    sh tools/sfs.sh pack "$out/t2fs" "$out/t2fs.img" 8388608 256 > /dev/null
+    rm -f "$out/t2ram"
+    dd if=/dev/null of="$out/t2ram" bs=1 seek=134217728 2> /dev/null
+    dd if="$out/t2fs.img" of="$out/t2ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    { cat "$1"; printf '\004'; } \
+        | STONE_QEMU_RAMFILE="$out/t2ram" sh tools/env.sh qemu \
+            tmp/build/kernel16.bin
+    dd if="$out/t2ram" of="$out/t2fs2.img" bs=64K iflag=skip_bytes \
+        skip=67108864 count=256 2> /dev/null
+    rm -rf "$out/t2out"
+    sh tools/sfs.sh unpack "$out/t2fs2.img" "$out/t2out" > /dev/null
+}
+
+# T1 に **tcc の実行形式まるごと**を作らせる (= T2)。
+# 手順は tools/tcc.sh os の tccH と同じでなければならない (直に比べる
+# ため)。シェルの 1 行は 9 語までなので -r で畳んでから繋ぐ。
+t2script() {
+    cat <<'EOF'
+tcc1 -c start.S -o start.o
+tcc1 -c riscv32.c -o riscv32.o
+tcc1 -c libtcc1.c -o libtcc1.o
+tcc1 -nostdinc -I/ -c string.c -o string.o
+tcc1 -nostdinc -I/ -c ctype.c -o ctype.o
+tcc1 -nostdinc -I/ -c stdlib.c -o stdlib.o
+tcc1 -nostdinc -I/ -c misc15.c -o misc15.o
+tcc1 -nostdinc -I/ -c sys.c -o sys.o
+tcc1 -nostdinc -I/ -c morecore.c -o morecore.o
+tcc1 -nostdinc -I/ -c stdio.c -o stdio.o
+tcc1 -nostdinc -I/ -c assert.c -o assert.o
+tcc1 -nostdinc -I/ -c tcc.c -o tcc.o
+tcc1 -r -o libc1.o string.o ctype.o stdlib.o misc15.o
+tcc1 -r -o libc2.o sys.o morecore.o stdio.o assert.o
+tcc1 -r -o rt.o start.o riscv32.o libtcc1.o
+tcc1 -r -o all.o rt.o tcc.o libc1.o libc2.o
+tcc1 -nostdlib -static -Wl,-Ttext=0x86000000 -o tcc2 all.o
+exit
+EOF
 }
 
 # 作業場で 1 つコマンドを走らせ，結果のファイル木を $out/t2out へ出す。
@@ -225,10 +277,27 @@ EOF
     fi
 }
 
+# T2 を作る。T1 に実行環境 (start.S・libtcc1 相当・libc15) と tcc 本体を
+# 翻訳させ，繋いで実行形式にする。手順は tccH と同一である。
+do_t2b() {
+    t2tree
+    t2script > "$out/t2.sh"
+    t2sh "$out/t2.sh" 2>&1 | grep -v 'warning\|In file included' || true
+    [ -f "$out/t2out/tcc2" ] || { echo "error: tcc2 ができていない" >&2; exit 1; }
+    cp "$out/t2out/tcc2" "$out/tcc2.bin"
+    echo "built $out/tcc2.bin ($(wc -c < "$out/tcc2.bin") バイト)" >&2
+    if [ -f tmp/tcc/build/tccH ]; then
+        cmp -s "$out/tcc2.bin" tmp/tcc/build/tccH \
+            && echo "T2 は tccH とバイト一致した" >&2 \
+            || echo "T2 は tccH と食い違う (振舞いが同じなら T2 == T3 は成る)" >&2
+    fi
+}
+
 case "${1:-t1}" in
 t1)  do_t1 ;;
 run) do_run ;;
 t2)  do_t2 ;;
+t2b) do_t2b ;;
 th)  do_th ;;
-*)   echo "usage: tcc-stone.sh [t1|run|t2|th]" >&2; exit 1 ;;
+*)   echo "usage: tcc-stone.sh [t1|run|t2|t2b|th]" >&2; exit 1 ;;
 esac

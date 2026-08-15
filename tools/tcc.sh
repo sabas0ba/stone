@@ -133,10 +133,16 @@ os)
             "$xtcc" -nostdinc -I. -c "$f.c" -o "$f.o"
         done
         "$xtcc" -nostdinc -I. -c tcc.c -o tcc.o
+        # ここから先は **T2 と同じ手順**でなければならない。OS の側は
+        # シェルが 1 行 9 語までなので，-r で 3 つに畳んでから繋ぐ
+        # (docs/stage015-tcc.md 12.18)。手順が違うと配置が変わり，
+        # tccH と T2 を直に比べられなくなる
+        "$xtcc" -r -o libc1.o string.o ctype.o stdlib.o misc15.o
+        "$xtcc" -r -o libc2.o sys.o morecore.o stdio.o assert.o
+        "$xtcc" -r -o rt.o start.o riscv32.o libtcc1.o
+        "$xtcc" -r -o all.o rt.o tcc.o libc1.o libc2.o
         # kernel16 はユーザ像を UBASE = 0x8600_0000 へ載せる
-        "$xtcc" -nostdlib -static -Wl,-Ttext=0x86000000 -o ../tccH \
-            start.o tcc.o string.o ctype.o stdlib.o misc15.o sys.o \
-            morecore.o stdio.o assert.o riscv32.o libtcc1.o
+        "$xtcc" -nostdlib -static -Wl,-Ttext=0x86000000 -o ../tccH all.o
     ) 2>&1 | grep -v 'warning:\|^In file included' || true
     [ -f "$bld/tccH" ] || { echo "error: tccH ができていない" >&2; exit 1; }
     echo "built $bld/tccH ($(wc -c < "$bld/tccH") バイト)" >&2
