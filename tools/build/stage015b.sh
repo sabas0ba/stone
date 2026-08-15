@@ -69,14 +69,23 @@ build_stage015b() {
     { cat tmp/build/ld15.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld15.bin
     echo "built tmp/build/ld15.bin" >&2
+    # U モードで浮動小数点を使えるようにしたリンカ (第 6 部)。
+    # 'K' 前置部が mret の直前に mstatus.FS を立てる
+    # (docs/stage015-tcc.md 12.24)
+    { cat stage015/ld16.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15o.bin > tmp/build/ld16.o
+    { cat tmp/build/ld16.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld16.bin
+    echo "built tmp/build/ld16.bin" >&2
 }
 
 do_stage015b() {
     run_stage stage015b cc15l0.bin cc15l.bin \
         cc15m0.bin cc15m.bin cc15n0.bin cc15n.bin cc15o0.bin cc15o.bin \
-        pp15.bin pp16.bin ld15.bin \
+        pp15.bin pp16.bin ld15.bin ld16.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
+           stage015/ld16.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
 }

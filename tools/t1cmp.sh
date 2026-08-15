@@ -31,7 +31,7 @@ dd if="$out/pfs.img" of="$out/pram" bs=64K oflag=seek_bytes \
     seek=67108864 conv=notrunc 2> /dev/null
 { cat "$out/t2fs/pboot"; printf '\004'; } \
     | STONE_QEMU_RAMFILE="$out/pram" sh tools/env.sh qemu \
-        tmp/build/kernel16.bin > /dev/null 2>&1
+        tmp/build/kernel16.bin > /dev/null 2>&1 || true
 dd if="$out/pram" of="$out/pfs2.img" bs=64K iflag=skip_bytes \
     skip=67108864 count=256 2> /dev/null
 rm -rf "$out/pout"

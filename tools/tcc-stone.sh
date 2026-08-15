@@ -27,7 +27,7 @@ prepare() {
     need docs/external/tcc "sh tools/fetch.sh tcc"
     [ -d "$src" ] || sh tools/tcc.sh src
     mkdir -p "$out"
-    for f in cc15o.bin pp16.bin ld15.bin; do
+    for f in cc15o.bin pp16.bin ld16.bin; do
         need "tmp/build/$f" "sh tools/build.sh stage015"
     done
 }
@@ -75,7 +75,7 @@ do_t1() {
         "$out/l_posix_morecore.o" "$out/l_posix_stdio.o" \
         "$out/l_posix_assert.o" tmp/build/rt64.o tmp/build/rtfp.o; \
       printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld15.bin > "$out/tcc1.bin"
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "$out/tcc1.bin"
     echo "built $out/tcc1.bin ($(wc -c < "$out/tcc1.bin") バイト)" >&2
 }
 

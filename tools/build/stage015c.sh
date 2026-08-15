@@ -21,12 +21,12 @@ build_stage015c() {
     echo "built tmp/build/kernel15.bin" >&2
     # カーネル第 16 世代 (第 6 部)。tcc の出す ELF は PT_LOAD を 2〜3 本
     # 持つが kernel15 は先頭しか載せない。全部載せるようにしたもの
-    # (docs/stage015-tcc.md 12.10)。最前線の cc15o / ld15 で作る
+    # (docs/stage015-tcc.md 12.10)。最前線の cc15o / ld16 で作る
     sh tools/bundle.sh stage015/kernel16.c \
         | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/build/kernel16.i
     sh tools/env.sh qemu tmp/build/cc15o.bin < tmp/build/kernel16.i > tmp/build/kernel16.o
     { printf 'K'; cat tmp/build/kernel16.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld15.bin > tmp/build/kernel16.bin
+        | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/build/kernel16.bin
     echo "built tmp/build/kernel16.bin" >&2
     # 第 15 世代の libc (第 4 部の実測ぶん)。最前線の cc15k でコンパイル
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \

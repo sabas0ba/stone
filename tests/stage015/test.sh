@@ -57,13 +57,13 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15k.bin:stage015/cc15k.md cc15l.bin:stage015/cc15l.md \
         cc15m.bin:stage015/cc15m.md cc15n.bin:stage015/cc15n.md \
         cc15o.bin:stage015/cc15o.md pp15.bin:stage015/pp15.md \
-        pp16.bin:stage015/pp16.md; do
+        pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15o と pp15 / pp16 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15o と pp15 / pp16 / ld16 の SHA-256 が各 .md 記載値と一致"
 
 { cat stage015/cc15o.sc; printf '\004'; } \
     | sh tools/env.sh qemu tmp/build/cc15o.bin > tmp/s15/b3.o \
@@ -178,6 +178,37 @@ dd if=/dev/null of=tmp/s15/ram16 bs=1 seek=134217728 2> /dev/null \
 r=$?
 [ "$r" -eq 0 ] && diff -q tmp/s15/lib15-k16.out tests/stage015/expected/lib15.txt > /dev/null
 report $? "run: 同じ像が kernel16 でも同じ出力になる ('E' 形式の後方互換)"
+
+# U モードの浮動小数点 (ld16 の 'K' 前置部が mstatus.FS を立てる)。
+# tcc が作った実行形式はハードウェアの浮動小数点を使うので，これが
+# 立っていないと不正命令で落ちる (docs/stage015-tcc.md 12.24)
+if [ -x tmp/tcc/build/riscv32-tcc ] && [ -d tmp/tcc/build/os ]; then
+    rm -rf tmp/s15/fproot
+    mkdir -p tmp/s15/fproot
+    cat > tmp/s15/fptest.c <<'FPEOF'
+#include <stdio.h>
+int main(void) { double d = 1.5; printf("fp=%d\n", (int)(d * 4.0)); return 0; }
+FPEOF
+    cp tmp/s15/fptest.c tmp/tcc/build/os/fptest.c
+    ( cd tmp/tcc/build/os \
+      && ../riscv32-tcc -nostdinc -I. -c fptest.c -o fptest.o \
+      && ../riscv32-tcc -nostdlib -static -Wl,-Ttext=0x86000000 \
+           -o ../fptest rt.o fptest.o libc1.o libc2.o ) > /dev/null 2>&1 \
+      && cp tmp/tcc/build/fptest tmp/s15/fproot/fptest \
+      && printf 'fptest\n' > tmp/s15/fproot/boot \
+      && sh tools/sfs.sh pack tmp/s15/fproot tmp/s15/fp.img 1048576 32 > /dev/null \
+      && rm -f tmp/s15/fpram \
+      && dd if=/dev/null of=tmp/s15/fpram bs=1 seek=134217728 2> /dev/null \
+      && dd if=tmp/s15/fp.img of=tmp/s15/fpram bs=64K oflag=seek_bytes \
+          seek=67108864 conv=notrunc 2> /dev/null
+    out=$(STONE_QEMU_RAMFILE=tmp/s15/fpram sh tools/env.sh qemu \
+        tmp/build/kernel16.bin < /dev/null 2>&1)
+    [ "$out" = "fp=6" ]
+    report $? "run: tcc が出したハードウェア浮動小数点が U モードで走る"
+    [ "$out" = "fp=6" ] || echo "   got: $out"
+else
+    echo "   skip: tmp/tcc/build/os が無い (sh tools/tcc.sh os で作れる)"
+fi
 
 section "第 6 部: tcc の自己ホスト (docs/stage015-tcc.md 12 章)"
 
