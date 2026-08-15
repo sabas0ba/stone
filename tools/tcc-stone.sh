@@ -294,11 +294,35 @@ do_t2b() {
     fi
 }
 
+# T3 を作る。**T2 に同じ手順で tcc を作らせる。** T2 == T3 が第 6 部の
+# 完了条件である (tcc が tcc を作り，その出力が動かない = 固定点)。
+#
+# 手順は t2script と 1 語だけ違う (翻訳器が tcc1 か tcc2 か，出力の名前が
+# tcc2 か tcc3 か)。入力のファイル名は同じでなければならない —— tcc は
+# 記号表にファイル名を入れるためである。出力の名前は像に入らない。
+do_t3() {
+    [ -f "$out/tcc2.bin" ] || do_t2b
+    t2tree                              # 作業場を作り直す (中身は T2 と同一)
+    cp "$out/tcc2.bin" "$out/t2fs/tcc2"
+    t2script | sed 's/^tcc1 /tcc2 /; s/ -o tcc2$/ -o tcc3/' > "$out/t3.sh"
+    t2sh "$out/t3.sh" 2>&1 | grep -v 'warning\|In file included' || true
+    [ -f "$out/t2out/tcc3" ] || { echo "error: tcc3 ができていない" >&2; exit 1; }
+    cp "$out/t2out/tcc3" "$out/tcc3.bin"
+    echo "built $out/tcc3.bin ($(wc -c < "$out/tcc3.bin") バイト)" >&2
+    if cmp -s "$out/tcc2.bin" "$out/tcc3.bin"; then
+        echo "T2 == T3 —— tcc の自己ホストが成った" >&2
+    else
+        echo "T2 != T3 (T2=$(wc -c < "$out/tcc2.bin") T3=$(wc -c < "$out/tcc3.bin"))" >&2
+        exit 1
+    fi
+}
+
 case "${1:-t1}" in
 t1)  do_t1 ;;
 run) do_run ;;
 t2)  do_t2 ;;
 t2b) do_t2b ;;
+t3)  do_t3 ;;
 th)  do_th ;;
-*)   echo "usage: tcc-stone.sh [t1|run|t2|t2b|th]" >&2; exit 1 ;;
+*)   echo "usage: tcc-stone.sh [t1|run|t2|t2b|t3|th]" >&2; exit 1 ;;
 esac
