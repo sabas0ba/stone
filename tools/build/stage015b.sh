@@ -40,21 +40,32 @@ build_stage015b() {
     { cat tmp/build/cc15n.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15n.bin
     echo "built tmp/build/cc15n.bin" >&2
+    # 局所の構造体を式で初期化する (docs/stage015-tcc.md 12.22)。前段は cc15n
+    { cat stage015/cc15o.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/cc15o0.o
+    { cat tmp/build/cc15o0.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15o0.bin
+    echo "built tmp/build/cc15o0.bin (bootstrap)" >&2
+    { cat stage015/cc15o.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15o0.bin > tmp/build/cc15o.o
+    { cat tmp/build/cc15o.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc15o.bin
+    echo "built tmp/build/cc15o.bin" >&2
     # 同じく容量の世代の pp (マクロ表とアリーナ。docs/stage015-tcc.md 12.1)
     { cat stage015/pp15.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/pp15.o
+        | sh tools/env.sh qemu tmp/build/cc15o.bin > tmp/build/pp15.o
     { cat tmp/build/pp15.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp15.bin
     echo "built tmp/build/pp15.bin" >&2
     # 再帰抑止を直した pp (docs/stage015-tcc.md 12.7)
     { cat stage015/pp16.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/pp16.o
+        | sh tools/env.sh qemu tmp/build/cc15o.bin > tmp/build/pp16.o
     { cat tmp/build/pp16.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/pp16.bin
     echo "built tmp/build/pp16.bin" >&2
     # tcc の .o (約 1 MB・シンボル数千) を受けるリンカ (12.8)
     { cat stage015/ld15.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/build/ld15.o
+        | sh tools/env.sh qemu tmp/build/cc15o.bin > tmp/build/ld15.o
     { cat tmp/build/ld15.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/ld15.bin
     echo "built tmp/build/ld15.bin" >&2
@@ -62,9 +73,10 @@ build_stage015b() {
 
 do_stage015b() {
     run_stage stage015b cc15l0.bin cc15l.bin \
-        cc15m0.bin cc15m.bin cc15n0.bin cc15n.bin \
+        cc15m0.bin cc15m.bin cc15n0.bin cc15n.bin cc15o0.bin cc15o.bin \
         pp15.bin pp16.bin ld15.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
+           stage015/cc15o.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
 }

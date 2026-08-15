@@ -10,7 +10,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s15
 
-cc=tmp/build/cc15n.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15o.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -55,21 +55,22 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15g.bin:stage015/cc15g.md cc15h.bin:stage015/cc15h.md \
         cc15i.bin:stage015/cc15i.md cc15j.bin:stage015/cc15j.md \
         cc15k.bin:stage015/cc15k.md cc15l.bin:stage015/cc15l.md \
-        cc15m.bin:stage015/cc15m.md cc15n.bin:stage015/cc15n.md pp15.bin:stage015/pp15.md \
+        cc15m.bin:stage015/cc15m.md cc15n.bin:stage015/cc15n.md \
+        cc15o.bin:stage015/cc15o.md pp15.bin:stage015/pp15.md \
         pp16.bin:stage015/pp16.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15n と pp15 / pp16 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15o と pp15 / pp16 の SHA-256 が各 .md 記載値と一致"
 
-{ cat stage015/cc15n.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc15n.bin > tmp/s15/b3.o \
+{ cat stage015/cc15o.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc15o.bin > tmp/s15/b3.o \
     && { cat tmp/s15/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s15/b3.bin \
-    && cmp -s tmp/s15/b3.bin tmp/build/cc15n.bin
-report $? "fixpoint: cc15n が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s15/b3.bin tmp/build/cc15o.bin
+report $? "fixpoint: cc15o が自分自身を再生成する (B2 == B3)"
 
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
@@ -80,7 +81,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15n が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15o が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合 (64 bit の土台)"
 
@@ -192,6 +193,19 @@ out=$(sh tools/env.sh qemu tmp/s15/gap15m.bin < /dev/null 2> /dev/null)
 [ "$out" = "abcdefghijklmnopqrstuvwxyzABCDEFG" ]
 report $? "run: cc15m の言語機能 33 件がすべて正しい"
 [ "$out" = "abcdefghijklmnopqrstuvwxyzABCDEFG" ] || echo "   got: $out"
+
+# 局所の構造体を式で初期化する (cc15o。docs/stage015-tcc.md 12.22)
+sh tools/bundle.sh tests/stage015/probe/strinit.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/strinit.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/strinit.i > tmp/s15/strinit.o 2> /dev/null \
+    && { cat tmp/s15/strinit.o tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu "$ld" > tmp/s15/strinit.bin 2> /dev/null
+report $? "build: strinit (局所の構造体の初期化の検査) がビルドできる"
+
+out=$(sh tools/env.sh qemu tmp/s15/strinit.bin < /dev/null 2> /dev/null)
+[ "$out" = "abcdef" ]
+report $? "run: 局所の構造体を式で初期化する 6 形がすべて正しい"
+[ "$out" = "abcdef" ] || echo "   got: $out"
 
 # 整数定数の型 (cc15n)。0x80000000 は unsigned int である
 sh tools/bundle.sh tests/stage015/probe/litu.c 2> /dev/null \
