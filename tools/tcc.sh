@@ -127,8 +127,8 @@ os)
         "$xtcc" -c start.S -o start.o
         # 実行時支援 (libtcc1.a 相当)。riscv32.c は 64 bit の除算・
         # シフト・変換 (stage015/tcc/riscv32.patch が足したもの)
-        "$xtcc" -c riscv32.c -o riscv32.o
-        "$xtcc" -c libtcc1.c -o libtcc1.o
+        "$xtcc" -nostdinc -I. -c riscv32.c -o riscv32.o
+        "$xtcc" -nostdinc -I. -c libtcc1.c -o libtcc1.o
         for f in string ctype stdlib misc15 sys morecore stdio assert; do
             "$xtcc" -nostdinc -I. -c "$f.c" -o "$f.o"
         done

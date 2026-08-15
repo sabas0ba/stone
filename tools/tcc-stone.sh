@@ -185,8 +185,8 @@ t2sh() {
 t2script() {
     cat <<'EOF'
 tcc1 -c start.S -o start.o
-tcc1 -c riscv32.c -o riscv32.o
-tcc1 -c libtcc1.c -o libtcc1.o
+tcc1 -nostdinc -I/ -c riscv32.c -o riscv32.o
+tcc1 -nostdinc -I/ -c libtcc1.c -o libtcc1.o
 tcc1 -nostdinc -I/ -c string.c -o string.o
 tcc1 -nostdinc -I/ -c ctype.c -o ctype.o
 tcc1 -nostdinc -I/ -c stdlib.c -o stdlib.o
