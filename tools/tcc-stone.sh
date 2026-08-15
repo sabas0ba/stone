@@ -149,6 +149,7 @@ t2tree() {
     done
     cp "$inc/sys/time.h" "$out/t2fs/sys/time.h"
     cp stage015/tcc/config-stone.h "$out/t2fs/config.h"
+    cp tmp/tcc/build/tccdefs_.h "$out/t2fs/"   # tccpp.c が文字列として取り込む
     cp "$out/tcc1.bin" "$out/t2fs/tcc1"
     # 実行環境の材料。T1 自身に翻訳・アセンブルさせる
     cp stage015/tccrt/start.S "$out/t2fs/"
