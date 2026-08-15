@@ -173,6 +173,10 @@ int puts(char *s) {
 
 /* ---- 書式出力 ---- */
 
+/* 実体は下 (sprintf の書込み先の宣言と一緒に置きたいため)。先に宣言だけ
+ * するのは，暗黙の宣言を許さない処理系 (tcc) で翻訳するためである */
+static int emitc(FILE *f, int c);
+
 /* 符号なしを基数 base で書く。幅 w に満たなければ pad で詰める */
 static int pnum(FILE *f, unsigned v, unsigned base, int w, int pad) {
   char b[16];

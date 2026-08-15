@@ -185,9 +185,50 @@ do_t2() {
         && echo "一致した" >&2 || echo "まだ食い違う (12.12)" >&2
 }
 
+# tccH (ホストの交差 tcc が作った，我々の OS 用の tcc) を OS の上で
+# 走らせる。**これは鎖の検査ではない。** 実行環境 (start.S・libc15・
+# kernel16 の ELF 読み・libtcc1 相当) が揃っているかだけを見る対照で
+# ある。ここが通れば，T2 が動かないときの原因は我々の cc に絞れる。
+do_th() {
+    need tmp/build/kernel16.bin "sh tools/build.sh stage015"
+    [ -f tmp/tcc/build/tccH ] || sh tools/tcc.sh os
+    mkdir -p "$out"
+    rm -rf "$out/thfs"
+    mkdir -p "$out/thfs"
+    cp tmp/tcc/build/tccH "$out/thfs/tccH"
+    cat > "$out/thfs/in.c" <<'EOF'
+int add(int a, int b) { return a + b; }
+int main() { return add(40, 2); }
+EOF
+    tccdefs=$src/include/tccdefs.h
+    [ -f "$tccdefs" ] || tccdefs=$src/tccdefs.h
+    cp "$tccdefs" "$out/thfs/tccdefs.h"
+    printf 'tccH -I/ -c in.c -o out.o\n' > "$out/thfs/boot"
+    sh tools/sfs.sh pack "$out/thfs" "$out/thfs.img" 8388608 128 > /dev/null
+    rm -f "$out/thram"
+    dd if=/dev/null of="$out/thram" bs=1 seek=134217728 2> /dev/null
+    dd if="$out/thfs.img" of="$out/thram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_RAMFILE="$out/thram" sh tools/env.sh qemu \
+        tmp/build/kernel16.bin < /dev/null
+    dd if="$out/thram" of="$out/thfs2.img" bs=64K iflag=skip_bytes \
+        skip=67108864 count=128 2> /dev/null
+    rm -rf "$out/thout"
+    sh tools/sfs.sh unpack "$out/thfs2.img" "$out/thout" > /dev/null
+    [ -f "$out/thout/out.o" ] || { echo "error: out.o が出ていない" >&2; exit 1; }
+    ( cd "$out/thfs" && ../../../tmp/tcc/build/riscv32-tcc -c in.c -o ../thref.o )
+    if cmp -s "$out/thout/out.o" "$out/thref.o"; then
+        echo "tccH は OS の上でホストの riscv32-tcc と同じ .o を出した" >&2
+    else
+        echo "error: tccH の出力がホストと食い違う" >&2
+        exit 1
+    fi
+}
+
 case "${1:-t1}" in
 t1)  do_t1 ;;
 run) do_run ;;
 t2)  do_t2 ;;
-*)   echo "usage: tcc-stone.sh [t1|run|t2]" >&2; exit 1 ;;
+th)  do_th ;;
+*)   echo "usage: tcc-stone.sh [t1|run|t2|th]" >&2; exit 1 ;;
 esac

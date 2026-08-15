@@ -33,4 +33,8 @@ size_t strspn(char *s, char *set);
 size_t strcspn(char *s, char *set);
 char *strpbrk(char *s, char *set);
 
+/* C89 には無い (POSIX)。tcc が使うので第 4 部で足した。実体は
+ * lib/misc15.c にある */
+char *strdup(char *s);
+
 #endif

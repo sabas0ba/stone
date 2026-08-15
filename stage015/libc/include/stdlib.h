@@ -42,4 +42,10 @@ int atoi(char *s);
 int abs(int n);
 div_t div(int numer, int denom);
 
+/* exit の実体は libc ではなく実行環境の側にある ('E' 前置部，あるいは
+ * tcc の ABI で組むときは tccrt/start.S)。宣言だけここに置くのは，
+ * 暗黙の宣言を errorにする処理系 (tcc) で libc 自身を翻訳するため
+ * である (docs/stage015-tcc.md 12.17)。 */
+void exit(int status);
+
 #endif
