@@ -30,11 +30,20 @@ jobs:
     # draft の PR では走らせない。作業中の push でキャッシュと計算時間を
     # 使い切らないための措置で，見せるための draft は draft のまま置ける
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    # 鎖は世代を足すたびに長くなる。さらに tools/build.sh は全 Stage の
-    # スタンプの入力なので (build.sh 参照)，ビルド手順を触る変更では
-    # tmp/build のキャッシュがあっても全段を作り直す。Stage 15 の世代を
-    # 足した時点で 30 分では足りなくなった (30 分でジョブが cancelled)
-    timeout-minutes: 60
+    # 鎖は世代を足すたびに長くなる。キャッシュが完全に外れた回
+    # (新しい Stage の手順を足した直後など) はゼロから全段を作るので，
+    # その回だけ突出して長い。第 6 部で cc15o / ld16 を足したときに
+    # 60 分でも足りなくなった (60 分でジョブが cancelled)。
+    #
+    # cancelled ではキャッシュが保存されないので，上限が足りないと
+    # 「毎回コールドビルド -> 毎回 cancelled」から抜けられない。上限は
+    # 温まった回の実測 (15 分前後) ではなく，**コールドビルドが収まる
+    # 値**にしておく必要がある。
+    #
+    # 温まった回を短くするほうの手当ては tools/build/stage015{a,b,c}.sh の
+    # 分割である (docs/dev-notes.md 1.4)。封じた世代 (stage015a) は
+    # 原文が変わらないので，一度キャッシュに入れば以後は必ず飛ばせる
+    timeout-minutes: 120
     env:
       STONE_ENGINE: podman
     steps:
