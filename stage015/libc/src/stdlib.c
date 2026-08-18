@@ -381,14 +381,16 @@ double strtod(const char *s, char **endptr)
     sig = 0;
     fdig = 0;
     while (*s >= '0' && *s <= '9') {
-        if (sig < 1844674407370955161ULL)
+        if (sig < 922337203685477580ULL)
             sig = sig * 10ULL + (unsigned long long)(*s - '0');
+        else
+            fdig = fdig - 1;    /* 器に入らない桁は指数へ送る (下の e で戻す) */
         s = s + 1;
     }
     if (*s == '.') {
         s = s + 1;
         while (*s >= '0' && *s <= '9') {
-            if (sig < 1844674407370955161ULL) {
+            if (sig < 922337203685477580ULL) {
                 sig = sig * 10ULL + (unsigned long long)(*s - '0');
                 fdig = fdig + 1;
             }
@@ -408,6 +410,12 @@ double strtod(const char *s, char **endptr)
         if (xneg) xv = 0 - xv;
     }
     if (endptr != NULL) *endptr = s;
+    /* 整数部が 18 桁を超えたぶんは fdig を負にして送ってある。10 進の
+     * 有効数字を 18 桁保つので double (17 桁) には十分である。
+     * 上限が 2^63/10 なのは，この後 (long long) へ落とすためである。
+     * 2^64/10 にすると sig が 2^63 を超え，符号つきへの変換で負になる。
+     * これを忘れると 20 桁の定数が 1/10 になる (2^64 = 1844674407...616 が
+     * その例。docs/stage015-tcc.md 12.25) */
     d = (double)(long long)sig;     /* sig < 2^63 なので符号つきで足りる */
     e = xv - fdig;
     p = 10.0;

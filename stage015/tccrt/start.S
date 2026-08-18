@@ -24,7 +24,12 @@ _start:
     lw   a0, 0(sp)
     addi a1, sp, 4
     jal  main
-    /* main の返り値で exit する (番号 93) */
+    /* main の返り値でそのまま exit へ落ちる */
+
+/* exit は libc15 に実体が無い ('E' 前置部が機械語で持っていた)。
+ * tcc の ABI で組むときはここが実体である */
+    .globl exit
+exit:
     li   a7, 93
     ecall
 1:  j    1b

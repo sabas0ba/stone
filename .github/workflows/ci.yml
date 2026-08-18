@@ -5,7 +5,10 @@ name: ci
 on:
   push:
     branches: [main]
+  # draft の間は走らせない (下の if)。ready にした時点で 1 度だけ走るよう
+  # ready_for_review を種類に足す
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   # 週次はキャッシュを使わずゼロから全段を再ビルドし，.md 記載の SHA-256 の
   # 再現性そのものを検証する (docs/dev-notes.md 1.3)
   schedule:
@@ -24,11 +27,23 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # 鎖は世代を足すたびに長くなる。さらに tools/build.sh は全 Stage の
-    # スタンプの入力なので (build.sh 参照)，ビルド手順を触る変更では
-    # tmp/build のキャッシュがあっても全段を作り直す。Stage 15 の世代を
-    # 足した時点で 30 分では足りなくなった (30 分でジョブが cancelled)
-    timeout-minutes: 60
+    # draft の PR では走らせない。作業中の push でキャッシュと計算時間を
+    # 使い切らないための措置で，見せるための draft は draft のまま置ける
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    # 鎖は世代を足すたびに長くなる。キャッシュが完全に外れた回
+    # (新しい Stage の手順を足した直後など) はゼロから全段を作るので，
+    # その回だけ突出して長い。第 6 部で cc15o / ld16 を足したときに
+    # 60 分でも足りなくなった (60 分でジョブが cancelled)。
+    #
+    # cancelled ではキャッシュが保存されないので，上限が足りないと
+    # 「毎回コールドビルド -> 毎回 cancelled」から抜けられない。上限は
+    # 温まった回の実測 (15 分前後) ではなく，**コールドビルドが収まる
+    # 値**にしておく必要がある。
+    #
+    # 温まった回を短くするほうの手当ては tools/build/stage015{a,b,c}.sh の
+    # 分割である (docs/dev-notes.md 1.4)。封じた世代 (stage015a) は
+    # 原文が変わらないので，一度キャッシュに入れば以後は必ず飛ばせる
+    timeout-minutes: 120
     env:
       STONE_ENGINE: podman
     steps:
@@ -64,14 +79,20 @@ jobs:
 
       # 生成物キャッシュ。ビルドは決定的なので，入力が一致すれば生成物を
       # 持ち回してよい (docs/dev-notes.md 1.3)。鍵が完全一致しなくても
-      # restore-keys で直近のものを復元し，tools/build.sh のスタンプが
-      # 変更のあった Stage だけを作り直す。生成物と .md の SHA-256 照合は
-      # 毎回全 Stage で行われる。schedule ではキャッシュを使わない
+      # restore-keys で直近のものを復元し，スタンプが変更のあったぶんだけ
+      # 作り直す。schedule ではキャッシュを使わない。
+      #
+      # tmp/test も一緒に持ち回す。テストのスタンプ (docs/dev-notes.md
+      # 1.5) がここにあり，入力の変わらない Stage の検査を飛ばせる。
+      # 生成物と .md の SHA-256 照合は，飛ばさない Stage では従来どおり
+      # 毎回行われる (週次の schedule は STONE_FORCE_TEST で全部走る)
       - name: Restore build artifacts
         if: github.event_name != 'schedule'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: tmp/build
+          path: |
+            tmp/build
+            tmp/test
           key: stone-build-${{ hashFiles('stage*/**', 'include/**', 'lib/**', 'tools/**') }}
           restore-keys: |
             stone-build-
@@ -79,6 +100,7 @@ jobs:
       - name: Run regression tests
         env:
           STONE_FORCE_BUILD: ${{ github.event_name == 'schedule' && '1' || '' }}
+          STONE_FORCE_TEST: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: bash tools/test.sh
 
       # 保存は取り出せなかったときだけ。actions/cache の post 段が

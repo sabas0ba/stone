@@ -10,7 +10,7 @@ cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s15
 
-cc=tmp/build/cc15m.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15o.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -55,21 +55,22 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15g.bin:stage015/cc15g.md cc15h.bin:stage015/cc15h.md \
         cc15i.bin:stage015/cc15i.md cc15j.bin:stage015/cc15j.md \
         cc15k.bin:stage015/cc15k.md cc15l.bin:stage015/cc15l.md \
-        cc15m.bin:stage015/cc15m.md pp15.bin:stage015/pp15.md \
-        pp16.bin:stage015/pp16.md; do
+        cc15m.bin:stage015/cc15m.md cc15n.bin:stage015/cc15n.md \
+        cc15o.bin:stage015/cc15o.md pp15.bin:stage015/pp15.md \
+        pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15m と pp15 / pp16 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15o と pp15 / pp16 / ld16 の SHA-256 が各 .md 記載値と一致"
 
-{ cat stage015/cc15m.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc15m.bin > tmp/s15/b3.o \
+{ cat stage015/cc15o.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc15o.bin > tmp/s15/b3.o \
     && { cat tmp/s15/b3.o; printf '\0'; } \
         | sh tools/env.sh qemu "$ld" > tmp/s15/b3.bin \
-    && cmp -s tmp/s15/b3.bin tmp/build/cc15m.bin
-report $? "fixpoint: cc15m が自分自身を再生成する (B2 == B3)"
+    && cmp -s tmp/s15/b3.bin tmp/build/cc15o.bin
+report $? "fixpoint: cc15o が自分自身を再生成する (B2 == B3)"
 
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
@@ -80,7 +81,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15m が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15o が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合 (64 bit の土台)"
 
@@ -166,6 +167,49 @@ r=$?
 [ "$r" -eq 0 ] && diff -q tmp/s15/lib15.out tests/stage015/expected/lib15.txt > /dev/null
 report $? "run: printf %llu / snprintf / strto / sscanf / setjmp / lseek が kernel15 で通る"
 
+# kernel16 (PT_LOAD を全部載せる。第 6 部) が従来の 'E' 形式をこれまで
+# どおり読めることを見る。像は上と同じものを使う
+rm -f tmp/s15/ram16
+dd if=/dev/null of=tmp/s15/ram16 bs=1 seek=134217728 2> /dev/null \
+    && dd if=tmp/s15/fs.img of=tmp/s15/ram16 bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE=tmp/s15/ram16 sh tools/env.sh qemu \
+        tmp/build/kernel16.bin < /dev/null > tmp/s15/lib15-k16.out 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -q tmp/s15/lib15-k16.out tests/stage015/expected/lib15.txt > /dev/null
+report $? "run: 同じ像が kernel16 でも同じ出力になる ('E' 形式の後方互換)"
+
+# U モードの浮動小数点 (ld16 の 'K' 前置部が mstatus.FS を立てる)。
+# tcc が作った実行形式はハードウェアの浮動小数点を使うので，これが
+# 立っていないと不正命令で落ちる (docs/stage015-tcc.md 12.24)
+if [ -x tmp/tcc/build/riscv32-tcc ] && [ -d tmp/tcc/build/os ]; then
+    rm -rf tmp/s15/fproot
+    mkdir -p tmp/s15/fproot
+    cat > tmp/s15/fptest.c <<'FPEOF'
+#include <stdio.h>
+int main(void) { double d = 1.5; printf("fp=%d\n", (int)(d * 4.0)); return 0; }
+FPEOF
+    cp tmp/s15/fptest.c tmp/tcc/build/os/fptest.c
+    ( cd tmp/tcc/build/os \
+      && ../riscv32-tcc -nostdinc -I. -c fptest.c -o fptest.o \
+      && ../riscv32-tcc -nostdlib -static -Wl,-Ttext=0x86000000 \
+           -o ../fptest rt.o fptest.o libc1.o libc2.o ) > /dev/null 2>&1 \
+      && cp tmp/tcc/build/fptest tmp/s15/fproot/fptest \
+      && printf 'fptest\n' > tmp/s15/fproot/boot \
+      && sh tools/sfs.sh pack tmp/s15/fproot tmp/s15/fp.img 1048576 32 > /dev/null \
+      && rm -f tmp/s15/fpram \
+      && dd if=/dev/null of=tmp/s15/fpram bs=1 seek=134217728 2> /dev/null \
+      && dd if=tmp/s15/fp.img of=tmp/s15/fpram bs=64K oflag=seek_bytes \
+          seek=67108864 conv=notrunc 2> /dev/null
+    out=$(STONE_QEMU_RAMFILE=tmp/s15/fpram sh tools/env.sh qemu \
+        tmp/build/kernel16.bin < /dev/null 2>&1)
+    [ "$out" = "fp=6" ]
+    report $? "run: tcc が出したハードウェア浮動小数点が U モードで走る"
+    [ "$out" = "fp=6" ] || echo "   got: $out"
+else
+    echo "   skip: tmp/tcc/build/os が無い (sh tools/tcc.sh os で作れる)"
+fi
+
 section "第 6 部: tcc の自己ホスト (docs/stage015-tcc.md 12 章)"
 
 # cc15m で入れた言語の穴を 1 つずつ確かめる (33 検査を 1 行で出す)
@@ -180,6 +224,62 @@ out=$(sh tools/env.sh qemu tmp/s15/gap15m.bin < /dev/null 2> /dev/null)
 [ "$out" = "abcdefghijklmnopqrstuvwxyzABCDEFG" ]
 report $? "run: cc15m の言語機能 33 件がすべて正しい"
 [ "$out" = "abcdefghijklmnopqrstuvwxyzABCDEFG" ] || echo "   got: $out"
+
+# 局所の構造体を式で初期化する (cc15o。docs/stage015-tcc.md 12.22)
+sh tools/bundle.sh tests/stage015/probe/strinit.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/strinit.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/strinit.i > tmp/s15/strinit.o 2> /dev/null \
+    && { cat tmp/s15/strinit.o tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu "$ld" > tmp/s15/strinit.bin 2> /dev/null
+report $? "build: strinit (局所の構造体の初期化の検査) がビルドできる"
+
+out=$(sh tools/env.sh qemu tmp/s15/strinit.bin < /dev/null 2> /dev/null)
+[ "$out" = "abcdef" ]
+report $? "run: 局所の構造体を式で初期化する 6 形がすべて正しい"
+[ "$out" = "abcdef" ] || echo "   got: $out"
+
+# strtod (tcc が 10 進の浮動小数点定数の変換に使う。12.25)
+sh tools/bundle.sh stage015/libc/include/*.h \
+    "sys/time.h=stage015/libc/include/sys/time.h" \
+    tests/stage015/probe/strtod.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/strtod.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/strtod.i > tmp/s15/strtod.o 2> /dev/null \
+    && { printf 'E'; cat tmp/s15/strtod.o \
+         tmp/build/l15_src_string.o tmp/build/l15_src_ctype.o \
+         tmp/build/l15_src_stdlib.o tmp/build/l15_src_misc15.o \
+         tmp/build/l15_posix_sys.o tmp/build/l15_posix_morecore.o \
+         tmp/build/l15_posix_stdio.o tmp/build/l15_posix_assert.o \
+         tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/s15/strtod 2> /dev/null
+report $? "build: strtod の検査がビルドできる"
+
+rm -rf tmp/s15/sdroot
+mkdir -p tmp/s15/sdroot
+cp tmp/s15/strtod tmp/s15/sdroot/sd
+printf 'sd\n' > tmp/s15/sdroot/boot
+sh tools/sfs.sh pack tmp/s15/sdroot tmp/s15/sd.img 1048576 32 > /dev/null \
+    && rm -f tmp/s15/sdram \
+    && dd if=/dev/null of=tmp/s15/sdram bs=1 seek=134217728 2> /dev/null \
+    && dd if=tmp/s15/sd.img of=tmp/s15/sdram bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+out=$(STONE_QEMU_RAMFILE=tmp/s15/sdram sh tools/env.sh qemu \
+    tmp/build/kernel16.bin < /dev/null 2>&1)
+[ "$out" = "abcdefg" ]
+report $? "run: strtod が 2 の冪 (2^32 / 2^64 / 2^96) を正しく変換する"
+[ "$out" = "abcdefg" ] || echo "   got: $out"
+
+# 整数定数の型 (cc15n)。0x80000000 は unsigned int である
+sh tools/bundle.sh tests/stage015/probe/litu.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/litu.i 2> /dev/null \
+    && sh tools/env.sh qemu "$cc" < tmp/s15/litu.i > tmp/s15/litu.o 2> /dev/null \
+    && { cat tmp/s15/litu.o tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu "$ld" > tmp/s15/litu.bin 2> /dev/null
+report $? "build: litu (整数定数の型の検査) がビルドできる"
+
+out=$(sh tools/env.sh qemu tmp/s15/litu.bin < /dev/null 2> /dev/null)
+[ "$out" = "abcdefg" ]
+report $? "run: 整数定数の型が C89 のとおり (0x80000000 は unsigned int)"
+[ "$out" = "abcdefg" ] || echo "   got: $out"
 
 # pp16 の再帰抑止 (自己参照マクロを実引数に渡す)
 sh tools/bundle.sh tests/stage015/probe/hyg16.c 2> /dev/null \

@@ -119,8 +119,15 @@ report $? "build: ld12.bin / kernel.bin の SHA-256 が各 .md 記載値と一�
 ok=0
 for o in pp.o cc10l.o ld.o; do
     { cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld" > tmp/s12/f_old.bin
+    r1=$?
     { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld12" > tmp/s12/f_new.bin
-    cmp -s tmp/s12/f_old.bin tmp/s12/f_new.bin || ok=1
+    r2=$?
+    if ! cmp -s tmp/s12/f_old.bin tmp/s12/f_new.bin; then
+        # 落ちたときに何が起きたかを残す。無言だと CI で追えない
+        echo "   $o: ld rc=$r1 ($(wc -c < tmp/s12/f_old.bin) バイト) /" \
+             "ld12 rc=$r2 ($(wc -c < tmp/s12/f_new.bin) バイト)"
+        ok=1
+    fi
 done
 [ "$ok" -eq 0 ]
 report $? "regress: 'F' の出力が stage008 の ld とバイト一致 (pp / cc10l / ld)"
