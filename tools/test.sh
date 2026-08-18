@@ -8,6 +8,10 @@
 #   ビルドは常に全段を対象にするが，スタンプ (tools/build.sh) により
 #   変更の無い段は作り直されない (docs/dev-notes.md 1.3)。
 #
+#   テストにもスタンプがある。**入力が前回と一致し，前回通っている
+#   Stage は飛ばす** (docs/dev-notes.md 1.5)。STONE_FORCE_TEST=1 で
+#   無視して全部走らせる。
+#
 # 各 Stage のテストは並列に走らせる (共有するのは tmp/build の生成物の
 # 読取りだけで，書き込み先は Stage ごとに分かれている)。出力は Stage ごとに
 # tmp/test-<stage>.log へ取り，Stage の順に完了を待って表示するので，
@@ -66,6 +70,31 @@ fi
 overall_fail=$fail
 export STONE_PREBUILT=1
 
+# ---- テストのスタンプ ----
+#
+# ビルドと同じ考え方をテストにも入れる。**入力が前回と一致し，前回
+# 通っている Stage は飛ばす。** 入力は「その Stage の検査一式
+# (tests/<stage>/**)」「共通の tests/lib.sh」「鎖の全ソース (stage*/**)」
+# 「生成物のスタンプ (tmp/build/*.stamp)」である。生成物のスタンプには
+# すべての成果物の SHA-256 が入っているので，成果物が 1 バイトでも
+# 変われば鍵が変わる。
+#
+# 健全性の根拠はビルドの決定性と同じである (docs/dev-notes.md 1.3)。
+# 見落としが怖いのは「入力に入れ忘れたものがある」場合だけなので，
+# 鎖のソースは Stage を絞らずまとめて入れてある。
+#
+# STONE_FORCE_TEST=1 で無視して全部走らせる。CI の週次はこれを立てる。
+mkdir -p tmp/test
+teststamp_key() {
+    { find "tests/$1" -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
+        | xargs -0 sha256sum 2> /dev/null
+      sha256sum tests/lib.sh 2> /dev/null
+      find stage[0-9]* -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
+        | xargs -0 sha256sum 2> /dev/null
+      cat tmp/build/*.stamp 2> /dev/null
+    } | sha256sum | cut -d' ' -f1
+}
+
 # 走らせる Stage を並べる
 run_list=()
 for t in tests/stage*/test.sh; do
@@ -76,6 +105,12 @@ for t in tests/stage*/test.sh; do
         *) continue ;;
         esac
     fi
+    if [ -z "${STONE_FORCE_TEST:-}" ] \
+        && [ "$(cat "tmp/test/$s.stamp" 2> /dev/null)" = "$(teststamp_key "$s")" ]; then
+        echo "== tests/$s =="
+        echo "cached tests/$s (前回と同じ入力で通っている。STONE_FORCE_TEST=1 で無視)"
+        continue
+    fi
     run_list+=("$s")
 done
 
@@ -83,7 +118,9 @@ if [ -n "${STONE_TEST_SERIAL:-}" ]; then
     for s in "${run_list[@]}"; do
         echo "== tests/$s =="
         bash "tests/$s/test.sh"
-        overall_fail=$((overall_fail + $?))
+        rc=$?
+        overall_fail=$((overall_fail + rc))
+        [ "$rc" -eq 0 ] && teststamp_key "$s" > "tmp/test/$s.stamp"
     done
 else
     maxjobs=${STONE_TEST_JOBS:-$(nproc 2> /dev/null || echo 2)}
@@ -106,9 +143,14 @@ else
         done
         for k in "${!batch_pids[@]}"; do
             wait "${batch_pids[$k]}"
-            overall_fail=$((overall_fail + $?))
+            rc=$?
+            overall_fail=$((overall_fail + rc))
             echo "== tests/${batch_names[$k]} =="
             cat "tmp/test-${batch_names[$k]}.log"
+            # 通った Stage だけスタンプを書く。落ちた Stage は次回も走る
+            [ "$rc" -eq 0 ] \
+                && teststamp_key "${batch_names[$k]}" \
+                    > "tmp/test/${batch_names[$k]}.stamp"
         done
     done
 fi

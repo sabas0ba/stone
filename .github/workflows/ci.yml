@@ -79,14 +79,20 @@ jobs:
 
       # 生成物キャッシュ。ビルドは決定的なので，入力が一致すれば生成物を
       # 持ち回してよい (docs/dev-notes.md 1.3)。鍵が完全一致しなくても
-      # restore-keys で直近のものを復元し，tools/build.sh のスタンプが
-      # 変更のあった Stage だけを作り直す。生成物と .md の SHA-256 照合は
-      # 毎回全 Stage で行われる。schedule ではキャッシュを使わない
+      # restore-keys で直近のものを復元し，スタンプが変更のあったぶんだけ
+      # 作り直す。schedule ではキャッシュを使わない。
+      #
+      # tmp/test も一緒に持ち回す。テストのスタンプ (docs/dev-notes.md
+      # 1.5) がここにあり，入力の変わらない Stage の検査を飛ばせる。
+      # 生成物と .md の SHA-256 照合は，飛ばさない Stage では従来どおり
+      # 毎回行われる (週次の schedule は STONE_FORCE_TEST で全部走る)
       - name: Restore build artifacts
         if: github.event_name != 'schedule'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: tmp/build
+          path: |
+            tmp/build
+            tmp/test
           key: stone-build-${{ hashFiles('stage*/**', 'include/**', 'lib/**', 'tools/**') }}
           restore-keys: |
             stone-build-
@@ -94,6 +100,7 @@ jobs:
       - name: Run regression tests
         env:
           STONE_FORCE_BUILD: ${{ github.event_name == 'schedule' && '1' || '' }}
+          STONE_FORCE_TEST: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: bash tools/test.sh
 
       # 保存は取り出せなかったときだけ。actions/cache の post 段が

@@ -41,7 +41,13 @@ run_stage() {
         echo "cached $name (stamp: 入力と生成物が前回と一致)" >&2
         return 0
     fi
-    "build_$name"
+    # ビルドが落ちたらスタンプを書かない。書いてしまうと次回は
+    # 「できている」と誤認して先へ進み，原因から遠い所で落ちる
+    if ! "build_$name"; then
+        echo "error: build_$name が失敗した" >&2
+        rm -f "$stamp"
+        return 1
+    fi
     { echo "$new"; sha256sum $outs; } > "$stamp"
 }
 
@@ -81,22 +87,23 @@ step() {
 
 # cc の世代を 1 つ作る (2 段。1 段目で作った器で自分自身を作り直す)。
 #   ccgen <名前> <前段の bin> <ソース> [<リンカの bin>]
+# 名前はすべて拡張子なしで受ける (cc15a / cc14g / ld)。.bin はここで付ける
 ccgen() {
     step "$1" "${1}0.bin" "${1}.bin" \
-        -- "$3" "tmp/build/$2" "tmp/build/${4:-ld.bin}" \
-        -- ccgen_run "$1" "$2" "$3" "${4:-ld.bin}"
+        -- "$3" "tmp/build/${2}.bin" "tmp/build/${4:-ld}.bin" \
+        -- ccgen_run "$1" "$2" "$3" "${4:-ld}"
 }
 
 ccgen_run() {
     { cat "$3"; printf '\004'; } \
-        | sh tools/env.sh qemu "tmp/build/$2" > "tmp/build/${1}0.o"
+        | sh tools/env.sh qemu "tmp/build/${2}.bin" > "tmp/build/${1}0.o"
     { cat "tmp/build/${1}0.o"; printf '\0'; } \
-        | sh tools/env.sh qemu "tmp/build/$4" > "tmp/build/${1}0.bin"
+        | sh tools/env.sh qemu "tmp/build/${4}.bin" > "tmp/build/${1}0.bin"
     echo "built tmp/build/${1}0.bin (bootstrap)" >&2
     { cat "$3"; printf '\004'; } \
         | sh tools/env.sh qemu "tmp/build/${1}0.bin" > "tmp/build/${1}.o"
     { cat "tmp/build/${1}.o"; printf '\0'; } \
-        | sh tools/env.sh qemu "tmp/build/$4" > "tmp/build/${1}.bin"
+        | sh tools/env.sh qemu "tmp/build/${4}.bin" > "tmp/build/${1}.bin"
     echo "built tmp/build/${1}.bin" >&2
 }
 
@@ -104,15 +111,15 @@ ccgen_run() {
 #   tool1 <名前> <翻訳する cc の bin> <ソース> [<リンカの bin>]
 tool1() {
     step "$1" "${1}.bin" \
-        -- "$3" "tmp/build/$2" "tmp/build/${4:-ld.bin}" \
-        -- tool1_run "$1" "$2" "$3" "${4:-ld.bin}"
+        -- "$3" "tmp/build/${2}.bin" "tmp/build/${4:-ld}.bin" \
+        -- tool1_run "$1" "$2" "$3" "${4:-ld}"
 }
 
 tool1_run() {
     { cat "$3"; printf '\004'; } \
-        | sh tools/env.sh qemu "tmp/build/$2" > "tmp/build/${1}.o"
+        | sh tools/env.sh qemu "tmp/build/${2}.bin" > "tmp/build/${1}.o"
     { cat "tmp/build/${1}.o"; printf '\0'; } \
-        | sh tools/env.sh qemu "tmp/build/$4" > "tmp/build/${1}.bin"
+        | sh tools/env.sh qemu "tmp/build/${4}.bin" > "tmp/build/${1}.bin"
     echo "built tmp/build/${1}.bin" >&2
 }
 
