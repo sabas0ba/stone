@@ -45,6 +45,77 @@ run_stage() {
     { echo "$new"; sha256sum $outs; } > "$stamp"
 }
 
+# ---- 成果物ごとのスタンプ (step) ----
+#
+# run_stage は Stage 単位なので，**途中で殺されるとその Stage の頭から
+# やり直し**になる。Stage 15 は 30 分を超えるので，これが実務上いちばん
+# 痛い (コンテナの再起動・CI のタイムアウト・Ctrl-C のどれでも起きる)。
+#
+# step は成果物 1 つ (あるいは 1 世代) ごとにスタンプを持ち，既にできて
+# いるものを飛ばす。**殺されても失うのは高々 1 世代 (2〜3 分) である。**
+# run_stage の外側のスタンプはそのまま残る。全部できていれば外側で
+# 一発で飛ぶので，温まった回の費用は変わらない。
+#
+#   step <名前> <生成物...> -- <入力...> -- <コマンド...>
+step() {
+    _name=$1; shift
+    _outs=""
+    while [ "$1" != -- ]; do _outs="$_outs tmp/build/$1"; shift; done
+    shift
+    _ins=""
+    while [ "$1" != -- ]; do _ins="$_ins $1"; shift; done
+    shift
+    _stamp=tmp/build/step-$_name.stamp
+    # shellcheck disable=SC2086
+    _new=$(sha256sum $_ins 2> /dev/null | sha256sum | cut -d' ' -f1)
+    if [ -z "${STONE_FORCE_BUILD:-}" ] && [ -f "$_stamp" ] \
+        && [ "$(head -n 1 "$_stamp")" = "$_new" ] \
+        && tail -n +2 "$_stamp" | sha256sum -c --status - 2> /dev/null; then
+        echo "cached $_name" >&2
+        return 0
+    fi
+    "$@" || return 1
+    # shellcheck disable=SC2086
+    { echo "$_new"; sha256sum $_outs; } > "$_stamp"
+}
+
+# cc の世代を 1 つ作る (2 段。1 段目で作った器で自分自身を作り直す)。
+#   ccgen <名前> <前段の bin> <ソース> [<リンカの bin>]
+ccgen() {
+    step "$1" "${1}0.bin" "${1}.bin" \
+        -- "$3" "tmp/build/$2" "tmp/build/${4:-ld.bin}" \
+        -- ccgen_run "$1" "$2" "$3" "${4:-ld.bin}"
+}
+
+ccgen_run() {
+    { cat "$3"; printf '\004'; } \
+        | sh tools/env.sh qemu "tmp/build/$2" > "tmp/build/${1}0.o"
+    { cat "tmp/build/${1}0.o"; printf '\0'; } \
+        | sh tools/env.sh qemu "tmp/build/$4" > "tmp/build/${1}0.bin"
+    echo "built tmp/build/${1}0.bin (bootstrap)" >&2
+    { cat "$3"; printf '\004'; } \
+        | sh tools/env.sh qemu "tmp/build/${1}0.bin" > "tmp/build/${1}.o"
+    { cat "tmp/build/${1}.o"; printf '\0'; } \
+        | sh tools/env.sh qemu "tmp/build/$4" > "tmp/build/${1}.bin"
+    echo "built tmp/build/${1}.bin" >&2
+}
+
+# 道具を 1 つ作る (1 段。pp / ld のように自分自身では作らないもの)。
+#   tool1 <名前> <翻訳する cc の bin> <ソース> [<リンカの bin>]
+tool1() {
+    step "$1" "${1}.bin" \
+        -- "$3" "tmp/build/$2" "tmp/build/${4:-ld.bin}" \
+        -- tool1_run "$1" "$2" "$3" "${4:-ld.bin}"
+}
+
+tool1_run() {
+    { cat "$3"; printf '\004'; } \
+        | sh tools/env.sh qemu "tmp/build/$2" > "tmp/build/${1}.o"
+    { cat "tmp/build/${1}.o"; printf '\0'; } \
+        | sh tools/env.sh qemu "tmp/build/$4" > "tmp/build/${1}.bin"
+    echo "built tmp/build/${1}.bin" >&2
+}
+
 # 各 Stage の手順を読み込む (build_<stage> と do_<stage> を定義する)
 for f in "$repo_root"/tools/build/stage*.sh; do
     . "$f"
