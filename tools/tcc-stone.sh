@@ -23,6 +23,34 @@ need() {
     [ -e "$1" ] || { echo "error: $1 が無い ($2)" >&2; exit 1; }
 }
 
+# ---- 段ごとのスタンプ ----
+#
+# T1 は約 25 分，T2 / T3 は各 30 分かかる。**途中で殺されると 1 時間半が
+# 丸ごと消える**ので，段ごとにスタンプを持って既にできているものを飛ばす
+# (docs/dev-notes.md 1.5)。鍵は「その段の入力の SHA-256」である。
+# STONE_FORCE_TCC=1 で無視して作り直す。
+#
+#   stamped <名前> <生成物> <入力...>   -> できていれば 0 (飛ばす)
+stamped() {
+    _sname=$1; _sout=$2; shift 2
+    _sstamp=$out/step-$_sname.stamp
+    # shellcheck disable=SC2086
+    _skey=$(sha256sum "$@" 2> /dev/null | sha256sum | cut -d' ' -f1)
+    if [ -z "${STONE_FORCE_TCC:-}" ] && [ -f "$_sout" ] \
+        && [ "$(cat "$_sstamp" 2> /dev/null)" = "$_skey" ]; then
+        echo "cached $_sname ($_sout。STONE_FORCE_TCC=1 で作り直す)" >&2
+        return 0
+    fi
+    return 1
+}
+
+stamp_put() {
+    _pname=$1; shift
+    # shellcheck disable=SC2086
+    sha256sum "$@" 2> /dev/null | sha256sum | cut -d' ' -f1 \
+        > "$out/step-$_pname.stamp"
+}
+
 prepare() {
     need docs/external/tcc "sh tools/fetch.sh tcc"
     [ -d "$src" ] || sh tools/tcc.sh src
@@ -52,10 +80,18 @@ bundle() {
         "$src/tcc.c"
 }
 
+t1inputs() {
+    echo tmp/build/pp16.bin tmp/build/cc15o.bin tmp/build/ld16.bin \
+         tmp/build/rt64.o tmp/build/rtfp.o "$out/tcc.bundle"
+    ls stage015/libc/src/*.c stage015/libc/posix/*.c stage015/libc/include/*.h
+}
+
 do_t1() {
     prepare
     need tmp/tcc/build/tccdefs_.h "sh tools/tcc.sh host"
     bundle > "$out/tcc.bundle"
+    # shellcheck disable=SC2046
+    stamped t1 "$out/tcc1.bin" $(t1inputs) && return 0
     sh tools/env.sh qemu tmp/build/pp16.bin < "$out/tcc.bundle" > "$out/tcc.i"
     echo "preprocessed: $(wc -l < "$out/tcc.i") 行" >&2
     sh tools/env.sh qemu tmp/build/cc15o.bin < "$out/tcc.i" > "$out/tcc.o"
@@ -77,6 +113,8 @@ do_t1() {
       printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld16.bin > "$out/tcc1.bin"
     echo "built $out/tcc1.bin ($(wc -c < "$out/tcc1.bin") バイト)" >&2
+    # shellcheck disable=SC2046
+    stamp_put t1 $(t1inputs)
 }
 
 # sfs の像を組んで kernel15 の上で走らせる。$1 は boot に書く 1 行
@@ -159,6 +197,9 @@ t2tree() {
         cp "stage015/libc/$f.c" "$out/t2fs/"
     done
     cp tmp/build/sh13 "$out/t2fs/sh"
+    # 作業場の中身を 1 つのハッシュにまとめる (段のスタンプの鍵に使う)
+    find "$out/t2fs" -type f | LC_ALL=C sort | tr '\n' '\0' \
+        | xargs -0 sha256sum > "$out/t2fs.list"
 }
 
 # 作業場でシェルにスクリプトを食わせる (boot 行は 8 語までなので，
@@ -282,10 +323,12 @@ EOF
 # 翻訳させ，繋いで実行形式にする。手順は tccH と同一である。
 do_t2b() {
     t2tree
+    stamped t2b "$out/tcc2.bin" "$out/tcc1.bin" "$out/t2fs.list" && return 0
     t2script > "$out/t2.sh"
     t2sh "$out/t2.sh" 2>&1 | grep -v 'warning\|In file included' || true
     [ -f "$out/t2out/tcc2" ] || { echo "error: tcc2 ができていない" >&2; exit 1; }
     cp "$out/t2out/tcc2" "$out/tcc2.bin"
+    stamp_put t2b "$out/tcc1.bin" "$out/t2fs.list"
     echo "built $out/tcc2.bin ($(wc -c < "$out/tcc2.bin") バイト)" >&2
     if [ -f tmp/tcc/build/tccH ]; then
         cmp -s "$out/tcc2.bin" tmp/tcc/build/tccH \
