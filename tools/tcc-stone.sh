@@ -1,7 +1,7 @@
 #!/bin/sh
 # tcc を**我々の鎖で**ビルドする (Stage 15 第 6 部)。
 #
-#   tcc-stone.sh t1     T1 を作る (pp16 -> cc15o -> ld15)。tmp/s16/tcc1.bin
+#   tcc-stone.sh t1     T1 を作る (pp16 -> cc15p -> ld16)。tmp/s16/tcc1.bin
 #   tcc-stone.sh run    T1 を OS 上で走らせて in.c を翻訳し，ホストの
 #                       riscv32-tcc の出力と突き合わせる
 #
@@ -55,7 +55,7 @@ prepare() {
     need docs/external/tcc "sh tools/fetch.sh tcc"
     [ -d "$src" ] || sh tools/tcc.sh src
     mkdir -p "$out"
-    for f in cc15o.bin pp16.bin ld16.bin; do
+    for f in cc15p.bin pp16.bin ld16.bin; do
         need "tmp/build/$f" "sh tools/build.sh stage015"
     done
 }
@@ -81,7 +81,7 @@ bundle() {
 }
 
 t1inputs() {
-    echo tmp/build/pp16.bin tmp/build/cc15o.bin tmp/build/ld16.bin \
+    echo tmp/build/pp16.bin tmp/build/cc15p.bin tmp/build/ld16.bin \
          tmp/build/rt64.o tmp/build/rtfp.o "$out/tcc.bundle"
     ls stage015/libc/src/*.c stage015/libc/posix/*.c stage015/libc/include/*.h
 }
@@ -94,7 +94,7 @@ do_t1() {
     stamped t1 "$out/tcc1.bin" $(t1inputs) && return 0
     sh tools/env.sh qemu tmp/build/pp16.bin < "$out/tcc.bundle" > "$out/tcc.i"
     echo "preprocessed: $(wc -l < "$out/tcc.i") 行" >&2
-    sh tools/env.sh qemu tmp/build/cc15o.bin < "$out/tcc.i" > "$out/tcc.o"
+    sh tools/env.sh qemu tmp/build/cc15p.bin < "$out/tcc.i" > "$out/tcc.o"
     echo "compiled: $(wc -c < "$out/tcc.o") バイト" >&2
     # libc15 を同じ世代でコンパイルする
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
@@ -103,7 +103,7 @@ do_t1() {
         sh tools/bundle.sh $inc/*.h "sys/time.h=$inc/sys/time.h" \
             "stage015/libc/$f.c" \
             | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/l_$n.i"
-        sh tools/env.sh qemu tmp/build/cc15o.bin < "$out/l_$n.i" > "$out/l_$n.o"
+        sh tools/env.sh qemu tmp/build/cc15p.bin < "$out/l_$n.i" > "$out/l_$n.o"
     done
     { printf 'E'; cat "$out/tcc.o" \
         "$out/l_src_string.o" "$out/l_src_ctype.o" "$out/l_src_stdlib.o" \

@@ -94,7 +94,11 @@ int main() {
   an.x = 1; an.j = 2; an.k = 3; an.y = 4;
   chk('q', an.j == 2 && an.k == 3
         && an.c == (((unsigned long long)3 << 32) | 2));
-  chk('r', offw == 12);
+  // cc15p で構造体の配置を C89 に揃えるまで，ここは 12 だった
+  // (long long の整列を 4 としていたため。docs/stage015-tcc.md 14 章)。
+  // 正しくは 16 である —— 無名共用体が unsigned long long を含むので
+  // 整列 8 になり，x (0..3) の後の詰めを跨いで 8..15 に置かれる
+  chk('r', offw == 16);
 
   // 局所の構造体初期化子
   chk('s', ct.t == (5 << 20) && ct.ref == 0);
