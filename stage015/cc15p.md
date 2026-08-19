@@ -14,7 +14,7 @@ sh tools/build.sh stage015
 # cc15p0(cc15p.sc) -> cc15p     (正本。以降は固定点)
 ```
 
-SHA-256: 7ddc8db34a66096b6ce1202a5f6055523344ca53cd2580b66666d580a6965368
+SHA-256: 1953eddbb26944580286e53bee7424591b6ecffe9553fb7d60e866fa1178aa79
 
 - 対象: RV32IM，リトルエンディアン
 - ロードアドレス: 0x8000_0000 (QEMU virt, `-bios`)
