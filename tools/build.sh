@@ -128,13 +128,13 @@ for f in "$repo_root"/tools/build/stage*.sh; do
     . "$f"
 done
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015"
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015 stage016"
 target=${1:-all}
-[ "$target" = all ] && target=stage015
+[ "$target" = all ] && target=stage016
 case " $stages " in
 *" $target "*) ;;
 *)
-    echo "usage: build.sh [stage002|...|stage014|stage015|all]" >&2
+    echo "usage: build.sh [stage002|...|stage015|stage016|all]" >&2
     exit 2
     ;;
 esac
@@ -150,7 +150,8 @@ done
 # しか依らない)。全段が対象のときは 3 本に分けて並列に作る。各 Stage の
 # 生成物とスタンプは互いに素なので，並列にしても出来るバイト列は変わらない。
 # 途中の Stage までの指定は従来どおり順に作る
-if [ "$target" != stage014 ] && [ "$target" != stage015 ]; then
+if [ "$target" != stage014 ] && [ "$target" != stage015 ] \
+    && [ "$target" != stage016 ]; then
     for s in stage011 stage012 stage013; do
         "do_$s"
         [ "$s" = "$target" ] && break
@@ -159,8 +160,11 @@ if [ "$target" != stage014 ] && [ "$target" != stage015 ]; then
 fi
 ( do_stage011 && do_stage012 ) & lane1=$!
 do_stage013 & lane2=$!
-# stage015 は stage014 の成果物 (cc14g) を使うので同じ本の中で順に作る
-if [ "$target" = stage015 ]; then
+# stage015 は stage014 の成果物 (cc14g) を使うので同じ本の中で順に作る。
+# stage016 は stage015 の最前線 (cc15p / pp16 / ld16) を使うのでその後ろ
+if [ "$target" = stage016 ]; then
+    ( do_stage014 && do_stage015 && do_stage016 ) & lane3=$!
+elif [ "$target" = stage015 ]; then
     ( do_stage014 && do_stage015 ) & lane3=$!
 else
     do_stage014 & lane3=$!
