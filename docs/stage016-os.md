@@ -216,3 +216,28 @@ sfs1 (`tools/sfs.sh`) は**そのまま残す**。Stage 12〜15 の検査がす�
 検査は `tests/stage016/user/pathprobe.c` を OS の上で走らせて，10 件の
 経路の引き方を期待と突き合わせる。中身をその経路の名札にしてあるので，
 取り違えれば**どれとどれを取り違えたか**が出力に出る。
+
+### 6.6 実測
+
+`kernel17.bin` は 26,020 バイト (kernel16 との差は経路解決のぶんだけ)。
+`pathprobe` を kernel17 の上で走らせた結果は下のとおりで，10 件すべてが
+期待と一致した。
+
+| 名札 | 経路 | 期待 |
+|---|---|---|
+| `abs` | `/top.txt` | `TOP` |
+| `rel` | `top.txt` | `TOP` |
+| `deep` | `/src/a/b/three.c` | `THREE` |
+| `dup-inc` | `/inc/one.c` | `INC-ONE` |
+| `dup-src` | `/src/one.c` | `SRC-ONE` |
+| `slashes` | `//src///one.c` | `SRC-ONE` |
+| `miss-top` | `/nosuch.txt` | 開けない |
+| `miss-deep` | `/src/nosuch.c` | 開けない |
+| `thru-file` | `/top.txt/x` | 開けない |
+| `miss-dir` | `/nodir/one.c` | 開けない |
+
+`dup-inc` と `dup-src` が別物として引けたことが第 1 部の目的そのもので
+ある。sfs1 では**この 2 つは同じ名前を持てなかった**ので，木の中に
+同名のファイルを置くこと自体ができなかった。
+
+第 1 部の検査は sfs2 のホスト側 9 件と合わせて 11 件で，すべて通っている。
