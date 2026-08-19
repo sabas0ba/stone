@@ -80,17 +80,39 @@ export STONE_PREBUILT=1
 # 変われば鍵が変わる。
 #
 # 健全性の根拠はビルドの決定性と同じである (docs/dev-notes.md 1.3)。
-# 見落としが怖いのは「入力に入れ忘れたものがある」場合だけなので，
-# 鎖のソースは Stage を絞らずまとめて入れてある。
+#
+# 鎖のソースは**その Stage 以下の番号のものだけ**を入れる。当初は
+# 絞らず全部入れていたが，それだと**新しい Stage を 1 つ足すだけで
+# 全 Stage のキャッシュが外れる** (Stage 16 を足したとき実際に
+# 000〜015 が全部走り直した)。各 Stage の検査が参照する stage ディレクトリ
+# は自分以下の番号に収まっている (最大は stage013 -> stage009/010/012) ので，
+# 後ろの Stage のソースは前の Stage の検査結果を変えようがない。
+#
+# 前の Stage のソースを外さないのは，検査がソースを直接読む場合がある
+# ため (例: stage015 の検査は stage015/libc/*.c をその場で翻訳する)。
+# 成果物の側は tmp/build/*.stamp が全世代ぶんの SHA-256 を持っているので，
+# 1 バイトでも変われば全 Stage の鍵が変わる。
 #
 # STONE_FORCE_TEST=1 で無視して全部走らせる。CI の週次はこれを立てる。
 mkdir -p tmp/test
 teststamp_key() {
+    # "stage016" -> 16。この番号以下の stage ディレクトリだけを見る。
+    # 10# を付けるのは 008 / 009 を 8 進数と読ませないためである
+    _num=$((10#${1#stage}))
+    _dirs=()
+    for _d in stage[0-9]*; do
+        [ -d "$_d" ] || continue
+        [ "$((10#${_d#stage}))" -le "$_num" ] && _dirs+=("$_d")
+    done
     { find "tests/$1" -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
         | xargs -0 sha256sum 2> /dev/null
       sha256sum tests/lib.sh 2> /dev/null
-      find stage[0-9]* -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
-        | xargs -0 sha256sum 2> /dev/null
+      # 空のときに find を呼ぶと引数なし = カレントディレクトリ全体に
+      # なってしまう (stage000 には対応するソースの階層が無い)
+      if [ "${#_dirs[@]}" -gt 0 ]; then
+          find "${_dirs[@]}" -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
+              | xargs -0 sha256sum 2> /dev/null
+      fi
       cat tmp/build/*.stamp 2> /dev/null
     } | sha256sum | cut -d' ' -f1
 }

@@ -45,6 +45,7 @@ gdb_port=1234
 "$engine" rm -f "$gdb_name" > /dev/null 2>&1
 STONE_CONTAINER_NAME=$gdb_name STONE_QEMU_GDB=$gdb_port \
     sh tools/env.sh qemu "$bin" < /dev/null > tmp/hello-gdb.out 2> tmp/hello-gdb.log &
+gdb_pid=$!
 gdb_rc=1
 for _ in $(seq 1 40); do
     if (exec 3<> "/dev/tcp/127.0.0.1/$gdb_port") 2> /dev/null; then
@@ -54,7 +55,13 @@ for _ in $(seq 1 40); do
     sleep 0.5
 done
 "$engine" rm -f "$gdb_name" > /dev/null 2>&1
-wait
+# QEMU は -S で止まったまま gdb の接続を待っている。コンテナごと消せば
+# 終わるが，**それが効かなかったときに wait が永久に返らない**。
+# 待ち役を PID でも落としておく (コンテナで走っているときは既に死んで
+# いるので何も起きない)。ここで固まると，ローカルの通し実行が
+# 先頭の Stage で止まったまま気づけない
+kill "$gdb_pid" > /dev/null 2>&1
+wait "$gdb_pid" > /dev/null 2>&1
 report $gdb_rc "gdb: stub のポート待受け (127.0.0.1:$gdb_port)"
 
 summary
