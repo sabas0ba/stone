@@ -19,6 +19,11 @@ int read(int fd, void *buf, size_t n);
 int write(int fd, void *buf, size_t n);
 int close(int fd);
 
+/* 作業ディレクトリ (第 16 世代。docs/stage016-os.md 7.3)。
+ * getcwd は buf を返す。足りなければ errno = ERANGE で NULL */
+int chdir(char *path);
+char *getcwd(char *buf, size_t size);
+
 /* 記憶域の末尾を n バイト伸ばし，伸ばす前の末尾を返す。失敗は (void *)-1 */
 void *sbrk(int n);
 

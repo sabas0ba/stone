@@ -27,6 +27,11 @@ int sys_ecall(int n, int a, int b, int c);
 
 #define SYS_LSEEK 62
 #define SYS_SPAWN 500
+/* 第 16 世代 (docs/stage016-os.md 7.2) */
+#define SYS_GETCWD   17
+#define SYS_MKDIRAT  34
+#define SYS_CHDIR    49
+#define SYS_GETDENTS 61
 
 int errno;
 
@@ -43,10 +48,16 @@ int open(char *path, int flags, ...) {
   /* mode (O_CREAT のときの第 3 引数) は読まずに捨てる。sfs に許可は
    * 無く，可変部を読まなくても呼出し規約上の害は無い (呼び手が積んで
    * 呼び手が下ろす) */
-  /* ルート直下しか無いので，先頭の '/' の並びは剥がして裸の名前にする
-   * (tcc が -I/ から "//tccdefs.h" の形の経路を作る。第 6 部の実測) */
-  while (*path == '/')
-    path = path + 1;
+  /* 第 15 世代までは先頭の '/' の並びをここで剥がしていた。名前空間が
+   * 平らでルート直下しか無かったので正しかったが，**作業ディレクトリを
+   * 持った瞬間に重大な誤りになる** —— "/inc/one.c" が "inc/one.c" に
+   * なり，ルートではなく cwd から引かれる。「絶対経路を渡したのに，
+   * 今いる場所によって別のファイルが開く」という黙って間違う壊れ方で
+   * ある (docs/stage016-os.md 7.4)。
+   *
+   * 剥がす処理はもう要らない。入った理由は tcc が -I/ から
+   * "//tccdefs.h" の形の経路を作ることだったが，第 1 部の walk が
+   * 先頭と連続の '/' を読み飛ばすので，そのまま渡して正しく引ける */
   return wrap(sys_openat(AT_FDCWD, path, flags, 0));
 }
 
@@ -93,4 +104,26 @@ int spawn(char *path, char **argv, char *in, char *out) {
 long lseek(int fd, long off, int whence)
 {
     return (long)wrap(sys_ecall(SYS_LSEEK, fd, (int)off, whence));
+}
+
+/* ---- ディレクトリ (第 16 世代。docs/stage016-os.md 7 章) ---- */
+
+int mkdir(char *path, int mode) {
+  return wrap(sys_ecall(SYS_MKDIRAT, AT_FDCWD, (int)path, mode));
+}
+
+int chdir(char *path) {
+  return wrap(sys_ecall(SYS_CHDIR, (int)path, 0, 0));
+}
+
+/* カーネルの getcwd は NUL を含む長さを返す。C の getcwd は buf を
+ * 返すのが約束なので，ここで詰め替える */
+char *getcwd(char *buf, size_t size) {
+  if (wrap(sys_ecall(SYS_GETCWD, (int)buf, (int)size, 0)) < 0) return 0;
+  return buf;
+}
+
+/* 生の getdents64。包み (opendir / readdir) は posix/dir.c にある */
+int getdents64(int fd, void *buf, int n) {
+  return wrap(sys_ecall(SYS_GETDENTS, fd, (int)buf, n));
 }

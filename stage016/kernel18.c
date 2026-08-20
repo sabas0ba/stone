@@ -1,4 +1,22 @@
-/* kernel14.c --- 簡易 OS のカーネル (Stage 14 世代)
+/* kernel18.c --- 簡易 OS のカーネル (Stage 16 第 2 部の世代)
+ *
+ * kernel17 (第 1 部) の写しに**ディレクトリの操作**を入れたものである
+ * (docs/stage016-os.md 7 章)。
+ *
+ *   作業ディレクトリ  cwd を 1 つ持つ。walk は先頭が / ならルートから，
+ *                     そうでなければ cwd から辿る。. は動かず，.. は
+ *                     親へ上がる (ルートの親はルート自身)
+ *   getdents64 (61)   ディレクトリの項目を Linux と同じ形で返す。
+ *                     ディレクトリの fd では fdpos が「次に見る表の索引」
+ *                     の意味になるので，read / write は EISDIR で拒む
+ *   mkdirat (34)      ディレクトリを作る (RV32 に mkdir は無い)
+ *   chdir (49) / getcwd (17)
+ *
+ * cwd は spawn の退避レコードにも入れた。子は親の cwd を引き継いで
+ * 始まり，子が chdir しても親は動かない (Unix と同じ)。
+ *
+ * kernel17 (第 1 部) は sfs2 の経路解決を入れた世代である。以下は
+ * それ以前からの引き継ぎ。
  *
  * stage013/kernel.c を出発点に，2 つの穴を塞いだものである
  * (docs/stage014-external.md 13 章)。機能は足していない。
@@ -71,6 +89,21 @@ int urun(void);
 #define SYS_LSEEK  62
 #define SYS_BRK    214
 #define SYS_SPAWN  500
+/* 第 2 部で足したディレクトリ操作 (docs/stage016-os.md 7.2) */
+#define SYS_GETCWD    17
+#define SYS_MKDIRAT   34
+#define SYS_CHDIR     49
+#define SYS_GETDENTS  61
+
+/* getdents64 の 1 件の形 (Linux と同じ)。64 bit の欄は 32 bit の語
+ * 2 本として書く。カーネルは 32 bit なので上位は常に 0 である */
+#define D_INO    0              /* u64 */
+#define D_OFF    8              /* s64 */
+#define D_RECLEN 16             /* u16 */
+#define D_TYPE   18             /* u8 */
+#define D_NAME   19
+#define DT_DIR   4
+#define DT_REG   8
 
 /* errno (負値で返す) */
 #define ENOENT   2
@@ -78,8 +111,12 @@ int urun(void);
 #define ENOEXEC  8
 #define EBADF    9
 #define ENOMEM   12
+#define EEXIST   17
+#define ENOTDIR  20
+#define EISDIR   21
 #define EINVAL   22
 #define ENOSPC   28
+#define ERANGE   34
 #define ENOSYS   38
 
 #define NFD 16
@@ -87,6 +124,9 @@ int urun(void);
 
 int tblo;                       /* 表の先頭 (sfs 内オフセット) */
 int tbln;                       /* 表の件数 */
+/* 作業ディレクトリ (表の項目番号。0 = ルート)。プロセスは一度に 1 つ
+ * しか走らないので，カーネルが 1 つ持てば足りる (7.3) */
+int cwd;
 int fdent[16];                  /* fd -> 表の項目番号 (-1 = 未使用)。NFD 個 */
 int fdpos[16];                  /* fd -> 読み書き位置 */
 unsigned ubrk;                  /* ユーザの break */
@@ -156,15 +196,23 @@ int childof(int par, char *s, int n) {
 
 /* 経路を辿る。stop が 1 なら**最後の 1 段の手前まで**で止め，
  * その親を返す (作成に使う)。見つからなければ -1。
- * 返した後 *lastp は最後の段の先頭を，*lastn はその長さを指す */
+ * 返した後 *lastp は最後の段の先頭を，*lastn はその長さを指す。
+ *
+ * 出発点は先頭の文字で決まる (7.3)。/ で始まればルート，そうでなければ
+ * 作業ディレクトリである。第 1 部との違いはここだけで，あとは . と ..
+ * の 2 段が増えただけである */
 int walk(char *path, int stop, char **lastp, int *lastn) {
   int cur;
   int i;
   int st;
   int n;
-  cur = 0;                              /* ルートから */
   i = 0;
-  while (path[i] == '/') i = i + 1;     /* 先頭の / は読み飛ばす */
+  if (path[0] == '/') {
+    cur = 0;                            /* 絶対経路はルートから */
+    while (path[i] == '/') i = i + 1;   /* 先頭の / は読み飛ばす */
+  } else {
+    cur = cwd;                          /* 相対経路は作業ディレクトリから */
+  }
   *lastp = path + i;
   *lastn = 0;
   while (path[i]) {
@@ -177,6 +225,14 @@ int walk(char *path, int stop, char **lastp, int *lastn) {
       *lastp = path + st;
       *lastn = n;
       return cur;
+    }
+    /* . は動かない。.. は親へ上がる。**ルートの親はルート自身**なので
+     * /.. は / になる (Linux と同じ)。親は必ずディレクトリなので，
+     * この 2 段では下の「ファイルを途中に挟む」検査は要らない */
+    if (n == 1 && path[st] == '.') continue;
+    if (n == 2 && path[st] == '.' && path[st + 1] == '.') {
+      cur = (int)ld4(ent(cur) + E_PAR);
+      continue;
     }
     cur = childof(cur, path + st, n);
     if (cur < 0) return -1;
@@ -206,6 +262,10 @@ int sfsmk(char *path, int isdir) {
   par = walk(path, 1, &nm, &nn);
   if (par < 0) return -1;
   if (nn == 0 || nn > NAMEMAX) return -1;
+  /* 最後の段が . や .. なら作れない。walk は最後の段を辿らずに返すので，
+   * ここで弾かないと ".." という名前の項目ができてしまう */
+  if (nn == 1 && nm[0] == '.') return -1;
+  if (nn == 2 && nm[0] == '.' && nm[1] == '.') return -1;
   if ((ld4(ent(par) + E_FLAG) & F_DIR) == 0) return -1;
   for (i = 0; i < tbln; i++) {
     e = ent(i);
@@ -333,6 +393,7 @@ int sys_write(int fd, unsigned buf, int n) {
     return n;
   }
   if (fd < 3 || fd >= NFD || fdent[fd] < 0) return 0 - EBADF;
+  if (ld4(ent(fdent[fd]) + E_FLAG) & F_DIR) return 0 - EISDIR;
   w = sfswrite(fdent[fd], fdpos[fd], buf, n);
   if (w < 0) return w;
   fdpos[fd] = fdpos[fd] + w;
@@ -374,6 +435,9 @@ int sys_read(int fd, unsigned buf, int n) {
     return n;
   }
   if (fd < 3 || fd >= NFD || fdent[fd] < 0) return 0 - EBADF;
+  /* ディレクトリの fd では fdpos が「次に見る表の索引」の意味になる
+   * (getdents64)。ふつうの read を通すと位置が混ざるので拒む */
+  if (ld4(ent(fdent[fd]) + E_FLAG) & F_DIR) return 0 - EISDIR;
   n = sfsread(fdent[fd], fdpos[fd], buf, n);
   fdpos[fd] = fdpos[fd] + n;
   return n;
@@ -387,6 +451,10 @@ int sys_openat(int dirfd, unsigned path, int flags) {
     if ((flags & 64) == 0) return 0 - ENOENT;   /* O_CREAT が無い */
     i = sfsnew((char *)path);
     if (i < 0) return 0 - ENOMEM;
+  } else if (ld4(ent(i) + E_FLAG) & F_DIR) {
+    /* ディレクトリは読み出し (getdents64) のためだけに開ける。
+     * 書き込みや切詰めを許すと表を壊す (第 2 部) */
+    if (flags & (1 | 2 | 64 | 512)) return 0 - EISDIR;
   } else if (flags & 512) {                     /* O_TRUNC */
     st4(ent(i) + E_LEN, 0);
   }
@@ -404,6 +472,117 @@ int sys_close(int fd) {
   if (fd < 3 || fd >= NFD || fdent[fd] < 0) return 0 - EBADF;
   fdent[fd] = -1;
   return 0;
+}
+
+/* ---- ディレクトリの操作 (第 2 部。docs/stage016-os.md 7 章) ---- */
+
+/* 作業ディレクトリを移す */
+int sys_chdir(unsigned path) {
+  int i;
+  i = sfsfind((char *)path);
+  if (i < 0) return 0 - ENOENT;
+  if ((ld4(ent(i) + E_FLAG) & F_DIR) == 0) return 0 - ENOTDIR;
+  cwd = i;
+  return 0;
+}
+
+/* 作業ディレクトリの経路を buf へ書く。返り値は NUL を含む長さ
+ * (Linux の getcwd と同じ)。**親を辿れるのは sfs2 だから**であって，
+ * sfs1 にはそもそも親が無かった (7.3) */
+int sys_getcwd(unsigned buf, int size) {
+  int stk[64];                          /* 根までの項目番号 (下から順に) */
+  int ns;
+  int i;
+  int k;
+  int p;
+  unsigned e;
+  ns = 0;
+  i = cwd;
+  while (i != 0) {                      /* ルート (0) の親はルート自身 */
+    if (ns >= 64) return 0 - ENOMEM;
+    stk[ns] = i;
+    ns = ns + 1;
+    i = (int)ld4(ent(i) + E_PAR);
+  }
+  if (ns == 0) {                        /* ルートにいる */
+    if (size < 2) return 0 - ERANGE;
+    *(char *)buf = '/';
+    *(char *)(buf + 1) = 0;
+    return 2;
+  }
+  p = 0;
+  for (k = ns - 1; k >= 0; k = k - 1) { /* 根の側から並べ直す */
+    if (p + 1 >= size) return 0 - ERANGE;
+    *(char *)(buf + p) = '/';
+    p = p + 1;
+    e = ent(stk[k]) + E_NAME;
+    i = 0;
+    while (*(char *)(e + i)) {
+      if (p + 1 >= size) return 0 - ERANGE;
+      *(char *)(buf + p) = *(char *)(e + i);
+      p = p + 1;
+      i = i + 1;
+    }
+  }
+  *(char *)(buf + p) = 0;
+  return p + 1;
+}
+
+/* ディレクトリを作る。RV32 に mkdir は無く mkdirat だけである */
+int sys_mkdirat(int dirfd, unsigned path, int mode) {
+  if (sfsfind((char *)path) >= 0) return 0 - EEXIST;
+  if (sfsmk((char *)path, 1) < 0) return 0 - ENOENT;
+  return 0;
+}
+
+/* ディレクトリの項目を読み出す。fdpos[fd] を「次に見る表の索引」として
+ * 使い回す (ディレクトリの fd では読み書き位置の意味を持たない)。
+ *
+ * . と .. は返さない。sfs2 に実体が無く，POSIX も「dot / dot-dot を
+ * 返すかどうかは未規定」としている */
+int sys_getdents64(int fd, unsigned buf, int n) {
+  int par;
+  int i;
+  int k;
+  int p;
+  int nl;
+  int rl;
+  unsigned e;
+  if (fd < 3 || fd >= NFD || fdent[fd] < 0) return 0 - EBADF;
+  par = fdent[fd];
+  if ((ld4(ent(par) + E_FLAG) & F_DIR) == 0) return 0 - ENOTDIR;
+  p = 0;
+  i = fdpos[fd];
+  if (i < 1) i = 1;                     /* 索引 0 はルート自身 */
+  while (i < tbln) {
+    e = ent(i);
+    if ((ld4(e + E_FLAG) & F_USED) != 0 && (int)ld4(e + E_PAR) == par) {
+      nl = 0;
+      while (*(char *)(e + E_NAME + nl)) nl = nl + 1;
+      rl = (D_NAME + nl + 1 + 7) / 8 * 8;       /* 8 バイト境界へ */
+      if (p + rl > n) {
+        /* 1 件も入らないなら器が小さすぎる。0 を返すと呼び手が
+         * 「終わり」と読んでしまうので，はっきり誤りとして返す */
+        if (p == 0) return 0 - EINVAL;
+        break;                          /* この件は次回に回す */
+      }
+      st4(buf + p + D_INO, (unsigned)i);
+      st4(buf + p + D_INO + 4, 0);
+      st4(buf + p + D_OFF, (unsigned)(i + 1));
+      st4(buf + p + D_OFF + 4, 0);
+      *(char *)(buf + p + D_RECLEN) = rl & 255;
+      *(char *)(buf + p + D_RECLEN + 1) = (rl >> 8) & 255;
+      if ((ld4(e + E_FLAG) & F_DIR) != 0) *(char *)(buf + p + D_TYPE) = DT_DIR;
+      else *(char *)(buf + p + D_TYPE) = DT_REG;
+      for (k = 0; k < nl; k++)
+        *(char *)(buf + p + D_NAME + k) = *(char *)(e + E_NAME + k);
+      *(char *)(buf + p + D_NAME + nl) = 0;
+      p = p + rl;
+    }
+    i = i + 1;
+  }
+  fdpos[fd] = i;
+  return p;
 }
 
 /* Linux 生の brk: 成否によらず「新しいブレーク」を返す */
@@ -554,7 +733,8 @@ int cpystr(char *d, unsigned s, int cap) {
 /* 親の像を退避して子を配置する。返り値は 0 か -errno。
  * 退避レコードの配置 (バイト): +0 tf 33 語, +132 fdent 16 語,
  * +196 fdpos 16 語, +260 つなぎ替え 4 語, +276 ubrk/sp/imgsz/stksz の 4 語,
- * +292 から像 [UBASE, ubrk) とフレームスタック [sp, USP) の複写 */
+ * +292 cwd 1 語 (第 2 部), +296 から像 [UBASE, ubrk) とフレームスタック
+ * [sp, USP) の複写 */
 int sys_spawn(unsigned sa) {
   unsigned *tf;
   char path[64];
@@ -590,7 +770,7 @@ int sys_spawn(unsigned sa) {
   imgsz = (ubrk - UBASE + 3) / 4 * 4;
   psp = tf[1] / 4 * 4;
   stksz = USP - psp;
-  if (savecur + 292 + imgsz + stksz > SAVETOP) return 0 - ENOMEM;
+  if (savecur + 296 + imgsz + stksz > SAVETOP) return 0 - ENOMEM;
 
   /* 引数をカーネル側へ写す。argv が 0 なら {path} 相当 */
   argvp = ld4(sa + 4);
@@ -652,9 +832,12 @@ int sys_spawn(unsigned sa) {
   st4(b + 280, psp);
   st4(b + 284, imgsz);
   st4(b + 288, stksz);
-  wcopy(b + 292, UBASE, imgsz);
-  wcopy(b + 292 + imgsz, psp, stksz);
-  savecur = b + 292 + imgsz + stksz;
+  /* 作業ディレクトリも親のものへ戻す。子が chdir しても親は動かない
+   * (Unix と同じ)。子は親の cwd を引き継いで始まる */
+  st4(b + 292, (unsigned)cwd);
+  wcopy(b + 296, UBASE, imgsz);
+  wcopy(b + 296 + imgsz, psp, stksz);
+  savecur = b + 296 + imgsz + stksz;
   depth = depth + 1;
 
   /* 子を配置する。ELF は検査済みなのでここでは失敗しない */
@@ -692,8 +875,9 @@ int spexit(int code) {
   psp = ld4(b + 280);
   imgsz = ld4(b + 284);
   stksz = ld4(b + 288);
-  wcopy(UBASE, b + 292, imgsz);
-  wcopy(psp, b + 292 + imgsz, stksz);
+  cwd = (int)ld4(b + 292);
+  wcopy(UBASE, b + 296, imgsz);
+  wcopy(psp, b + 296 + imgsz, stksz);
   savecur = b;
   return code & 255;
 }
@@ -726,6 +910,10 @@ int ktrap(void) {
   else if (n == SYS_LSEEK) r = sys_lseek((int)tf[9], (int)tf[10], (int)tf[11]);
   else if (n == SYS_BRK) r = (int)sys_brk(tf[9]);
   else if (n == SYS_SPAWN) r = sys_spawn(tf[9]);
+  else if (n == SYS_GETDENTS) r = sys_getdents64((int)tf[9], tf[10], (int)tf[11]);
+  else if (n == SYS_MKDIRAT) r = sys_mkdirat((int)tf[9], tf[10], (int)tf[11]);
+  else if (n == SYS_CHDIR) r = sys_chdir(tf[9]);
+  else if (n == SYS_GETCWD) r = sys_getcwd(tf[9], (int)tf[10]);
   else if (n == SYS_EXIT) {
     if (depth > 0) r = spexit((int)tf[9]);      /* 子の終わり。親へ戻る */
     else exit((int)tf[9]);
@@ -754,6 +942,7 @@ int main(void) {
   tblo = (int)ld4(SFSA + 8);
   tbln = (int)ld4(SFSA + 12);
   for (i = 0; i < NFD; i++) fdent[i] = -1;
+  cwd = 0;                              /* 起動時の作業ディレクトリはルート */
   fd0ent = -1;
   fd1ent = -1;
   depth = 0;
