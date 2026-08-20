@@ -1,0 +1,11 @@
+abs TOP TOP
+rel TOP TOP
+deep THREE THREE
+dup-inc INC-ONE INC-ONE
+dup-src SRC-ONE SRC-ONE
+slashes SRC-ONE SRC-ONE
+miss-top enoent enoent
+miss-deep enoent enoent
+thru-file enoent enoent
+miss-dir enoent enoent
+done
