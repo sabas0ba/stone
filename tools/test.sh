@@ -51,6 +51,20 @@ if [ "$rc" -ne 0 ]; then
 fi
 sh tools/env.sh run gdb-multiarch --version > /dev/null 2>&1
 report $? "env: gdb-multiarch の導入確認"
+
+# dev-notes.md 1.2 のホスト実行パッチが commit されていないことを見る。
+#
+# **作業中の tools/env.sh に当たっているのは構わない** (それが本来の
+# 使い方である)。見るのは HEAD の側で，「リポジトリに入っていないこと」
+# だけを確かめる。
+#
+# これを入れたのは，実際に 1 度入ってしまったからである。パッチは
+# STONE_ENGINE=host のときしか通らないので，コンテナで走る CI では
+# 分岐に入らず，**緑のまま 3 回すり抜けた**。動作を壊さない違反は
+# 動作の検査では見つからない。
+git show HEAD:tools/env.sh 2> /dev/null | grep -q '"${STONE_ENGINE:-}" = host'
+[ $? -ne 0 ]
+report $? "env: ホスト実行パッチが commit されていない (docs/dev-notes.md 1.2)"
 overall_fail=$fail
 
 # ブートストラップ鎖はここで一度だけ作る。各 Stage のテストは
