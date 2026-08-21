@@ -4,6 +4,7 @@
 // バイナリ資産は fetch してキャッシュする。
 import { Machine, runFilter, withTerminator, concatBytes, buildBundle } from './rv32.js';
 import { packSfs, unpackSfs, SFS_OFFSET } from './sfs.js';
+import { packSfs2, unpackSfs2 } from './sfs2.js';
 
 const cache = new Map();
 
@@ -110,15 +111,26 @@ async function prepareFile(f, imgFiles) {
 }
 
 async function handleBoot(msg) {
-    const { id, kernel, files, bootLine, imgSize } = msg;
+    const { id, kernel, files, bootLine, imgSize, maxEntries, ramSize } = msg;
+    const fs = msg.fs || 1;
     try {
         const imgFiles = [];
         for (const f of files) await prepareFile(f, imgFiles);
         imgFiles.push({ name: 'boot', data: new TextEncoder().encode(bootLine) });
         const size = imgSize || (4 << 20);
-        const m = new Machine(await fetchBytes(kernel));
-        m.mem.set(packSfs(imgFiles, size), SFS_OFFSET);
-        sessions.set(id, { m, size, pumping: false });
+        const img = fs === 2
+            ? packSfs2(imgFiles, size, maxEntries || 256)
+            : packSfs(imgFiles, size, maxEntries || 128);
+        // 大きな RAM (kernel19 の 512 MB) は確保に失敗しうるので分けて掴む
+        let m;
+        try {
+            m = new Machine(await fetchBytes(kernel), { ramSize });
+        } catch (e) {
+            throw new Error(`could not allocate ${Math.round((ramSize || 0) / (1 << 20))} MB `
+                + `of emulator memory in this browser (${e})`);
+        }
+        m.mem.set(img, SFS_OFFSET);
+        sessions.set(id, { m, size, fs, pumping: false });
         postMessage({ id, kind: 'tstate', state: 'running', icount: 0 });
         pump(id);
     } catch (e) {
@@ -152,7 +164,10 @@ async function pump(id) {
                 state: r.status === 'exit' ? 'exited' : 'crashed',
                 exitCode: s.m.exitCode, icount: s.m.icount });
             const img = s.m.mem.slice(SFS_OFFSET, SFS_OFFSET + s.size);
-            const out = unpackSfs(img).filter((f) => f.name !== 'boot');
+            const out = (s.fs === 2
+                ? unpackSfs2(img).map((f) => ({ name: f.path, dir: f.dir, data: f.data }))
+                : unpackSfs(img).map((f) => ({ ...f, dir: false })))
+                .filter((f) => f.name !== 'boot');
             postMessage({ id, kind: 'tfiles', files: out },
                 out.map((f) => f.data.buffer));
             sessions.delete(id);
