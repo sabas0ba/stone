@@ -158,9 +158,9 @@ for f in "$repo_root"/tools/build/stage*.sh; do
     . "$f"
 done
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015 stage016"
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015 stage016 stage017"
 target=${1:-all}
-[ "$target" = all ] && target=stage016
+[ "$target" = all ] && target=stage017
 case " $stages " in
 *" $target "*) ;;
 *)
@@ -181,7 +181,7 @@ done
 # 生成物とスタンプは互いに素なので，並列にしても出来るバイト列は変わらない。
 # 途中の Stage までの指定は従来どおり順に作る
 if [ "$target" != stage014 ] && [ "$target" != stage015 ] \
-    && [ "$target" != stage016 ]; then
+    && [ "$target" != stage016 ] && [ "$target" != stage017 ]; then
     for s in stage011 stage012 stage013; do
         "do_$s"
         [ "$s" = "$target" ] && break
@@ -191,8 +191,11 @@ fi
 ( do_stage011 && do_stage012 ) & lane1=$!
 do_stage013 & lane2=$!
 # stage015 は stage014 の成果物 (cc14g) を使うので同じ本の中で順に作る。
-# stage016 は stage015 の最前線 (cc15p / pp16 / ld16) を使うのでその後ろ
-if [ "$target" = stage016 ]; then
+# stage016 は stage015 の最前線 (cc15p / pp16 / ld16) を使うのでその後ろ。
+# stage017 は stage016 の libc18 を使うのでさらにその後ろ
+if [ "$target" = stage017 ]; then
+    ( do_stage014 && do_stage015 && do_stage016 && do_stage017 ) & lane3=$!
+elif [ "$target" = stage016 ]; then
     ( do_stage014 && do_stage015 && do_stage016 ) & lane3=$!
 elif [ "$target" = stage015 ]; then
     ( do_stage014 && do_stage015 ) & lane3=$!

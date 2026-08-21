@@ -1,0 +1,11 @@
+hello-build 0
+hello from cc on stone
+hello-run 0
+selfhost-build 0
+struct 25
+fib 144
+sort 1 2 3 4 5
+sprintf fmt-42-ff
+malloc ok
+strlen 10
+selfhost-run 0
