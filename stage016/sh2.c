@@ -60,6 +60,7 @@
 #define R_APP    3              /* >> */
 #define R_HERE   4              /* << (本文は word に入れてある) */
 #define R_DUP    5              /* >&N / <&N */
+#define R_ERR    6              /* 2>file (標準エラーのつなぎ替え) */
 
 struct node {
   int kind;
@@ -476,7 +477,10 @@ static int p_redir(int *rn) {
   lex();
   if (toktype != T_WORD) syerr("redirect target");
   if (fd < 0) fd = (type == R_IN) ? 0 : 1;
-  addrd(type, fd, tok);
+  /* 2>file は標準エラーのつなぎ替えである。kernel21 の spawn2 が
+   * これを受ける (docs/stage016-os.md 10.5) */
+  if (fd == 2 && (type == R_OUT || type == R_APP)) addrd(R_ERR, 2, tok);
+  else addrd(type, fd, tok);
   lex();
   *rn = *rn + 1;
   return 1;
@@ -1425,6 +1429,7 @@ static int runsimple(int n) {
   int sapp;
   int nassign;
   int errdup;
+  char *err;
 
   argc_ = 0;
   nassign = 0;
@@ -1452,8 +1457,7 @@ static int runsimple(int n) {
   }
 
   /* リダイレクトを解決する */
-  in = 0; out = 0; app = 0; errdup = 0;
-  (void)errdup;
+  in = 0; out = 0; app = 0; errdup = 0; err = 0;
   for (i = 0; i < nd[n].rn; i = i + 1) {
     struct rdir *r;
     r = &rdt[nd[n].r0 + i];
@@ -1474,6 +1478,7 @@ static int runsimple(int n) {
        * 伸ばす (err の欄を足す) 必要があり，第 4 部の 3 の課題とする */
       errdup = 1;
     }
+    else if (r->type == R_ERR) { err = expandone(r->word); }
     else if (r->type == R_HERE) {
       /* here-doc は一時ファイルへ落として < と同じにする */
       char tn[64];
@@ -1540,7 +1545,10 @@ static int runsimple(int n) {
   /* 組込みは stdio を通って出るが，外部コマンドは fd 1 へ直に出る。
    * 流しておかないと順序が入れ替わる */
   fflush(stdout);
-  st = spawn(argv_[0], argv_, in, out);
+  /* 2>&1 は「標準エラーを標準出力と同じ先へ」。out が決まっていれば
+   * それを err にも渡す */
+  if (errdup && err == 0) err = out;
+  st = spawn2(argv_[0], argv_, in, out, err);
   if (st < 0) {
     fputs(argv_[0], stderr);
     fputs(": not found\n", stderr);
