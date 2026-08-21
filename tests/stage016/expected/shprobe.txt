@@ -26,4 +26,10 @@ setpos 3 3
 pos2 q q
 shift q q
 while 111 111
+if-noelse 0 0
+while-none 0 0
+until-none 0 0
+for-none 0 0
+case-nohit 0 0
+func-def 0 0
 done

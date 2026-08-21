@@ -1602,6 +1602,7 @@ static int runrd(int n);
 
 static int runtree(int n) {
   int st;
+  int ran;
   if (n < 0 || exiting) return lastst;
   if (nd[n].rn > 0 && nd[n].kind != N_SIMPLE) return runrd(n);
   switch (nd[n].kind) {
@@ -1631,22 +1632,33 @@ static int runtree(int n) {
     return st;
   case N_GROUP:
     return runtree(nd[n].a);
+  /* **中身を 1 つも走らせなかった複合コマンドの状態は 0 である。**
+   * 条件の状態がそのまま残ってはいけない。configure の最後の行が
+   *   if test "$source_path_used" = "yes" ; then ... fi
+   * で，これが偽のとき configure 全体が 1 で終わっていた。lastst を
+   * 明示的に 0 へ置くのは，$? が返り値ではなく lastst を見るからである */
   case N_IF:
     if (runtree(nd[n].a) == 0) return runtree(nd[n].b);
+    if (nd[n].c < 0) { lastst = 0; return 0; }
     return runtree(nd[n].c);
   case N_WHILE:
     st = 0;
-    while (!exiting && runtree(nd[n].a) == 0) st = runtree(nd[n].b);
+    ran = 0;
+    while (!exiting && runtree(nd[n].a) == 0) { st = runtree(nd[n].b); ran = 1; }
+    if (!ran) { lastst = 0; st = 0; }
     return st;
   case N_UNTIL:
     st = 0;
-    while (!exiting && runtree(nd[n].a) != 0) st = runtree(nd[n].b);
+    ran = 0;
+    while (!exiting && runtree(nd[n].a) != 0) { st = runtree(nd[n].b); ran = 1; }
+    if (!ran) { lastst = 0; st = 0; }
     return st;
   case N_FUNC:
     if (nfun >= NFUN) { fputs("sh2: too many functions\n", stderr); exit(2); }
     funs[nfun].name = wtab[nd[n].w0];
     funs[nfun].body = nd[n].a;
     nfun = nfun + 1;
+    lastst = 0;
     return 0;
   case N_FOR: {
     int i;
@@ -1660,6 +1672,7 @@ static int runtree(int n) {
     nit = argc_;
     for (k = 0; k < nit; k = k + 1) items[k] = argv_[k];
     st = 0;
+    if (nit == 0) lastst = 0;   /* 回らなかった for も 0 */
     for (k = 0; k < nit && !exiting; k = k + 1) {
       vset(var, items[k]);
       st = runtree(nd[n].b);
@@ -1678,6 +1691,7 @@ static int runtree(int n) {
         if (patmatch(pat, subj)) return runtree(nd[it].a);
       }
     }
+    lastst = 0;                 /* どの枝にも当たらなければ 0 */
     return 0;
   }
   default:

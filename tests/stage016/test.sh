@@ -252,6 +252,12 @@ report $? "ref: 参照シェルで probe が通る"
 diff -q tests/stage016/expected/shprobe.txt "$out/shprobe.ref" > /dev/null
 report $? "ref: 記録した期待値が参照シェルの出力と一致する"
 
+# 各行は「名札 期待 実測」である。**expected/ との突き合わせだけでは，
+# 記録した期待値のほうが間違っている場合を捕まえられない**
+awk 'NF >= 3 && $2 != $3 { bad = 1 } END { exit bad }' \
+    tests/stage016/expected/shprobe.txt
+report $? "ref: 期待と実測が全行で一致している (記録の側の取り違え避け)"
+
 srt=$out/sroot
 mkdir -p "$srt"
 cp tests/stage016/user/shprobe.sh "$srt/probe.sh"

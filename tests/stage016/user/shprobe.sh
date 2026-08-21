@@ -48,4 +48,25 @@ set -- a b c
 n=
 while [ $# -gt 0 ]; do shift; n=1$n; done
 echo "while 111 $n"
+# **中身を 1 つも走らせなかった複合コマンドの状態は 0 である。**
+# configure の最後の行がこの形で，ここを取り違えると configure 全体が
+# 1 で終わる。走ったかどうかで答が変わるので，両側を見る
+false
+if test a = b; then echo no; fi
+echo "if-noelse 0 $?"
+false
+while false; do echo no; done
+echo "while-none 0 $?"
+false
+until true; do echo no; done
+echo "until-none 0 $?"
+false
+for x in $NOTHING; do echo no; done
+echo "for-none 0 $?"
+false
+case zz in a) echo no ;; esac
+echo "case-nohit 0 $?"
+false
+h() { echo hi; }
+echo "func-def 0 $?"
 echo done
