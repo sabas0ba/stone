@@ -1,0 +1,25 @@
+mk-tmp 0 0
+open-before 1 1
+unlink 0 0
+open-after 0 0
+unlink-again -1 -1
+unlink-missing -1 -1
+unlink-dir -1 -1
+mk-tmp2 0 0
+unlink-open 0 0
+read-unlinked TWO TWO
+open-unlinked 0 0
+loop-20 0 0
+rp-abs /inc/one.c /inc/one.c
+rp-dotdot /inc/one.c /inc/one.c
+rp-dot /src/one.c /src/one.c
+rp-slashes /src/one.c /src/one.c
+rp-root / /
+rp-above-root / /
+chdir-a 0 0
+rp-rel /src/a/two.c /src/a/two.c
+rp-rel-dotdot /src/one.c /src/one.c
+rp-rel-deep /inc/one.c /inc/one.c
+chdir-root 0 0
+rp-from-root /src/one.c /src/one.c
+done

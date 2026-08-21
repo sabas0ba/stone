@@ -197,4 +197,48 @@ report $? "kernel18 の上限は 14 MiB 未満 (UBRKMAX - UBASE = 14 MB)"
 [ -n "$new_mb" ] && [ "$new_mb" -ge 250 ]
 report $? "kernel19 の上限は 250 MiB 以上 (got ${new_mb:-?} MiB)"
 
+section "kernel20 / libc17: 削除と realpath (docs/stage016-os.md 9.4)"
+
+# 検査用の木 (dirprobe と同じ形)
+rrt=$out/rroot
+mkdir -p "$rrt/src/a" "$rrt/inc"
+echo "TOP"     > "$rrt/top.txt"
+echo "SRC-ONE" > "$rrt/src/one.c"
+echo "A-TWO"   > "$rrt/src/a/two.c"
+echo "INC-ONE" > "$rrt/inc/one.c"
+
+# rmprobe を **libc17** とリンクする。libc16 とリンクしてはいけない ——
+# libc16 の unlink は何もせず 0 を返し，realpath は複写するだけなので，
+# open-after と rp-rel が黙って間違う (docs/stage016-os.md 9.4)
+sh tools/bundle.sh stage016/libc17/include/*.h \
+    "sys/stat.h=stage016/libc17/include/sys/stat.h" \
+    tests/stage016/user/rmprobe.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/rmprobe.i" 2> /dev/null \
+    && sh tools/env.sh qemu tmp/build/cc15p.bin < "$out/rmprobe.i" \
+        > "$out/rmprobe.o" 2> /dev/null \
+    && { printf 'E'; cat "$out/rmprobe.o" \
+         tmp/build/l17_src_string.o tmp/build/l17_src_stdlib.o \
+         tmp/build/l17_src_misc15.o tmp/build/l17_posix_sys.o \
+         tmp/build/l17_posix_morecore.o tmp/build/l17_posix_stdio.o \
+         tmp/build/l17_posix_assert.o tmp/build/l17_posix_dir.o \
+         tmp/build/rt64.o tmp/build/rtfp.o; \
+         printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "$rrt/rmprobe"
+report $? "build: rmprobe を libc17 とリンクできる"
+
+printf 'rmprobe\n' > "$rrt/boot"
+sh tools/sfs2.sh pack "$rrt" "$out/rfs.img" 4194304 128 > /dev/null \
+    && rm -f "$out/rram" \
+    && dd if=/dev/null of="$out/rram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/rfs.img" of="$out/rram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/rram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel20.bin < /dev/null \
+        > "$out/rmprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/rmprobe.txt "$out/rmprobe.out" \
+    > "$out/rmprobe.diff"
+report $? "run: kernel20 が消せて，libc17 の realpath が経路を畳める"
+[ -s "$out/rmprobe.diff" ] && sed -n '4,$p' "$out/rmprobe.diff"
+
 summary
