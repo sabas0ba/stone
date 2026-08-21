@@ -144,4 +144,57 @@ r=$?
 report $? "run: kernel18 が一覧・作成・移動と . / .. を扱える"
 [ -s "$out/dirprobe.diff" ] && sed -n '4,$p' "$out/dirprobe.diff"
 
+section "kernel19: 記憶域の拡張 (docs/stage016-os.md 8 章)"
+
+# memprobe を libc16 とリンクする
+mrt=$out/mroot
+mkdir -p "$mrt"
+sh tools/bundle.sh stage016/libc/include/*.h \
+    tests/stage016/user/memprobe.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/memprobe.i" 2> /dev/null \
+    && sh tools/env.sh qemu tmp/build/cc15p.bin < "$out/memprobe.i" \
+        > "$out/memprobe.o" 2> /dev/null \
+    && { printf 'E'; cat "$out/memprobe.o" \
+         tmp/build/l16_src_string.o tmp/build/l16_src_stdlib.o \
+         tmp/build/l16_src_misc15.o tmp/build/l16_posix_sys.o \
+         tmp/build/l16_posix_morecore.o tmp/build/l16_posix_stdio.o \
+         tmp/build/l16_posix_assert.o tmp/build/l16_posix_dir.o \
+         tmp/build/rt64.o tmp/build/rtfp.o; \
+         printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "$mrt/memprobe"
+report $? "build: memprobe を組める"
+
+printf 'memprobe\n' > "$mrt/boot"
+sh tools/sfs2.sh pack "$mrt" "$out/mfs.img" 4194304 32 > /dev/null
+
+# 同じ像を 2 つのカーネルで走らせて比べる。**片方だけを見ても
+# 「広がった」ことは言えない**ので，古い世代の実測を対にして出す
+memrun() {                  # memrun <kernel> <ramsize> <rambytes>
+    rm -f "$out/mram"
+    dd if=/dev/null of="$out/mram" bs=1 seek="$3" 2> /dev/null
+    dd if="$out/mfs.img" of="$out/mram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_RAMFILE="$out/mram" STONE_QEMU_RAM="$2" \
+        sh tools/env.sh qemu "tmp/build/$1.bin" < /dev/null 2>&1
+}
+
+old_out=$(memrun kernel18 128M 134217728)
+old_mb=$(echo "$old_out" | sed -n 's/^got //p')
+new_out=$(memrun kernel19 512M 536870912)
+new_mb=$(echo "$new_out" | sed -n 's/^got //p')
+
+echo "$old_out" | grep -q '^verify ok$'
+report $? "kernel18 (128 MB): 取れた記憶域を書いて読み戻せる (got ${old_mb:-?} MiB)"
+
+echo "$new_out" | grep -q '^verify ok$'
+report $? "kernel19 (512 MB): 取れた記憶域を書いて読み戻せる (got ${new_mb:-?} MiB)"
+
+# 旧世代は 14 MB の枠内 (像とデータスタックを引くので 14 未満)
+[ -n "$old_mb" ] && [ "$old_mb" -lt 14 ]
+report $? "kernel18 の上限は 14 MiB 未満 (UBRKMAX - UBASE = 14 MB)"
+
+# 新世代は 250 MiB 以上。256 MB の枠から像とデータスタックを引いた値
+[ -n "$new_mb" ] && [ "$new_mb" -ge 250 ]
+report $? "kernel19 の上限は 250 MiB 以上 (got ${new_mb:-?} MiB)"
+
 summary
