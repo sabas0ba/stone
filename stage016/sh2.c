@@ -652,3 +652,577 @@ static int p_list(void) {
   }
   return l;
 }
+
+/* ---- 語の展開 ----
+ *
+ * POSIX の順序を守る (10.3)。
+ *   1. パラメータ展開  2. コマンド置換  3. 語分割  4. 引用の除去
+ *
+ * 3 が効くのは**引用の外から来た部分だけ**である。"$1" は切らないが
+ * $1 は切る。したがって展開しながら「この文字は引用の中から来たか」を
+ * 対で持ち歩く (ebuf と eqf)。
+ */
+static char ebuf[NBUF];
+static char eqf[NBUF];          /* 1 = 引用の中から来た */
+static int elen;
+
+static char *argv_[NARG];
+static int argc_;
+
+static int runtree(int n);      /* 前方宣言 */
+static int runstr(char *s);
+static int patmatch(char *pat, char *s);
+
+static void eput(int c, int q) {
+  if (elen >= NBUF - 1) { fputs("sh2: word too long\n", stderr); exit(2); }
+  ebuf[elen] = (char)c;
+  eqf[elen] = (char)q;
+  elen = elen + 1;
+}
+
+static void eputs(char *s, int q) {
+  while (*s) { eput((int)(unsigned char)*s, q); s = s + 1; }
+}
+
+/* 一時ファイルの名前を作る */
+static void tmpname(char *out) {
+  tmpseq = tmpseq + 1;
+  sprintf(out, "/tmp.sh2.%d", tmpseq);
+}
+
+/* 中身を丸ごと読んで返す (末尾の改行は落とす) */
+static char *slurpfile(char *path, int strip) {
+  int fd;
+  int n;
+  char *out;
+  fd = open(path, O_RDONLY);
+  if (fd < 0) return sdup0("");
+  out = sarena + nsa;
+  for (;;) {
+    if (nsa + 4096 + 1 > NSTR) { fputs("sh2: out of string space\n", stderr); exit(2); }
+    n = read(fd, sarena + nsa, 4096);
+    if (n <= 0) break;
+    nsa = nsa + n;
+  }
+  close(fd);
+  if (strip) while (nsa > 0 && sarena[nsa - 1] == '\n') nsa = nsa - 1;
+  sarena[nsa] = 0;
+  nsa = nsa + 1;
+  return out;
+}
+
+/* 出力の行き先。**カーネルに dup2 が無い**ので，fd を差し替える代わりに
+ * 「いまの出力先のファイル名」を持ち回す。
+ *
+ * 外部コマンドは spawn(path, argv, in, out) がファイル名を受けるので
+ * そのまま渡せる (docs/stage013-tools.md 3.2)。組込みは outs() を通して
+ * 書き，ここを見て振り分ける。 */
+static char *curout;            /* 0 なら標準出力 */
+static int curapp;              /* 1 なら追記 */
+static char *curin;             /* 0 なら標準入力 */
+
+/* 組込みの出力。curout が立っていればそこへ足す */
+static void outs(char *s) {
+  int fd;
+  int n;
+  if (curout == 0) { fputs(s, stdout); return; }
+  fd = open(curout, O_WRONLY | O_CREAT | (curapp ? 0 : O_TRUNC), 0666);
+  if (fd < 0) return;
+  if (curapp) lseek(fd, 0, 2);
+  n = (int)strlen(s);
+  write(fd, s, (size_t)n);
+  close(fd);
+  curapp = 1;                   /* 同じ実行の続きは足していく */
+}
+
+/* コマンド置換: 中身を一時ファイルへ流して読み戻す (9.3) */
+static char *cmdsub(char *body) {
+  char tn[64];
+  char *res;
+  char *so;
+  int sa;
+  tmpname(tn);
+  so = curout; sa = curapp;
+  curout = sdup0(tn); curapp = 0;
+  runstr(body);
+  curout = so; curapp = sa;
+  res = slurpfile(tn, 1);
+  unlink(tn);
+  return res;
+}
+
+/* ${NAME} の中身を処理する。s は '{' の次から '}' の手前まで */
+static void expandbrace(char *s, int n, int q) {
+  char name[128];
+  int i;
+  int op;
+  int opl;
+  char *val;
+  char *arg;
+  char *e;
+
+  /* 演算子 (#, ##, %, %%, :-, :=, :?, :+) を探す。名前は英数字と _ */
+  i = 0;
+  while (i < n && (isnamec((int)(unsigned char)s[i]) || (i == 0 && (s[i] == '#' || s[i] == '?' || s[i] == '*' || s[i] == '@'))))
+    i = i + 1;
+  if (i > 127) i = 127;
+  memcpy(name, s, (size_t)i);
+  name[i] = 0;
+
+  op = 0;
+  opl = 0;
+  arg = "";
+  if (i < n) {
+    if (s[i] == ':' && i + 1 < n) { op = s[i + 1]; opl = 2; }
+    else if (s[i] == '#' && i + 1 < n && s[i + 1] == '#') { op = 'H'; opl = 2; }
+    else if (s[i] == '%' && i + 1 < n && s[i + 1] == '%') { op = 'P'; opl = 2; }
+    else if (s[i] == '#') { op = 'h'; opl = 1; }
+    else if (s[i] == '%') { op = 'p'; opl = 1; }
+    if (op != 0) {
+      arg = sdup(s + i + opl, n - i - opl);
+    }
+  }
+
+  /* 名前の値を取る */
+  if (strcmp(name, "#") == 0) {
+    char nb[16];
+    sprintf(nb, "%d", nposn);
+    val = sdup0(nb);
+  } else if (strcmp(name, "?") == 0) {
+    char nb[16];
+    sprintf(nb, "%d", lastst);
+    val = sdup0(nb);
+  } else if (name[0] >= '0' && name[0] <= '9' && name[1] == 0) {
+    int k;
+    k = name[0] - '0';
+    val = (k <= nposn && pos[k] != 0) ? pos[k] : "";
+  } else {
+    val = vget(name);
+  }
+
+  /* 演算子を当てる */
+  if (op == '-') {              /* ${V:-既定} */
+    if (val[0] == 0) { expandbrace(arg, (int)strlen(arg), q); return; }
+  } else if (op == '=') {       /* ${V:=既定} */
+    if (val[0] == 0) { vset(name, arg); val = vget(name); }
+  } else if (op == 'h' || op == 'H') {          /* # / ## 前を落とす */
+    int al;
+    al = (int)strlen(arg);
+    /* パターンは * を含みうる。* を含まない単純な場合だけ字面で比べ，
+     * 含む場合は最短 (h) / 最長 (H) の一致を探す */
+    if (strchr(arg, '*') == 0) {
+      if (al > 0 && strncmp(val, arg, (size_t)al) == 0) val = val + al;
+    } else {
+      int vl;
+      int k;
+      int st;
+      vl = (int)strlen(val);
+      st = -1;
+      for (k = (op == 'h') ? 0 : vl; (op == 'h') ? k <= vl : k >= 0;
+           k = (op == 'h') ? k + 1 : k - 1) {
+        char sav;
+        sav = val[k];
+        val[k] = 0;
+        if (patmatch(arg, val)) st = k;
+        val[k] = sav;
+        if (st >= 0) break;
+      }
+      if (st >= 0) val = val + st;
+    }
+  } else if (op == 'p' || op == 'P') {          /* % / %% 後ろを落とす */
+    int vl;
+    int k;
+    int cut;
+    vl = (int)strlen(val);
+    cut = -1;
+    for (k = (op == 'p') ? vl : 0; (op == 'p') ? k >= 0 : k <= vl;
+         k = (op == 'p') ? k - 1 : k + 1) {
+      if (patmatch(arg, val + k)) { cut = k; break; }
+    }
+    if (cut >= 0) {
+      val = sdup(val, cut);
+    }
+  }
+
+  /* $* と $@ は位置パラメータを並べる */
+  if (strcmp(name, "*") == 0 || strcmp(name, "@") == 0) {
+    int k;
+    for (k = 1; k <= nposn; k = k + 1) {
+      if (k > 1) eput(' ', q ? 0 : 0);   /* 引用の中でも語の切れ目にする */
+      eputs(pos[k] ? pos[k] : "", q);
+    }
+    return;
+  }
+  e = val;
+  eputs(e, q);
+}
+
+/* 1 語を展開して ebuf/eqf へ置く。分割はしない */
+static void expand1(char *w) {
+  int q;                        /* 0 = 素, '\'' か '"' */
+  char *p;
+  elen = 0;
+  q = 0;
+  p = w;
+  while (*p) {
+    int c;
+    c = (int)(unsigned char)*p;
+    if (c == '\\' && p[1] && q != '\'') {
+      eput((int)(unsigned char)p[1], 1);
+      p = p + 2;
+      continue;
+    }
+    if (q == 0 && (c == '\'' || c == '"')) { q = c; p = p + 1; continue; }
+    if (q != 0 && c == q) { q = 0; p = p + 1; continue; }
+    if (q != '\'' && c == '`') {
+      char *st;
+      p = p + 1;
+      st = p;
+      while (*p && *p != '`') p = p + 1;
+      eputs(cmdsub(sdup(st, (int)(p - st))), q ? 1 : 0);
+      if (*p) p = p + 1;
+      continue;
+    }
+    if (q != '\'' && c == '$' && p[1] == '(') {
+      char *st;
+      int d;
+      p = p + 2;
+      st = p;
+      d = 1;
+      while (*p) {
+        if (*p == '(') d = d + 1;
+        if (*p == ')') { d = d - 1; if (d == 0) break; }
+        p = p + 1;
+      }
+      eputs(cmdsub(sdup(st, (int)(p - st))), q ? 1 : 0);
+      if (*p) p = p + 1;
+      continue;
+    }
+    if (q != '\'' && c == '$' && p[1] == '{') {
+      char *st;
+      int d;
+      p = p + 2;
+      st = p;
+      d = 1;
+      while (*p) {
+        if (*p == '{') d = d + 1;
+        if (*p == '}') { d = d - 1; if (d == 0) break; }
+        p = p + 1;
+      }
+      expandbrace(st, (int)(p - st), q ? 1 : 0);
+      if (*p) p = p + 1;
+      continue;
+    }
+    if (q != '\'' && c == '$' && p[1]) {
+      char nm[128];
+      int k;
+      p = p + 1;
+      k = 0;
+      if (*p == '#' || *p == '?' || *p == '*' || *p == '@'
+          || (*p >= '0' && *p <= '9')) {
+        nm[0] = *p; nm[1] = 0; p = p + 1;
+      } else if (isname1((int)(unsigned char)*p)) {
+        while (isnamec((int)(unsigned char)*p) && k < 127) {
+          nm[k] = *p; k = k + 1; p = p + 1;
+        }
+        nm[k] = 0;
+      } else {
+        eput('$', q ? 1 : 0);
+        continue;
+      }
+      expandbrace(nm, (int)strlen(nm), q ? 1 : 0);
+      continue;
+    }
+    eput(c, q ? 1 : 0);
+    p = p + 1;
+  }
+  eput(0, 1);
+  elen = elen - 1;
+}
+
+/* 展開した ebuf を IFS で切って argv_ へ積む。
+ * **引用の中から来た文字 (eqf) では切らない** —— これが 10.3 の肝 */
+static void splitadd(void) {
+  int i;
+  int st;
+  i = 0;
+  while (i < elen) {
+    while (i < elen && eqf[i] == 0
+           && (ebuf[i] == ' ' || ebuf[i] == '\t' || ebuf[i] == '\n'))
+      i = i + 1;
+    if (i >= elen) break;
+    st = i;
+    while (i < elen && !(eqf[i] == 0
+           && (ebuf[i] == ' ' || ebuf[i] == '\t' || ebuf[i] == '\n')))
+      i = i + 1;
+    if (argc_ >= NARG) { fputs("sh2: too many arguments\n", stderr); exit(2); }
+    argv_[argc_] = sdup(ebuf + st, i - st);
+    argc_ = argc_ + 1;
+  }
+}
+
+/* 語を 1 つ展開して argv_ へ足す (分割あり) */
+static void addarg(char *w) {
+  expand1(w);
+  splitadd();
+}
+
+/* 語を 1 つ展開して 1 語のまま返す (リダイレクトの先など) */
+static char *expandone(char *w) {
+  expand1(w);
+  return sdup(ebuf, elen);
+}
+
+/* ---- パターン照合 (case と ${V#...} が使う) ----
+ *
+ * 経路展開は要らない (10.1) ので，**文字列に対する照合だけ**でよい。
+ * * があるので後戻りが要る。素直に再帰で書く。
+ */
+static int patmatch(char *pat, char *s) {
+  for (;;) {
+    if (*pat == 0) return *s == 0;
+    if (*pat == '*') {
+      pat = pat + 1;
+      if (*pat == 0) return 1;
+      while (*s) {
+        if (patmatch(pat, s)) return 1;
+        s = s + 1;
+      }
+      return patmatch(pat, s);
+    }
+    if (*s == 0) return 0;
+    if (*pat == '?') { pat = pat + 1; s = s + 1; continue; }
+    if (*pat == '[') {
+      int neg;
+      int hit;
+      char *q;
+      q = pat + 1;
+      neg = 0;
+      if (*q == '!' || *q == '^') { neg = 1; q = q + 1; }
+      hit = 0;
+      for (;;) {
+        if (*q == 0) return 0;                  /* 閉じない [ */
+        if (*q == ']' && q != pat + 1 + neg) break;
+        if (q[1] == '-' && q[2] && q[2] != ']') {
+          if (*s >= q[0] && *s <= q[2]) hit = 1;
+          q = q + 3;
+        } else {
+          if (*s == *q) hit = 1;
+          q = q + 1;
+        }
+      }
+      if (neg) hit = !hit;
+      if (!hit) return 0;
+      pat = q + 1;
+      s = s + 1;
+      continue;
+    }
+    if (*pat == '\\' && pat[1]) pat = pat + 1;
+    if (*pat != *s) return 0;
+    pat = pat + 1;
+    s = s + 1;
+  }
+}
+
+/* ---- 組込み ---- */
+
+static int nposave;
+static char *posave[NPOS];
+
+static int b_test(int ac, char **av);
+
+/* 数を文字列にして返す */
+static char *itos(int v) {
+  char b[16];
+  sprintf(b, "%d", v);
+  return sdup0(b);
+}
+
+static int b_echo(int ac, char **av) {
+  int i;
+  int nl;
+  i = 1;
+  nl = 1;
+  if (i < ac && strcmp(av[i], "-n") == 0) { nl = 0; i = i + 1; }
+  for (; i < ac; i = i + 1) {
+    outs(av[i]);
+    if (i + 1 < ac) outs(" ");
+  }
+  if (nl) outs("\n");
+  return 0;
+}
+
+static int b_cd(int ac, char **av) {
+  char *d;
+  d = (ac > 1) ? av[1] : vget("HOME");
+  if (d[0] == 0) d = "/";
+  if (chdir(d) < 0) { fputs("cd: no such directory\n", stderr); return 1; }
+  return 0;
+}
+
+static int b_pwd(int ac, char **av) {
+  char b[512];
+  (void)ac; (void)av;
+  if (getcwd(b, 512) == 0) return 1;
+  outs(b);
+  outs("\n");
+  return 0;
+}
+
+static int b_set(int ac, char **av) {
+  int i;
+  int k;
+  if (ac == 1) return 0;
+  i = 1;
+  if (strcmp(av[1], "--") == 0) i = 2;
+  else if (av[1][0] == '-') return 0;           /* set -e などは黙って無視 */
+  k = 0;
+  for (; i < ac && k + 1 < NPOS; i = i + 1) {
+    k = k + 1;
+    pos[k] = av[i];
+  }
+  nposn = k;
+  return 0;
+}
+
+static int b_shift(int ac, char **av) {
+  int n;
+  int i;
+  n = (ac > 1) ? atoi(av[1]) : 1;
+  if (n > nposn) return 1;
+  for (i = 1; i + n <= nposn; i = i + 1) pos[i] = pos[i + n];
+  nposn = nposn - n;
+  return 0;
+}
+
+static int b_unset(int ac, char **av) {
+  int i;
+  for (i = 1; i < ac; i = i + 1) vunset(av[i]);
+  return 0;
+}
+
+static int b_eval(int ac, char **av) {
+  int i;
+  int n;
+  char *buf;
+  n = 0;
+  for (i = 1; i < ac; i = i + 1) n = n + (int)strlen(av[i]) + 1;
+  buf = sarena + nsa;
+  if (nsa + n + 2 > NSTR) { fputs("sh2: out of string space\n", stderr); exit(2); }
+  buf[0] = 0;
+  for (i = 1; i < ac; i = i + 1) {
+    if (i > 1) strcat(buf, " ");
+    strcat(buf, av[i]);
+  }
+  nsa = nsa + n + 1;
+  return runstr(buf);
+}
+
+static int b_read(int ac, char **av) {
+  char line[4096];
+  if (fgets(line, 4096, stdin) == 0) return 1;
+  {
+    int n;
+    n = (int)strlen(line);
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) n = n - 1;
+    line[n] = 0;
+  }
+  if (ac > 1) vset(av[1], line);
+  return 0;
+}
+
+static int b_exit(int ac, char **av) {
+  exiting = 1;
+  exitst = (ac > 1) ? atoi(av[1]) : lastst;
+  return exitst;
+}
+
+/* test / [ 。configure が使う演算だけを持つ */
+static int b_test(int ac, char **av) {
+  int n;
+  n = ac;
+  if (strcmp(av[0], "[") == 0) {
+    if (n > 1 && strcmp(av[n - 1], "]") == 0) n = n - 1;
+  }
+  if (n <= 1) return 1;
+  /* ! を剥がす */
+  if (strcmp(av[1], "!") == 0) {
+    char *sub[NARG];
+    int i;
+    sub[0] = av[0];
+    for (i = 2; i < n; i = i + 1) sub[i - 1] = av[i];
+    return b_test(n - 1, sub) ? 0 : 1;
+  }
+  if (n == 2) return av[1][0] == 0 ? 1 : 0;             /* test STR */
+  if (n == 3) {
+    if (strcmp(av[1], "-z") == 0) return av[2][0] == 0 ? 0 : 1;
+    if (strcmp(av[1], "-n") == 0) return av[2][0] != 0 ? 0 : 1;
+    if (strcmp(av[1], "-f") == 0 || strcmp(av[1], "-r") == 0
+        || strcmp(av[1], "-e") == 0 || strcmp(av[1], "-s") == 0) {
+      int fd;
+      fd = open(av[2], O_RDONLY);
+      if (fd < 0) return 1;
+      close(fd);
+      return 0;
+    }
+    if (strcmp(av[1], "-d") == 0) {
+      /* ディレクトリは open できるが read が EISDIR になる (kernel20) */
+      int fd;
+      char b[1];
+      fd = open(av[2], O_RDONLY);
+      if (fd < 0) return 1;
+      {
+        int r;
+        r = read(fd, b, 1);
+        close(fd);
+        return (r < 0) ? 0 : 1;
+      }
+    }
+    return 1;
+  }
+  if (n == 4) {
+    if (strcmp(av[2], "=") == 0) return strcmp(av[1], av[3]) == 0 ? 0 : 1;
+    if (strcmp(av[2], "!=") == 0) return strcmp(av[1], av[3]) != 0 ? 0 : 1;
+    if (strcmp(av[2], "-eq") == 0) return atoi(av[1]) == atoi(av[3]) ? 0 : 1;
+    if (strcmp(av[2], "-ne") == 0) return atoi(av[1]) != atoi(av[3]) ? 0 : 1;
+    if (strcmp(av[2], "-lt") == 0) return atoi(av[1]) < atoi(av[3]) ? 0 : 1;
+    if (strcmp(av[2], "-le") == 0) return atoi(av[1]) <= atoi(av[3]) ? 0 : 1;
+    if (strcmp(av[2], "-gt") == 0) return atoi(av[1]) > atoi(av[3]) ? 0 : 1;
+    if (strcmp(av[2], "-ge") == 0) return atoi(av[1]) >= atoi(av[3]) ? 0 : 1;
+    return 1;
+  }
+  return 1;
+}
+
+/* 組込みなら実行して 1 を返す */
+static int builtin(int ac, char **av, int *st) {
+  char *c;
+  c = av[0];
+  if (strcmp(c, ":") == 0 || strcmp(c, "true") == 0) { *st = 0; return 1; }
+  if (strcmp(c, "false") == 0) { *st = 1; return 1; }
+  if (strcmp(c, "echo") == 0) { *st = b_echo(ac, av); return 1; }
+  if (strcmp(c, "cd") == 0) { *st = b_cd(ac, av); return 1; }
+  if (strcmp(c, "pwd") == 0) { *st = b_pwd(ac, av); return 1; }
+  if (strcmp(c, "set") == 0) { *st = b_set(ac, av); return 1; }
+  if (strcmp(c, "shift") == 0) { *st = b_shift(ac, av); return 1; }
+  if (strcmp(c, "unset") == 0) { *st = b_unset(ac, av); return 1; }
+  if (strcmp(c, "eval") == 0) { *st = b_eval(ac, av); return 1; }
+  if (strcmp(c, "read") == 0) { *st = b_read(ac, av); return 1; }
+  if (strcmp(c, "exit") == 0) { *st = b_exit(ac, av); return 1; }
+  if (strcmp(c, "test") == 0 || strcmp(c, "[") == 0) {
+    *st = b_test(ac, av); return 1;
+  }
+  if (strcmp(c, "local") == 0) {
+    /* local は「代入するだけ」。境界は関数の出口で戻す */
+    int i;
+    for (i = 1; i < ac; i = i + 1) {
+      char *eq;
+      eq = strchr(av[i], '=');
+      if (eq) { *eq = 0; vset(av[i], eq + 1); *eq = '='; }
+      else vset(av[i], "");
+    }
+    *st = 0;
+    return 1;
+  }
+  return 0;
+}
