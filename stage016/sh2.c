@@ -59,6 +59,7 @@
 #define R_OUT    2              /* > */
 #define R_APP    3              /* >> */
 #define R_HERE   4              /* << (本文は word に入れてある) */
+#define R_DUP    5              /* >&N / <&N */
 
 struct node {
   int kind;
@@ -385,7 +386,19 @@ static int iskw(char *s) {
   return toktype == T_WORD && strcmp(tok, s) == 0;
 }
 
-/* 語がそのまま予約語になる位置かどうかは呼び手が決める */
+/* 「並びを終わらせる語」。**if / while / for / case は入らない** ——
+ * それらは命令を**始める**語なので，並びの途中に出てきたら次の命令で
+ * ある。ここを混ぜると for opt do ... case ... esac ... done の case で
+ * 並びが切れて "expected done" になる (実際になった) */
+static int isterm(char *s) {
+  return strcmp(s, "then") == 0 || strcmp(s, "elif") == 0
+      || strcmp(s, "else") == 0 || strcmp(s, "fi") == 0
+      || strcmp(s, "do") == 0 || strcmp(s, "done") == 0
+      || strcmp(s, "esac") == 0 || strcmp(s, "}") == 0
+      || strcmp(s, "in") == 0;
+}
+
+/* 「命令の名前にはならない語」。始める語も終わらせる語も含む */
 static int isreserved(char *s) {
   return strcmp(s, "if") == 0 || strcmp(s, "then") == 0
       || strcmp(s, "elif") == 0 || strcmp(s, "else") == 0
@@ -396,10 +409,31 @@ static int isreserved(char *s) {
       || strcmp(s, "esac") == 0 || strcmp(s, "}") == 0;
 }
 
+/* 誤りの位置を行番号で出す。ip が脚本の中にあるときだけ数える
+ * (eval や関数の本体は別の器なので数えられない) */
+static int curline(void) {
+  char *q;
+  int n;
+  if (ip < src || ip > src + NSRC) return 0;
+  n = 1;
+  for (q = src; q < ip && *q; q = q + 1) if (*q == '\n') n = n + 1;
+  return n;
+}
+
+static void syerr(char *what) {
+  int ln;
+  ln = curline();
+  if (ln > 0) fprintf(stderr, "sh2: %d: syntax error: %s\n", ln, what);
+  else fprintf(stderr, "sh2: syntax error: %s\n", what);
+  if (toktype == T_WORD) fprintf(stderr, "sh2:   near word '%s'\n", tok);
+  exit(2);
+}
+
 static void expect(char *s) {
   if (!iskw(s)) {
-    fprintf(stderr, "sh2: syntax error: expected %s\n", s);
-    exit(2);
+    char b[64];
+    sprintf(b, "expected %s", s);
+    syerr(b);
   }
   lex();
 }
@@ -425,11 +459,22 @@ static int p_redir(int *rn) {
   } else if (toktype == T_APP) {
     type = R_APP;
   } else {
-    if (fd >= 0) { fputs("sh2: syntax error near fd\n", stderr); exit(2); }
+    if (fd >= 0) syerr("redirect fd");
     return 0;
   }
+  /* N>&M / N<&M。lex は単独の & を T_SEMI にするので，字句より前の
+   * 生の文字を見て判断する */
+  if (*ip == '&') {
+    ip = ip + 1;
+    lex();
+    if (fd < 0) fd = (type == R_IN) ? 0 : 1;
+    addrd(R_DUP, fd, (toktype == T_WORD) ? tok : sdup0("1"));
+    lex();
+    *rn = *rn + 1;
+    return 1;
+  }
   lex();
-  if (toktype != T_WORD) { fputs("sh2: syntax error: redirect\n", stderr); exit(2); }
+  if (toktype != T_WORD) syerr("redirect target");
   if (fd < 0) fd = (type == R_IN) ? 0 : 1;
   addrd(type, fd, tok);
   lex();
@@ -494,7 +539,7 @@ static int p_for(void) {
   int n;
   n = newnode(N_FOR);
   lex();                        /* for */
-  if (toktype != T_WORD) { fputs("sh2: syntax error: for\n", stderr); exit(2); }
+  if (toktype != T_WORD) syerr("for");
   addword(tok);                 /* 変数名 (w0) */
   nd[n].wn = 1;
   lex();
@@ -524,7 +569,7 @@ static int p_case(void) {
   int prev;
   n = newnode(N_CASE);
   lex();                        /* case */
-  if (toktype != T_WORD) { fputs("sh2: syntax error: case\n", stderr); exit(2); }
+  if (toktype != T_WORD) syerr("case");
   addword(tok);                 /* 対象の語 */
   nd[n].wn = 1;
   lex();
@@ -543,7 +588,7 @@ static int p_case(void) {
       if (toktype == T_PIPE) { lex(); continue; }
       break;
     }
-    if (toktype != T_RP) { fputs("sh2: syntax error: case pattern\n", stderr); exit(2); }
+    if (toktype != T_RP) syerr("case pattern");
     lex();
     skipnl();
     if (!iskw("esac") && toktype != T_DSEMI)
@@ -557,17 +602,31 @@ static int p_case(void) {
   return n;
 }
 
+/* 複合コマンドの後ろに付くリダイレクトを拾う。
+ * **case や if にも付く** —— configure の 611 行目が
+ *   case $source_path in ... esac >>config.mak
+ * である。簡単コマンドだけ見ていると，ここの出力が端末へ漏れる
+ * (実際に TOPSRC= の行が config.mak に入らなかった) */
+static void trailrd(int n) {
+  int rn;
+  int r0;
+  r0 = nrd;
+  rn = 0;
+  while (p_redir(&rn)) ;
+  if (rn > 0) { nd[n].r0 = r0; nd[n].rn = rn; }
+}
+
 static int p_command(void) {
   int n;
   int rn;
 
   skipnl();
   if (toktype == T_EOF) return -1;
-  if (iskw("if")) return p_if();
-  if (iskw("while")) return p_while(N_WHILE);
-  if (iskw("until")) return p_while(N_UNTIL);
-  if (iskw("for")) return p_for();
-  if (iskw("case")) return p_case();
+  if (iskw("if")) { n = p_if(); trailrd(n); return n; }
+  if (iskw("while")) { n = p_while(N_WHILE); trailrd(n); return n; }
+  if (iskw("until")) { n = p_while(N_UNTIL); trailrd(n); return n; }
+  if (iskw("for")) { n = p_for(); trailrd(n); return n; }
+  if (iskw("case")) { n = p_case(); trailrd(n); return n; }
   if (iskw("!")) { lex(); n = newnode(N_NOT); nd[n].a = p_command(); return n; }
   if (toktype == T_WORD && strcmp(tok, "{") == 0) {
     lex();
@@ -584,7 +643,7 @@ static int p_command(void) {
     lex();
     n = newnode(N_GROUP);
     nd[n].a = p_list();
-    if (toktype != T_RP) { fputs("sh2: syntax error: )\n", stderr); exit(2); }
+    if (toktype != T_RP) syerr(")");
     lex();
     return n;
   }
@@ -661,7 +720,7 @@ static int p_list(void) {
     if (toktype != T_SEMI && toktype != T_NL) break;
     while (toktype == T_SEMI || toktype == T_NL) lex();
     if (toktype == T_EOF) break;
-    if (toktype == T_WORD && isreserved(tok)) break;
+    if (toktype == T_WORD && isterm(tok)) break;
     if (toktype == T_RP || toktype == T_DSEMI) break;
     n = newnode(N_SEQ);
     nd[n].a = l;
@@ -685,6 +744,17 @@ static int p_list(void) {
  * POSIX では終端子が引用されていなければ $ と ` と \ だけが特別で，
  * ' と " は素の文字である */
 static int noquote;
+
+/* この語に引用が現れたか。**引用のあった空語は 1 個の空引数になる。**
+ * "$CC" で CC が未設定なら「空の引数が 1 つ」であって「引数なし」では
+ * ない。ここを落とすと test -n "$CC" が test -n になり，引数 1 個の
+ * test として**真になってしまう** (configure 57 行目でこれを踏んだ) */
+static int wquoted;
+
+/* この語で "$@" を展開したか。**"$@" は位置パラメータが無ければ
+ * 0 個の語になる** (POSIX の特例)。"$X" が空なら 1 個の空語なので，
+ * 両者を分けて扱う必要がある */
+static int sawat;
 
 static char ebuf[NBUF];
 static char eqf[NBUF];          /* 1 = 引用の中から来た */
@@ -914,6 +984,7 @@ static void expandbrace(char *s, int n, int q) {
   /* $* と $@ は位置パラメータを並べる */
   if (strcmp(name, "*") == 0 || strcmp(name, "@") == 0) {
     int k;
+    if (name[0] == '@') sawat = 1;
     for (k = 1; k <= nposn; k = k + 1) {
       if (k > 1) eput(' ', q ? 0 : 0);   /* 引用の中でも語の切れ目にする */
       eputs(pos[k] ? pos[k] : "", q);
@@ -935,6 +1006,13 @@ static void expandfrag(char *w, int q0) {
   while (*p) {
     int c;
     c = (int)(unsigned char)*p;
+    if (c == '\\' && p[1] == '\n' && q != '\'') {
+      /* 逆斜線 + 改行は**行の継続**である。何も出さずに飲む。
+       * here-doc の中で長い行を折る書き方に出てくる (config.h の
+       * #if の行がこれで，飲まないと 2 行に割れる) */
+      p = p + 2;
+      continue;
+    }
     if (c == '\\' && p[1] && q != '\'') {
       /* 二重引用符の中では $ ` " \\ と改行の前だけが特別である (POSIX)。
        * それ以外は**逆斜線をそのまま残す** —— "\n" を tr に渡す形が
@@ -950,7 +1028,9 @@ static void expandfrag(char *w, int q0) {
       p = p + 2;
       continue;
     }
-    if (!noquote && q == 0 && (c == '\'' || c == '"')) { q = c; p = p + 1; continue; }
+    if (!noquote && q == 0 && (c == '\'' || c == '"')) {
+      q = c; wquoted = 1; p = p + 1; continue;
+    }
     if (!noquote && q != 0 && c == q) { q = 0; p = p + 1; continue; }
     if (q != '\'' && c == '`') {
       char *st;
@@ -1019,6 +1099,8 @@ static void expandfrag(char *w, int q0) {
 /* 1 語を展開して ebuf/eqf へ置く。分割はしない */
 static void expand1(char *w) {
   elen = 0;
+  wquoted = 0;
+  sawat = 0;
   expandfrag(w, 0);
 }
 
@@ -1027,6 +1109,8 @@ static void expand1(char *w) {
 static void splitadd(void) {
   int i;
   int st;
+  int got;
+  got = 0;
   i = 0;
   while (i < elen) {
     while (i < elen && eqf[i] == 0
@@ -1039,6 +1123,14 @@ static void splitadd(void) {
       i = i + 1;
     if (argc_ >= NARG) { fputs("sh2: too many arguments\n", stderr); exit(2); }
     argv_[argc_] = sdup(ebuf + st, i - st);
+    argc_ = argc_ + 1;
+    got = 1;
+  }
+  /* 引用があったのに何も出なかったら，空の引数を 1 つ置く。
+   * ただし "$@" だけは例外で，位置パラメータが無ければ 0 個である */
+  if (!got && wquoted && !sawat) {
+    if (argc_ >= NARG) { fputs("sh2: too many arguments\n", stderr); exit(2); }
+    argv_[argc_] = sdup0("");
     argc_ = argc_ + 1;
   }
 }
@@ -1332,6 +1424,7 @@ static int runsimple(int n) {
   char *sout;
   int sapp;
   int nassign;
+  int errdup;
 
   argc_ = 0;
   nassign = 0;
@@ -1359,13 +1452,28 @@ static int runsimple(int n) {
   }
 
   /* リダイレクトを解決する */
-  in = 0; out = 0; app = 0;
+  in = 0; out = 0; app = 0; errdup = 0;
+  (void)errdup;
   for (i = 0; i < nd[n].rn; i = i + 1) {
     struct rdir *r;
     r = &rdt[nd[n].r0 + i];
     if (r->type == R_IN) in = expandone(r->word);
     else if (r->type == R_OUT) { out = expandone(r->word); app = 0; }
     else if (r->type == R_APP) { out = expandone(r->word); app = 1; }
+    else if (r->type == R_DUP) {
+      /* 2>&1 —— 「fd 2 を fd 1 と同じ先へ」。
+       *
+       * **カーネルは fd 2 のつなぎ替えを持たない** (spawn が受けるのは
+       * in と out の 2 つだけ。docs/stage013-tools.md 3.2)。組込みの
+       * 出力は outs() を通るのでここで揃えられるが，外部コマンドの
+       * 標準エラーは端末へ出たままになる。
+       *
+       * configure は cc_msg.txt に警告を溜めて grep するので，この差は
+       * 「警告が見つからない = その選択肢を有効にする」方向に効く。
+       * 停まらないが結果は変わりうる。塞ぐには spawn の記録を 1 語
+       * 伸ばす (err の欄を足す) 必要があり，第 4 部の 3 の課題とする */
+      errdup = 1;
+    }
     else if (r->type == R_HERE) {
       /* here-doc は一時ファイルへ落として < と同じにする */
       char tn[64];
@@ -1461,9 +1569,13 @@ static int runpipe(int n) {
   return st;
 }
 
+/* 節に付いたリダイレクトを効かせて中を走らせる (簡単コマンド以外) */
+static int runrd(int n);
+
 static int runtree(int n) {
   int st;
   if (n < 0 || exiting) return lastst;
+  if (nd[n].rn > 0 && nd[n].kind != N_SIMPLE) return runrd(n);
   switch (nd[n].kind) {
   case N_SIMPLE:
     st = runsimple(n);
@@ -1543,6 +1655,31 @@ static int runtree(int n) {
   default:
     return 0;
   }
+}
+
+/* 節のリダイレクトを curin / curout へ移してから中を走らせる。
+ * 走らせている間だけ効く */
+static int runrd(int n) {
+  char *sin;
+  char *sout;
+  int sapp;
+  int i;
+  int st;
+  int rn;
+  sin = curin; sout = curout; sapp = curapp;
+  rn = nd[n].rn;
+  nd[n].rn = 0;                 /* 中で runtree を呼ぶので一度外す */
+  for (i = 0; i < rn; i = i + 1) {
+    struct rdir *r;
+    r = &rdt[nd[n].r0 + i];
+    if (r->type == R_IN) curin = expandone(r->word);
+    else if (r->type == R_OUT) { curout = expandone(r->word); curapp = 0; }
+    else if (r->type == R_APP) { curout = expandone(r->word); curapp = 1; }
+  }
+  st = runtree(n);
+  nd[n].rn = rn;
+  curin = sin; curout = sout; curapp = sapp;
+  return st;
 }
 
 /* 文字列を構文木にして歩く。eval と関数と $() がこれを使う (10.2) */
