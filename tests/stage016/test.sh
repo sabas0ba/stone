@@ -361,7 +361,9 @@ cp docs/external/tcc/configure docs/external/tcc/VERSION "$cfg/"
 ( cd "$cfg" && PATH="$repo_root/tests/stage016/refbin:$PATH" \
     sh "$repo_root/tests/stage016/user/cfgprobe.sh" ) > "$out/cfgprobe.raw" 2>&1
 r=$?
-sed "s|$cfg|/|g" "$out/cfgprobe.raw" > "$out/cfgprobe.ref"
+# **絶対経路で置き換える。** configure が書くのは pwd の出力なので
+# 常に絶対経路であり，$cfg (repo からの相対) では末尾しか当たらない
+sed "s|$repo_root/$cfg|/|g" "$out/cfgprobe.raw" > "$out/cfgprobe.ref"
 [ "$r" -eq 0 ]
 report $? "ref: 参照シェルで configure が通る"
 
