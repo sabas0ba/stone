@@ -99,6 +99,20 @@ static int nvar;
 static struct fun funs[NFUN];
 static int nfun;
 
+/* local の退避。関数に入るときの丈を覚え，出るときにここまで戻す。
+ *
+ * **変数表の丈を切り詰めるだけでは駄目である。** 関数の中の代入は
+ * POSIX では既定で大域なので，local と宣言されたものだけを戻す
+ * (configure の assign_opt が関数の中で大域変数を作る) */
+#define NLOC 256
+struct loc {
+  char *name;
+  char *old;
+  int existed;
+};
+static struct loc locs[NLOC];
+static int nloc;
+
 static char *pos[NPOS];         /* 位置パラメータ $1.. ($0 は pos[0]) */
 static int nposn;               /* $# */
 static int lastst;              /* $? */
@@ -181,6 +195,9 @@ static int toktype;             /* 0 = 語, それ以外は下の T_* */
 #define T_IONUM 16              /* 数字の直後に < か > が来た */
 
 static int ionum;
+/* here-doc の本文を読むと，その語を含む行の改行も食ってしまう。
+ * **命令はそこで終わっている**ので，次の lex() で改行を 1 つ返す */
+static int pendingnl;
 
 static int isblank2(int c) { return c == ' ' || c == '\t'; }
 
@@ -216,6 +233,7 @@ static char *heretext(char *delim) {
   }
   sarena[nsa] = 0;
   nsa = nsa + 1;
+  pendingnl = 1;
   return out;
 }
 
@@ -225,6 +243,7 @@ static void lex(void) {
   int q;
   int c;
 
+  if (pendingnl) { pendingnl = 0; toktype = T_NL; return; }
   for (;;) {
     while (isblank2(*ip)) ip = ip + 1;
     if (*ip == '\\' && ip[1] == '\n') { ip = ip + 2; continue; }
@@ -662,6 +681,11 @@ static int p_list(void) {
  * $1 は切る。したがって展開しながら「この文字は引用の中から来たか」を
  * 対で持ち歩く (ebuf と eqf)。
  */
+/* here-doc の本文を展開するときは，引用符を**文字として**扱う。
+ * POSIX では終端子が引用されていなければ $ と ` と \ だけが特別で，
+ * ' と " は素の文字である */
+static int noquote;
+
 static char ebuf[NBUF];
 static char eqf[NBUF];          /* 1 = 引用の中から来た */
 static int elen;
@@ -672,6 +696,7 @@ static int argc_;
 static int runtree(int n);      /* 前方宣言 */
 static int runstr(char *s);
 static int patmatch(char *pat, char *s);
+static void expandfrag(char *w, int q0);
 
 static void eput(int c, int q) {
   if (elen >= NBUF - 1) { fputs("sh2: word too long\n", stderr); exit(2); }
@@ -735,12 +760,32 @@ static void outs(char *s) {
   curapp = 1;                   /* 同じ実行の続きは足していく */
 }
 
-/* コマンド置換: 中身を一時ファイルへ流して読み戻す (9.3) */
+/* コマンド置換: 中身を一時ファイルへ流して読み戻す (9.3)。
+ *
+ * **展開の途中から実行へ降りるので，展開の器を退避する。** ebuf は
+ * 呼び手 (expand1) が組み立てている最中であり，argv_ も呼び手
+ * (runsimple) が積んでいる最中である。中で走るコマンドがそれらを
+ * 使い回すので，保存しないと外側の語が壊れる。
+ *
+ * 最初これを忘れて `echo cmd=$(echo sub)` が "sub subsub" になった。 */
 static char *cmdsub(char *body) {
   char tn[64];
+  char sbuf[NBUF];
+  char sqf[NBUF];
+  char *sav[NARG];
   char *res;
   char *so;
   int sa;
+  int sl;
+  int sac;
+  int i;
+
+  /* 展開の器を退避 */
+  sl = elen;
+  for (i = 0; i < sl; i = i + 1) { sbuf[i] = ebuf[i]; sqf[i] = eqf[i]; }
+  sac = argc_;
+  for (i = 0; i < sac && i < NARG; i = i + 1) sav[i] = argv_[i];
+
   tmpname(tn);
   so = curout; sa = curapp;
   curout = sdup0(tn); curapp = 0;
@@ -748,6 +793,12 @@ static char *cmdsub(char *body) {
   curout = so; curapp = sa;
   res = slurpfile(tn, 1);
   unlink(tn);
+
+  /* 戻す */
+  elen = sl;
+  for (i = 0; i < sl; i = i + 1) { ebuf[i] = sbuf[i]; eqf[i] = sqf[i]; }
+  argc_ = sac;
+  for (i = 0; i < sac && i < NARG; i = i + 1) argv_[i] = sav[i];
   return res;
 }
 
@@ -802,9 +853,25 @@ static void expandbrace(char *s, int n, int q) {
 
   /* 演算子を当てる */
   if (op == '-') {              /* ${V:-既定} */
-    if (val[0] == 0) { expandbrace(arg, (int)strlen(arg), q); return; }
+    /* 既定は名前ではなく**語**である。$(...) や ${...} が入れ子で
+     * 現れうるので断片として展開する (configure 69 行目の
+     * ${2:-${1%%=*}} がこれ) */
+    if (val[0] == 0) { expandfrag(arg, q); return; }
   } else if (op == '=') {       /* ${V:=既定} */
-    if (val[0] == 0) { vset(name, arg); val = vget(name); }
+    if (val[0] == 0) {
+      int sl;
+      int i2;
+      char sb[NBUF];
+      sl = elen;
+      for (i2 = 0; i2 < sl; i2 = i2 + 1) sb[i2] = ebuf[i2];
+      elen = 0;
+      expandfrag(arg, 0);
+      eput(0, 1);
+      vset(name, ebuf);
+      elen = sl;
+      for (i2 = 0; i2 < sl; i2 = i2 + 1) ebuf[i2] = sb[i2];
+      val = vget(name);
+    }
   } else if (op == 'h' || op == 'H') {          /* # / ## 前を落とす */
     int al;
     al = (int)strlen(arg);
@@ -857,23 +924,34 @@ static void expandbrace(char *s, int n, int q) {
   eputs(e, q);
 }
 
-/* 1 語を展開して ebuf/eqf へ置く。分割はしない */
-static void expand1(char *w) {
+/* 断片を展開して ebuf/eqf へ**足す** (器は初期化しない)。
+ * ${V:-既定} の既定側がこれを使う —— 既定は名前ではなく語なので，
+ * $(...) や ${...} が入れ子で現れうる */
+static void expandfrag(char *w, int q0) {
   int q;                        /* 0 = 素, '\'' か '"' */
   char *p;
-  elen = 0;
-  q = 0;
+  q = q0 ? '"' : 0;             /* 引用の中から呼ばれたら引用として扱う */
   p = w;
   while (*p) {
     int c;
     c = (int)(unsigned char)*p;
     if (c == '\\' && p[1] && q != '\'') {
+      /* 二重引用符の中では $ ` " \\ と改行の前だけが特別である (POSIX)。
+       * それ以外は**逆斜線をそのまま残す** —— "\n" を tr に渡す形が
+       * configure に出てくるので，ここで落とすと壊れる */
+      if (q == '"' && p[1] != '$' && p[1] != '`' && p[1] != '"'
+          && p[1] != '\\' && p[1] != '\n') {
+        eput('\\', 1);
+        eput((int)(unsigned char)p[1], 1);
+        p = p + 2;
+        continue;
+      }
       eput((int)(unsigned char)p[1], 1);
       p = p + 2;
       continue;
     }
-    if (q == 0 && (c == '\'' || c == '"')) { q = c; p = p + 1; continue; }
-    if (q != 0 && c == q) { q = 0; p = p + 1; continue; }
+    if (!noquote && q == 0 && (c == '\'' || c == '"')) { q = c; p = p + 1; continue; }
+    if (!noquote && q != 0 && c == q) { q = 0; p = p + 1; continue; }
     if (q != '\'' && c == '`') {
       char *st;
       p = p + 1;
@@ -936,8 +1014,12 @@ static void expand1(char *w) {
     eput(c, q ? 1 : 0);
     p = p + 1;
   }
-  eput(0, 1);
-  elen = elen - 1;
+}
+
+/* 1 語を展開して ebuf/eqf へ置く。分割はしない */
+static void expand1(char *w) {
+  elen = 0;
+  expandfrag(w, 0);
 }
 
 /* 展開した ebuf を IFS で切って argv_ へ積む。
@@ -1213,13 +1295,22 @@ static int builtin(int ac, char **av, int *st) {
     *st = b_test(ac, av); return 1;
   }
   if (strcmp(c, "local") == 0) {
-    /* local は「代入するだけ」。境界は関数の出口で戻す */
     int i;
     for (i = 1; i < ac; i = i + 1) {
       char *eq;
+      char *name;
+      struct var *v;
       eq = strchr(av[i], '=');
-      if (eq) { *eq = 0; vset(av[i], eq + 1); *eq = '='; }
-      else vset(av[i], "");
+      name = eq ? sdup(av[i], (int)(eq - av[i])) : av[i];
+      /* 元の値を退避しておく。関数を出るときに戻す */
+      if (nloc < NLOC) {
+        v = vfind(name);
+        locs[nloc].name = sdup0(name);
+        locs[nloc].existed = (v != 0);
+        locs[nloc].old = (v != 0) ? v->val : "";
+        nloc = nloc + 1;
+      }
+      vset(name, eq ? eq + 1 : "");
     }
     *st = 0;
     return 1;
@@ -1279,10 +1370,17 @@ static int runsimple(int n) {
       /* here-doc は一時ファイルへ落として < と同じにする */
       char tn[64];
       int fd;
+      char *body;
       tmpname(tn);
+      /* 終端子が引用されていなければ本文の $ を展開する (POSIX)。
+       * configure の config.mak / config.h はこれで組み立てられる */
+      noquote = 1;
+      expand1(r->word);
+      noquote = 0;
+      body = sdup(ebuf, elen);
       fd = open(tn, O_WRONLY | O_CREAT | O_TRUNC, 0666);
       if (fd >= 0) {
-        write(fd, r->word, strlen(r->word));
+        write(fd, body, strlen(body));
         close(fd);
       }
       in = sdup0(tn);
@@ -1303,9 +1401,14 @@ static int runsimple(int n) {
       for (i2 = 0; i2 <= nposn && i2 < NPOS; i2 = i2 + 1) saved[i2] = pos[i2];
       for (i2 = 1; i2 < argc_ && i2 < NPOS; i2 = i2 + 1) pos[i2] = argv_[i2];
       nposn = argc_ - 1;
-      vmark = nvar;                             /* local の境界 */
+      vmark = nloc;                             /* local の境界 */
       sp = runtree(funs[k].body);
-      nvar = vmark;                             /* local を捨てる */
+      /* **local と宣言されたものだけ**を戻す。関数の中の素の代入は
+       * 大域に残る (POSIX) */
+      while (nloc > vmark) {
+        nloc = nloc - 1;
+        vset(locs[nloc].name, locs[nloc].old);
+      }
       nposn = savedn;
       for (i2 = 0; i2 <= savedn && i2 < NPOS; i2 = i2 + 1) pos[i2] = saved[i2];
       return sp;
@@ -1326,6 +1429,9 @@ static int runsimple(int n) {
   argv_[argc_] = 0;
   if (in == 0) in = curin;
   if (out == 0 && curout != 0) { out = curout; app = curapp; }
+  /* 組込みは stdio を通って出るが，外部コマンドは fd 1 へ直に出る。
+   * 流しておかないと順序が入れ替わる */
+  fflush(stdout);
   st = spawn(argv_[0], argv_, in, out);
   if (st < 0) {
     fputs(argv_[0], stderr);
