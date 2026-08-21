@@ -139,11 +139,34 @@ report $? "elf: sh13 が ET_EXEC / RISC-V / entry 0x86000054 / PT_LOAD"
 # ---------------------------------------------------------------------------
 section "退行: 'F' / 'K' の出力が ld12 と一致"
 
+# **同じ入力・同じ道具でも答が揺らぐことがある** (docs/dev-notes.md 1.6)。
+# 扱いは tests/stage012 の同じ検査と揃える
 ok=0
 for o in pp.o cc10l.o ld.o; do
-    { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld12" > tmp/s13/f_old.bin
-    { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld13" > tmp/s13/f_new.bin
-    cmp -s tmp/s13/f_old.bin tmp/s13/f_new.bin || ok=1
+    n=0
+    while :; do
+        { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld12" > tmp/s13/f_old.bin
+        { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld13" > tmp/s13/f_new.bin
+        cmp -s tmp/s13/f_old.bin tmp/s13/f_new.bin && break
+
+        { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld12" > tmp/s13/f_chk.bin
+        if cmp -s tmp/s13/f_old.bin tmp/s13/f_chk.bin; then
+            self=一致
+        else
+            self=**不一致**
+        fi
+
+        n=$((n + 1))
+        if [ "$n" -ge 3 ]; then
+            echo "   $o: ld12 $(wc -c < tmp/s13/f_old.bin) バイト /" \
+                 "ld13 $(wc -c < tmp/s13/f_new.bin) バイト" \
+                 "/ ld12 の自己再現 $self"
+            echo "     in  tmp/build/$o $(wc -c < "tmp/build/$o") $(sha256sum "tmp/build/$o" | cut -c1-16)"
+            ok=1
+            break
+        fi
+        warned "regress($o): $n 回目で食い違った (ld12 の自己再現 $self)。やり直す"
+    done
 done
 [ "$ok" -eq 0 ]
 report $? "regress: 'F' の出力が ld12 とバイト一致 (pp / cc10l / ld)"
