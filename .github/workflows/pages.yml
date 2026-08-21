@@ -12,7 +12,8 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ['web/**', 'stage*/**', 'tools/**', 'env/**', '.github/workflows/pages.yml']
+    paths: ['web/**', 'stage*/**', 'tests/**', 'tools/**', 'env/**',
+            '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
