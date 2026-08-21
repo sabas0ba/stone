@@ -771,6 +771,7 @@ static int runtree(int n);      /* 前方宣言 */
 static int runstr(char *s);
 static int patmatch(char *pat, char *s);
 static void expandfrag(char *w, int q0);
+static int tool(int ac, char **av, int *st);
 
 static void eput(int c, int q) {
   if (elen >= NBUF - 1) { fputs("sh2: word too long\n", stderr); exit(2); }
@@ -819,6 +820,10 @@ static char *slurpfile(char *path, int strip) {
 static char *curout;            /* 0 なら標準出力 */
 static int curapp;              /* 1 なら追記 */
 static char *curin;             /* 0 なら標準入力 */
+/* 組込みの誤り出力の行き先。**外部コマンドは spawn2 が受けるが，
+ * 組込みは自分で振り分けないと 2>/dev/null が効かない** (実際に
+ * cat の「開けない」が漏れた) */
+static char *curerr;
 
 /* 組込みの出力。curout が立っていればそこへ足す */
 static void outs(char *s) {
@@ -832,6 +837,17 @@ static void outs(char *s) {
   write(fd, s, (size_t)n);
   close(fd);
   curapp = 1;                   /* 同じ実行の続きは足していく */
+}
+
+/* 組込みの誤り出力。curerr が立っていればそこへ足す */
+static void errs(char *s) {
+  int fd;
+  if (curerr == 0) { fputs(s, stderr); return; }
+  fd = open(curerr, O_WRONLY | O_CREAT, 0666);
+  if (fd < 0) return;
+  lseek(fd, 0, 2);
+  write(fd, s, strlen(s));
+  close(fd);
 }
 
 /* コマンド置換: 中身を一時ファイルへ流して読み戻す (9.3)。
@@ -1430,6 +1446,7 @@ static int runsimple(int n) {
   int nassign;
   int errdup;
   char *err;
+  char *serr;
 
   argc_ = 0;
   nassign = 0;
@@ -1528,15 +1545,18 @@ static int runsimple(int n) {
     }
   }
 
-  /* 組込みか? リダイレクトは curout / curin を差し替えて効かせる */
-  sin = curin; sout = curout; sapp = curapp;
+  /* 組込みか，あるいは組込みとして持っている道具か。
+   * リダイレクトは curout / curin を差し替えて効かせる */
+  sin = curin; sout = curout; sapp = curapp; serr = curerr;
   if (in) curin = in;
   if (out) { curout = out; curapp = app; }
-  if (builtin(argc_, argv_, &st)) {
-    curin = sin; curout = sout; curapp = sapp;
+  if (err) curerr = err;
+  else if (errdup && out) curerr = out;
+  if (builtin(argc_, argv_, &st) || tool(argc_, argv_, &st)) {
+    curin = sin; curout = sout; curapp = sapp; curerr = serr;
     return st;
   }
-  curin = sin; curout = sout; curapp = sapp;
+  curin = sin; curout = sout; curapp = sapp; curerr = serr;
 
   /* 外部コマンド。spawn がファイル名で入出力を受ける */
   argv_[argc_] = 0;
@@ -1550,8 +1570,8 @@ static int runsimple(int n) {
   if (errdup && err == 0) err = out;
   st = spawn2(argv_[0], argv_, in, out, err);
   if (st < 0) {
-    fputs(argv_[0], stderr);
-    fputs(": not found\n", stderr);
+    errs(argv_[0]);
+    errs(": not found\n");
     return 127;
   }
   return st;
@@ -1764,4 +1784,301 @@ int main(int argc, char **argv) {
     if (exiting) break;
   }
   return exiting ? exitst : lastst;
+}
+
+/* ---- 外部の道具 (組込みとして持つ。docs/stage016-os.md 11.2) ----
+ *
+ * configure が呼ぶのは uname / cat / grep / rm / mkdir / head / diff /
+ * mv / cp / ln の 10 個である (11.1 で数え直した)。**tr も sed も awk も
+ * 呼ばれない。**
+ *
+ * 別のプログラムにせず組込みにしたのは，configure も make も
+ * コマンドをシェル経由で起動するので外から見た振舞いが変わらないから
+ * である。代償は「シェルを介さない呼び手から使えない」ことで，要る
+ * ようになったら main() を被せて別々にリンクすればよい (11.2)。
+ */
+
+/* ファイルを丸ごと読んで返す。長さを *np へ。開けなければ 0 */
+static char *readall(char *path, int *np) {
+  int fd;
+  int n;
+  char *out;
+  fd = open(path, O_RDONLY);
+  if (fd < 0) return 0;
+  out = sarena + nsa;
+  for (;;) {
+    if (nsa + 4096 + 1 > NSTR) { fputs("sh2: out of string space\n", stderr); exit(2); }
+    n = read(fd, sarena + nsa, 4096);
+    if (n <= 0) break;
+    nsa = nsa + n;
+  }
+  close(fd);
+  *np = (int)(sarena + nsa - out);
+  sarena[nsa] = 0;
+  nsa = nsa + 1;
+  return out;
+}
+
+/* 中身をいまの出力先へ流す */
+static void emit(char *s, int n) {
+  int fd;
+  if (curout == 0) {
+    fwrite(s, 1, (size_t)n, stdout);
+    return;
+  }
+  fd = open(curout, O_WRONLY | O_CREAT | (curapp ? 0 : O_TRUNC), 0666);
+  if (fd < 0) return;
+  if (curapp) lseek(fd, 0, 2);
+  write(fd, s, (size_t)n);
+  close(fd);
+  curapp = 1;
+}
+
+static int t_cat(int ac, char **av) {
+  int i;
+  int n;
+  char *b;
+  int st;
+  st = 0;
+  if (ac == 1) {
+    /* 標準入力から。curin が立っていればそこから */
+    if (curin) {
+      b = readall(curin, &n);
+      if (b) emit(b, n);
+    }
+    return 0;
+  }
+  for (i = 1; i < ac; i = i + 1) {
+    b = readall(av[i], &n);
+    if (b == 0) { errs("cat: cannot open\n"); st = 1; continue; }
+    emit(b, n);
+  }
+  return st;
+}
+
+static int t_head(int ac, char **av) {
+  int i;
+  int n;
+  int k;
+  int lines;
+  char *b;
+  lines = 10;
+  i = 1;
+  if (i < ac && av[i][0] == '-' && av[i][1] >= '0' && av[i][1] <= '9') {
+    lines = atoi(av[i] + 1);
+    i = i + 1;
+  }
+  if (i >= ac) return 1;
+  b = readall(av[i], &n);
+  if (b == 0) return 1;
+  k = 0;
+  for (i = 0; i < n && k < lines; i = i + 1)
+    if (b[i] == '\n') k = k + 1;
+  emit(b, i);
+  return 0;
+}
+
+static int t_rm(int ac, char **av) {
+  int i;
+  int st;
+  int force;
+  st = 0;
+  force = 0;
+  for (i = 1; i < ac; i = i + 1) {
+    if (av[i][0] == '-') {
+      if (strchr(av[i], 'f')) force = 1;
+      continue;
+    }
+    if (unlink(av[i]) < 0 && !force) st = 1;
+  }
+  return st;
+}
+
+static int t_mkdir(int ac, char **av) {
+  int i;
+  int st;
+  st = 0;
+  for (i = 1; i < ac; i = i + 1) {
+    if (av[i][0] == '-') continue;              /* -p は既定の振舞い */
+    /* -p 相当: 途中の段も作る */
+    {
+      char buf[512];
+      int k;
+      int n;
+      n = (int)strlen(av[i]);
+      if (n >= 512) { st = 1; continue; }
+      strcpy(buf, av[i]);
+      for (k = 1; k <= n; k = k + 1) {
+        if (buf[k] == '/' || buf[k] == 0) {
+          char sav;
+          sav = buf[k];
+          buf[k] = 0;
+          mkdir(buf, 0777);                     /* 既にあれば EEXIST。無視 */
+          buf[k] = sav;
+        }
+      }
+    }
+  }
+  return st;
+}
+
+/* 1 行が pat を含むか (grep は固定文字列としてだけ扱う)。
+ * **configure が使う 4 箇所のうち 2 つは /proc/cpuinfo で，我々の OS に
+ * その擬似ファイルは無い。** 開けないので偽になり，それが正しい */
+static int t_grep(int ac, char **av) {
+  int i;
+  int n;
+  int quiet;
+  int inv;
+  char *pat;
+  char *b;
+  int st;
+  int ls;
+  quiet = 0;
+  inv = 0;
+  pat = 0;
+  i = 1;
+  for (; i < ac; i = i + 1) {
+    if (strcmp(av[i], "--") == 0) { i = i + 1; break; }
+    if (av[i][0] == '-' && av[i][1] != 0) {
+      if (strchr(av[i], 'q')) quiet = 1;
+      if (strchr(av[i], 'v')) inv = 1;
+      continue;                                 /* -s なども黙って受ける */
+    }
+    break;
+  }
+  if (i < ac) { pat = av[i]; i = i + 1; }
+  if (pat == 0) return 2;
+  st = 1;
+  for (; i < ac; i = i + 1) {
+    b = readall(av[i], &n);
+    if (b == 0) continue;
+    ls = 0;
+    for (;;) {
+      int e;
+      int hit;
+      if (ls >= n) break;
+      e = ls;
+      while (e < n && b[e] != '\n') e = e + 1;
+      b[e] = 0;
+      hit = (strstr(b + ls, pat) != 0);
+      if (inv) hit = !hit;
+      if (hit) {
+        st = 0;
+        if (!quiet) { emit(b + ls, (int)strlen(b + ls)); emit("\n", 1); }
+      }
+      ls = e + 1;
+    }
+  }
+  return st;
+}
+
+/* 2 つのファイルが同じか。違いの中身は出さない (configure は
+ * >/dev/null に捨てており，終了コードしか見ていない) */
+static int t_diff(int ac, char **av) {
+  char *a;
+  char *b;
+  int na;
+  int nb;
+  if (ac < 3) return 2;
+  a = readall(av[1], &na);
+  b = readall(av[2], &nb);
+  if (a == 0 || b == 0) {
+    errs("diff: cannot open\n");
+    return 2;
+  }
+  if (na != nb) return 1;
+  return memcmp(a, b, (size_t)na) == 0 ? 0 : 1;
+}
+
+/* 複写。mv / cp / ln はどれも「中身を写す」で足りる (sfs2 に
+ * ハードリンクもシンボリックリンクも無いので，ln も複写にする) */
+static int copyfile(char *from, char *to) {
+  char *b;
+  int n;
+  int fd;
+  b = readall(from, &n);
+  if (b == 0) return -1;
+  fd = open(to, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  if (fd < 0) return -1;
+  if (n > 0) write(fd, b, (size_t)n);
+  close(fd);
+  return 0;
+}
+
+/* av から選択肢を除いた実引数を集める */
+static int realargs(int ac, char **av, char **out) {
+  int i;
+  int n;
+  n = 0;
+  for (i = 1; i < ac; i = i + 1) {
+    if (av[i][0] == '-' && av[i][1] != 0) continue;
+    out[n] = av[i];
+    n = n + 1;
+  }
+  return n;
+}
+
+static int t_cp(int ac, char **av) {
+  char *a[NARG];
+  int n;
+  n = realargs(ac, av, a);
+  if (n < 2) return 1;
+  return copyfile(a[0], a[1]) < 0 ? 1 : 0;
+}
+
+static int t_mv(int ac, char **av) {
+  char *a[NARG];
+  int n;
+  n = realargs(ac, av, a);
+  if (n < 2) return 1;
+  if (copyfile(a[0], a[1]) < 0) return 1;
+  unlink(a[0]);
+  return 0;
+}
+
+/* ln は複写にする。**sfs2 にリンクが無い**ので，同じ中身の別ファイルを
+ * 作るのが最も近い。configure は lib / tests を張るのに使うだけである */
+static int t_ln(int ac, char **av) {
+  char *a[NARG];
+  int n;
+  n = realargs(ac, av, a);
+  if (n < 2) return 1;
+  unlink(a[1]);
+  return copyfile(a[0], a[1]) < 0 ? 1 : 0;
+}
+
+/* 我々の OS の素性を答える (11.3)。configure はこれを見て targetos と
+ * cpu を決める。stone は configure の知らない名前なので既定の経路に
+ * 落ちる */
+static int t_uname(int ac, char **av) {
+  char *r;
+  r = "stone";
+  if (ac > 1) {
+    if (strcmp(av[1], "-m") == 0) r = "riscv32";
+    else if (strcmp(av[1], "-p") == 0) r = "riscv32";
+    else if (strcmp(av[1], "-r") == 0) r = "16";
+    else if (strcmp(av[1], "-o") == 0) r = "stone";
+    else if (strcmp(av[1], "-s") == 0) r = "stone";
+  }
+  emit(r, (int)strlen(r));
+  emit("\n", 1);
+  return 0;
+}
+
+/* 道具を引く。組込みの表と同じ形で返す */
+static int tool(int ac, char **av, int *st) {
+  char *c;
+  c = av[0];
+  if (strcmp(c, "cat") == 0) { *st = t_cat(ac, av); return 1; }
+  if (strcmp(c, "head") == 0) { *st = t_head(ac, av); return 1; }
+  if (strcmp(c, "rm") == 0) { *st = t_rm(ac, av); return 1; }
+  if (strcmp(c, "mkdir") == 0) { *st = t_mkdir(ac, av); return 1; }
+  if (strcmp(c, "grep") == 0) { *st = t_grep(ac, av); return 1; }
+  if (strcmp(c, "diff") == 0) { *st = t_diff(ac, av); return 1; }
+  if (strcmp(c, "cp") == 0) { *st = t_cp(ac, av); return 1; }
+  if (strcmp(c, "mv") == 0) { *st = t_mv(ac, av); return 1; }
+  if (strcmp(c, "ln") == 0) { *st = t_ln(ac, av); return 1; }
+  if (strcmp(c, "uname") == 0) { *st = t_uname(ac, av); return 1; }
+  return 0;
 }
