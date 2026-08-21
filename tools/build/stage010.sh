@@ -143,6 +143,6 @@ do_stage010() {
         cc10d0.bin cc10d.bin cc10e0.bin cc10e.bin cc10f0.bin cc10f.bin \
         cc10g0.bin cc10g.bin cc10h0.bin cc10h.bin cc10i0.bin cc10i.bin \
         cc10j0.bin cc10j.bin cc10k0.bin cc10k.bin cc10l0.bin cc10l.bin \
-        cc.bin \
+        cc.bin cc10l.o \
         -- stage010/*.sc stage010/include/*.h tmp/build/stage008.stamp tools/build/stage010.sh
 }

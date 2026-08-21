@@ -17,6 +17,6 @@ build_stage009() {
 }
 
 do_stage009() {
-    run_stage stage009 pp.bin \
+    run_stage stage009 pp.bin pp.o \
         -- stage009/pp.sc tmp/build/stage008.stamp tools/build/stage009.sh
 }

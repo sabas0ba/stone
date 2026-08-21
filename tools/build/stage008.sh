@@ -29,6 +29,6 @@ build_stage008() {
 }
 
 do_stage008() {
-    run_stage stage008 cc0.bin ld0.bin cc8.bin ld.bin \
+    run_stage stage008 cc0.bin ld0.bin cc8.bin ld.bin ld.o \
         -- stage008/cc.sc stage008/ld.sc tmp/build/stage007.stamp tools/build/stage008.sh
 }

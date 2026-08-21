@@ -123,9 +123,24 @@ for o in pp.o cc10l.o ld.o; do
     { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld12" > tmp/s12/f_new.bin
     r2=$?
     if ! cmp -s tmp/s12/f_old.bin tmp/s12/f_new.bin; then
-        # 落ちたときに何が起きたかを残す。無言だと CI で追えない
+        # 落ちたときに何が起きたかを残す。無言だと CI で追えない。
+        #
+        # **入力の素性まで出す。** 同じ入力を 2 つのリンカへ流している
+        # はずなのに答が違うなら，違っているのは入力かリンカのどちらか
+        # である。手元で通って CI で落ちたとき，どちらが違うのかを
+        # 憶測で詰めることになり，1 往復を無駄にした。
         echo "   $o: ld rc=$r1 ($(wc -c < tmp/s12/f_old.bin) バイト) /" \
              "ld12 rc=$r2 ($(wc -c < tmp/s12/f_new.bin) バイト)"
+        for _f in "tmp/build/$o" "$ld" "$ld12"; do
+            if [ -e "$_f" ]; then
+                echo "     in  $_f $(wc -c < "$_f") $(sha256sum "$_f" | cut -c1-16)"
+            else
+                echo "     in  $_f **無い**"
+            fi
+        done
+        for _f in tmp/s12/f_old.bin tmp/s12/f_new.bin; do
+            echo "     out $_f $(sha256sum "$_f" | cut -c1-16)"
+        done
         ok=1
     fi
 done
