@@ -1,0 +1,25 @@
+cat one one
+cat2 one one
+cat-stdin one one
+cat-missing ok ok
+head2 l1 l1
+head2-has-l2 ok ok
+head2-cut-l3 ok ok
+head-default ok ok
+grep beta beta
+grep-q ok ok
+grep-q-miss ok ok
+grep-v alpha alpha
+grep-dashdash ok ok
+diff-same ok ok
+diff-differ ok ok
+cp one one
+mv one one
+mv-gone ok ok
+ln one one
+rm ok ok
+rm-f ok ok
+mkdir-p deep deep
+err-quiet ok ok
+err-file ok ok
+done

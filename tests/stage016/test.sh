@@ -271,4 +271,69 @@ r=$?
 report $? "run: sh2 が kernel21 の上で参照シェルと同じ結果を出す"
 [ -s "$out/shprobe.diff" ] && sed -n '4,$p' "$out/shprobe.diff"
 
+section "道具と空装置 (docs/stage016-os.md 11 章)"
+
+# 道具の側も同じやり方で見る。**期待値は本物の sh と本物の coreutils
+# で作る**ので，検査できるのは両者が一致する範囲だけである。一致
+# しない範囲は 11.4 に不足として並べてある
+sh tests/stage016/user/toolprobe.sh > "$out/toolprobe.ref" 2>&1
+report $? "ref: 参照シェルと本物の道具で probe が通る"
+
+diff -q tests/stage016/expected/toolprobe.txt "$out/toolprobe.ref" > /dev/null
+report $? "ref: 記録した期待値が参照シェルの出力と一致する"
+
+# 各行は「名札 期待 実測」である。期待と実測が食い違う行が 1 つでも
+# あれば駄目。**expected/ との突き合わせだけでは，記録した期待値の
+# ほうが間違っている場合を捕まえられない**
+awk 'NF >= 3 && $2 != $3 { bad = 1 } END { exit bad }' \
+    tests/stage016/expected/toolprobe.txt
+report $? "ref: 期待と実測が全行で一致している (記録の側の取り違え避け)"
+
+trt=$out/troot
+mkdir -p "$trt"
+cp tests/stage016/user/toolprobe.sh "$trt/probe.sh"
+cp tmp/build/sh2.bin "$trt/sh2"
+printf 'sh2 probe.sh\n' > "$trt/boot"
+# 道具は木を作って回るので，項目数を多めに取る
+sh tools/sfs2.sh pack "$trt" "$out/tsfs.img" 4194304 128 > /dev/null \
+    && rm -f "$out/tram" \
+    && dd if=/dev/null of="$out/tram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/tsfs.img" of="$out/tram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/tram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel22.bin < /dev/null \
+        > "$out/toolprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/toolprobe.txt "$out/toolprobe.out" \
+    > "$out/toolprobe.diff"
+report $? "run: 組込みの道具が kernel22 の上で本物と同じ結果を出す"
+[ -s "$out/toolprobe.diff" ] && sed -n '4,$p' "$out/toolprobe.diff"
+
+# uname だけは参照シェルで期待値を作れない。**我々の OS の素性を
+# 答えるものだからである。** 並び順が本物と同じであることは，本物の
+# uname が -m -s に sysname を先に返すのを見て決めた (11.3)
+urt=$out/uroot
+mkdir -p "$urt"
+cp tests/stage016/user/unameprobe.sh "$urt/probe.sh"
+cp tmp/build/sh2.bin "$urt/sh2"
+printf 'sh2 probe.sh\n' > "$urt/boot"
+sh tools/sfs2.sh pack "$urt" "$out/usfs.img" 1048576 32 > /dev/null \
+    && rm -f "$out/uram" \
+    && dd if=/dev/null of="$out/uram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/usfs.img" of="$out/uram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/uram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel22.bin < /dev/null \
+        > "$out/unameprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/unameprobe.txt \
+    "$out/unameprobe.out" > "$out/unameprobe.diff"
+report $? "run: uname が我々の素性を本物と同じ並び順で答える"
+[ -s "$out/unameprobe.diff" ] && sed -n '4,$p' "$out/unameprobe.diff"
+
+# 本物の uname が「書いた順ではなく決まった順」で並べることを，
+# その場で確かめる。**これが崩れると上の期待値ごと嘘になる**
+[ "$(uname -m -s)" = "$(uname -s) $(uname -m)" ]
+report $? "ref: 本物の uname も -m -s に sysname を先に並べる"
+
 summary
