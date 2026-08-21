@@ -191,7 +191,21 @@ else
     done
 fi
 
+# やり直して通ったものを最後の 1 行にも出す。**Stage ごとの行だけだと
+# 見落とす。** 実行が再現しない環境の上では一致の検査が一致を測れないので
+# (docs/dev-notes.md 1.6)，何回やり直したかは全体の信頼度そのものである
+warn_total=0
+for _l in tmp/test-stage*.log; do
+    [ -f "$_l" ] || continue
+    _n=$(grep -c '^warn ' "$_l" 2> /dev/null)
+    warn_total=$((warn_total + _n))
+done
+
 echo "===="
+if [ "$warn_total" -gt 0 ]; then
+    echo "warning: $warn_total 件がやり直して通った (実行が再現していない。dev-notes 1.6)"
+    grep -h '^warn ' tmp/test-stage*.log 2> /dev/null | sed 's/^/  /'
+fi
 if [ "$overall_fail" -eq 0 ]; then
     echo "result: all passed"
 else
