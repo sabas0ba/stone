@@ -1,5 +1,6 @@
 cat one one
 cat2 one one
+cat2-second ok ok
 cat-stdin one one
 cat-missing ok ok
 head2 l1 l1

@@ -22,6 +22,7 @@ cat a.txt > o1.txt
 echo "cat one $(cat o1.txt)"
 cat a.txt b.txt > o2.txt
 echo "cat2 one $(head -1 o2.txt)"
+grep -q two o2.txt && echo "cat2-second ok ok"
 cat < a.txt > o3.txt
 echo "cat-stdin one $(cat o3.txt)"
 cat nosuch.txt > /dev/null 2>&1 || echo "cat-missing ok ok"
