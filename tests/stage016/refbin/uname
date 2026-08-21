@@ -1,0 +1,31 @@
+#!/bin/sh
+# 我々の OS の素性を，本物の uname と同じ並び順 (-s -n -r -v -m -p -i -o)
+# で返す身代わり。
+#
+# **ここだけは参照実行の側にも我々の値を教えないと比べられない。**
+# uname は「その機械が何か」を答えるものなので，本物の uname は
+# 当然ホストのことを答える。並び順が本物と同じであることは
+# tests/stage016/test.sh が本物の uname を見て別に確かめている。
+o=; put=
+add() { if [ -n "$put" ]; then o="$o $1"; else o=$1; put=1; fi; }
+want() {
+    c=$1
+    shift
+    for a in "$@"; do
+        case "$a" in
+        -*) case "$a" in *"$c"*) return 0 ;; esac ;;
+        esac
+    done
+    return 1
+}
+for c in s r m p o; do
+    if want "$c" "$@" || want a "$@"; then
+        case "$c" in
+        m | p) add riscv32 ;;
+        r) add 16 ;;
+        *) add stone ;;
+        esac
+    fi
+done
+[ -n "$put" ] || o=stone
+echo "$o"

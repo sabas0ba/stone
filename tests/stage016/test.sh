@@ -342,4 +342,51 @@ report $? "run: uname が我々の素性を本物と同じ並び順で答える"
 [ "$(uname -m -s)" = "$(uname -s) $(uname -m)" ]
 report $? "ref: 本物の uname も -m -s に sysname を先に並べる"
 
+section "configure を我々の OS の上で走らせる (docs/stage016-os.md 11.6)"
+
+# 第 4 部の完了条件。tcc の configure (768 行) を我々の OS で走らせ，
+# 本物の POSIX シェルの結果と突き合わせる。
+#
+# 参照実行には身代わりを 2 つ通す (tests/stage016/refbin)。
+#   sh2    -> 本物の sh。probe を 2 通り書き分けないため
+#   uname  -> 我々の OS の素性。**機種を答えるものなので，教えないと
+#             比べようがない**
+#
+# 唯一そろえられないのが「Source path」の行である。configure は
+# pwd をそこへ書く。我々の OS では / だが，参照実行は作業用の
+# ディレクトリになる。**その 1 行だけを揃えてから比べる**
+cfg=$out/cfgref
+mkdir -p "$cfg"
+cp docs/external/tcc/configure docs/external/tcc/VERSION "$cfg/"
+( cd "$cfg" && PATH="$repo_root/tests/stage016/refbin:$PATH" \
+    sh "$repo_root/tests/stage016/user/cfgprobe.sh" ) > "$out/cfgprobe.raw" 2>&1
+r=$?
+sed "s|$cfg|/|g" "$out/cfgprobe.raw" > "$out/cfgprobe.ref"
+[ "$r" -eq 0 ]
+report $? "ref: 参照シェルで configure が通る"
+
+diff -q tests/stage016/expected/cfgprobe.txt "$out/cfgprobe.ref" > /dev/null
+report $? "ref: 記録した期待値が参照シェルの出力と一致する"
+
+crt=$out/croot
+mkdir -p "$crt"
+cp tests/stage016/user/cfgprobe.sh "$crt/probe.sh"
+cp docs/external/tcc/configure docs/external/tcc/VERSION "$crt/"
+cp tmp/build/sh2.bin "$crt/sh2"
+printf 'sh2 probe.sh\n' > "$crt/boot"
+# configure は途中の産物をいくつも作る。項目数に余裕を持たせる
+sh tools/sfs2.sh pack "$crt" "$out/csfs.img" 8388608 192 > /dev/null \
+    && rm -f "$out/cram" \
+    && dd if=/dev/null of="$out/cram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/csfs.img" of="$out/cram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/cram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel22.bin < /dev/null \
+        > "$out/cfgprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/cfgprobe.txt "$out/cfgprobe.out" \
+    > "$out/cfgprobe.diff"
+report $? "run: configure が kernel22 の上で参照シェルと同じ結果を出す"
+[ -s "$out/cfgprobe.diff" ] && sed -n '4,$p' "$out/cfgprobe.diff"
+
 summary
