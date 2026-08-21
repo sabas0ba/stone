@@ -319,3 +319,336 @@ static char *savedtok;
 static int savedtype;
 static void lmark(void) { savedip = ip; savedtok = tok; savedtype = toktype; }
 static void lback(void) { ip = savedip; tok = savedtok; toktype = savedtype; }
+
+/* ---- 構文解析 (再帰下降) ----
+ *
+ * list     := and_or ((';' | '\n') and_or)*
+ * and_or   := pipeline (('&&' | '||') pipeline)*
+ * pipeline := command ('|' command)*
+ * command  := simple | if | while | until | for | case | '{' list '}' | funcdef
+ */
+
+static int p_list(void);
+
+static int newnode(int kind) {
+  int n;
+  if (nnd >= NNODE) { fputs("sh2: script too complex\n", stderr); exit(2); }
+  n = nnd;
+  nnd = nnd + 1;
+  nd[n].kind = kind;
+  nd[n].a = -1; nd[n].b = -1; nd[n].c = -1;
+  nd[n].w0 = nwt; nd[n].wn = 0;
+  nd[n].r0 = nrd; nd[n].rn = 0;
+  nd[n].next = -1;
+  return n;
+}
+
+static void addword(char *w) {
+  if (nwt >= NWORD) { fputs("sh2: too many words\n", stderr); exit(2); }
+  wtab[nwt] = w;
+  nwt = nwt + 1;
+}
+
+static void addrd(int type, int fd, char *w) {
+  if (nrd >= NRD) { fputs("sh2: too many redirections\n", stderr); exit(2); }
+  rdt[nrd].type = type;
+  rdt[nrd].fd = fd;
+  rdt[nrd].word = w;
+  nrd = nrd + 1;
+}
+
+/* 改行と ; を読み飛ばす */
+static void skipnl(void) {
+  while (toktype == T_NL || toktype == T_SEMI) lex();
+}
+
+static int iskw(char *s) {
+  return toktype == T_WORD && strcmp(tok, s) == 0;
+}
+
+/* 語がそのまま予約語になる位置かどうかは呼び手が決める */
+static int isreserved(char *s) {
+  return strcmp(s, "if") == 0 || strcmp(s, "then") == 0
+      || strcmp(s, "elif") == 0 || strcmp(s, "else") == 0
+      || strcmp(s, "fi") == 0 || strcmp(s, "while") == 0
+      || strcmp(s, "until") == 0 || strcmp(s, "do") == 0
+      || strcmp(s, "done") == 0 || strcmp(s, "for") == 0
+      || strcmp(s, "in") == 0 || strcmp(s, "case") == 0
+      || strcmp(s, "esac") == 0 || strcmp(s, "}") == 0;
+}
+
+static void expect(char *s) {
+  if (!iskw(s)) {
+    fprintf(stderr, "sh2: syntax error: expected %s\n", s);
+    exit(2);
+  }
+  lex();
+}
+
+/* リダイレクトを 1 つ読む。読んだら 1 */
+static int p_redir(int *rn) {
+  int fd;
+  int type;
+  fd = -1;
+  if (toktype == T_IONUM) { fd = ionum; lex(); }
+  if (toktype == T_LT) {
+    if (ip[0] == '<') {         /* << (字句が < を 2 つに割っている) */
+      ip = ip + 1;
+      lex();
+      addrd(R_HERE, fd < 0 ? 0 : fd, heretext(tok));
+      lex();
+      *rn = *rn + 1;
+      return 1;
+    }
+    type = R_IN;
+  } else if (toktype == T_GT) {
+    type = R_OUT;
+  } else if (toktype == T_APP) {
+    type = R_APP;
+  } else {
+    if (fd >= 0) { fputs("sh2: syntax error near fd\n", stderr); exit(2); }
+    return 0;
+  }
+  lex();
+  if (toktype != T_WORD) { fputs("sh2: syntax error: redirect\n", stderr); exit(2); }
+  if (fd < 0) fd = (type == R_IN) ? 0 : 1;
+  addrd(type, fd, tok);
+  lex();
+  *rn = *rn + 1;
+  return 1;
+}
+
+static int p_simple(void) {
+  int n;
+  int rn;
+  n = newnode(N_SIMPLE);
+  rn = 0;
+  for (;;) {
+    if (p_redir(&rn)) continue;
+    if (toktype != T_WORD) break;
+    if (nd[n].wn == 0 && isreserved(tok)) break;
+    addword(tok);
+    nd[n].wn = nd[n].wn + 1;
+    lex();
+  }
+  nd[n].rn = rn;
+  if (nd[n].wn == 0 && rn == 0) return -1;
+  return n;
+}
+
+static int p_if(void) {
+  int n;
+  int c;
+  n = newnode(N_IF);
+  lex();                        /* if */
+  nd[n].a = p_list();           /* 条件 */
+  expect("then");
+  nd[n].b = p_list();           /* then 側 */
+  if (iskw("elif")) {
+    /* elif は「else の中に if がある」ものとして畳む */
+    nd[n].c = p_if();
+    return n;
+  }
+  if (iskw("else")) {
+    lex();
+    nd[n].c = p_list();
+  }
+  if (iskw("fi")) { lex(); return n; }
+  /* elif から来た場合は fi を親が食う */
+  c = 0;
+  (void)c;
+  return n;
+}
+
+static int p_while(int kind) {
+  int n;
+  n = newnode(kind);
+  lex();                        /* while / until */
+  nd[n].a = p_list();
+  expect("do");
+  nd[n].b = p_list();
+  expect("done");
+  return n;
+}
+
+static int p_for(void) {
+  int n;
+  n = newnode(N_FOR);
+  lex();                        /* for */
+  if (toktype != T_WORD) { fputs("sh2: syntax error: for\n", stderr); exit(2); }
+  addword(tok);                 /* 変数名 (w0) */
+  nd[n].wn = 1;
+  lex();
+  skipnl();
+  if (iskw("in")) {
+    lex();
+    while (toktype == T_WORD && !isreserved(tok)) {
+      addword(tok);
+      nd[n].wn = nd[n].wn + 1;
+      lex();
+    }
+  } else {
+    /* in が無ければ位置パラメータを回す。"$@" を 1 語として入れておく */
+    addword(sdup0("\"$@\""));
+    nd[n].wn = nd[n].wn + 1;
+  }
+  skipnl();
+  expect("do");
+  nd[n].b = p_list();
+  expect("done");
+  return n;
+}
+
+static int p_case(void) {
+  int n;
+  int it;
+  int prev;
+  n = newnode(N_CASE);
+  lex();                        /* case */
+  if (toktype != T_WORD) { fputs("sh2: syntax error: case\n", stderr); exit(2); }
+  addword(tok);                 /* 対象の語 */
+  nd[n].wn = 1;
+  lex();
+  skipnl();
+  expect("in");
+  skipnl();
+  prev = -1;
+  while (!iskw("esac") && toktype != T_EOF) {
+    it = newnode(N_CASEIT);
+    if (toktype == T_LP) lex();         /* 省略できる ( */
+    for (;;) {
+      if (toktype != T_WORD) break;
+      addword(tok);
+      nd[it].wn = nd[it].wn + 1;
+      lex();
+      if (toktype == T_PIPE) { lex(); continue; }
+      break;
+    }
+    if (toktype != T_RP) { fputs("sh2: syntax error: case pattern\n", stderr); exit(2); }
+    lex();
+    skipnl();
+    if (!iskw("esac") && toktype != T_DSEMI)
+      nd[it].a = p_list();
+    if (toktype == T_DSEMI) lex();
+    skipnl();
+    if (prev < 0) nd[n].a = it; else nd[prev].next = it;
+    prev = it;
+  }
+  expect("esac");
+  return n;
+}
+
+static int p_command(void) {
+  int n;
+  int rn;
+
+  skipnl();
+  if (toktype == T_EOF) return -1;
+  if (iskw("if")) return p_if();
+  if (iskw("while")) return p_while(N_WHILE);
+  if (iskw("until")) return p_while(N_UNTIL);
+  if (iskw("for")) return p_for();
+  if (iskw("case")) return p_case();
+  if (iskw("!")) { lex(); n = newnode(N_NOT); nd[n].a = p_command(); return n; }
+  if (toktype == T_WORD && strcmp(tok, "{") == 0) {
+    lex();
+    n = newnode(N_GROUP);
+    nd[n].a = p_list();
+    expect("}");
+    rn = 0;
+    while (p_redir(&rn)) ;
+    nd[n].rn = rn;
+    return n;
+  }
+  if (toktype == T_LP) {
+    /* サブシェルは並行しないので群と同じに扱う */
+    lex();
+    n = newnode(N_GROUP);
+    nd[n].a = p_list();
+    if (toktype != T_RP) { fputs("sh2: syntax error: )\n", stderr); exit(2); }
+    lex();
+    return n;
+  }
+  /* 関数定義か? name () { ... } */
+  if (toktype == T_WORD && isname1((int)(unsigned char)tok[0])) {
+    lmark();
+    {
+      char *nm;
+      nm = tok;
+      lex();
+      if (toktype == T_LP) {
+        lex();
+        if (toktype == T_RP) {
+          lex();
+          skipnl();
+          n = newnode(N_FUNC);
+          addword(nm);
+          nd[n].wn = 1;
+          nd[n].a = p_command();
+          return n;
+        }
+      }
+      lback();
+    }
+  }
+  return p_simple();
+}
+
+static int p_pipeline(void) {
+  int n;
+  int l;
+  l = p_command();
+  if (l < 0) return -1;
+  while (toktype == T_PIPE) {
+    lex();
+    skipnl();
+    n = newnode(N_PIPE);
+    nd[n].a = l;
+    nd[n].b = p_command();
+    l = n;
+  }
+  return l;
+}
+
+static int p_andor(void) {
+  int n;
+  int l;
+  l = p_pipeline();
+  if (l < 0) return -1;
+  for (;;) {
+    if (toktype == T_ANDIF) {
+      lex(); skipnl();
+      n = newnode(N_AND);
+    } else if (toktype == T_ORIF) {
+      lex(); skipnl();
+      n = newnode(N_OR);
+    } else {
+      break;
+    }
+    nd[n].a = l;
+    nd[n].b = p_pipeline();
+    l = n;
+  }
+  return l;
+}
+
+static int p_list(void) {
+  int n;
+  int l;
+  skipnl();
+  l = p_andor();
+  if (l < 0) return -1;
+  for (;;) {
+    if (toktype != T_SEMI && toktype != T_NL) break;
+    while (toktype == T_SEMI || toktype == T_NL) lex();
+    if (toktype == T_EOF) break;
+    if (toktype == T_WORD && isreserved(tok)) break;
+    if (toktype == T_RP || toktype == T_DSEMI) break;
+    n = newnode(N_SEQ);
+    nd[n].a = l;
+    nd[n].b = p_andor();
+    if (nd[n].b < 0) { nnd = nnd - 1; break; }
+    l = n;
+  }
+  return l;
+}
