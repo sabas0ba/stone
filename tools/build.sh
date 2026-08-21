@@ -27,6 +27,28 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 mkdir -p tmp/build
 
+# 生成物が「無い」「0 バイト」でないことを見る。0 なら 1 を返す。
+#
+# **これを入れたのは，落ちたビルドが緑として記録される事故が 3 度
+# 起きたからである** (docs/dev-notes.md 1.2)。仕組みはこうである ——
+# ccgen_run / kern_run / *_run はどれも末尾が `echo "built ..." >&2` で，
+# **関数の終了状態はその echo のもの**になる。途中の qemu が 1 つ残らず
+# 失敗しても，リダイレクトが 0 バイトのファイルを作り，関数は 0 を返し，
+# step がそれを正しい生成物として印を書く。次回は「できている」と
+# 誤認して先へ進む。
+#
+# 各 *_run に set -e を入れて回るより，**出来上がりを見る**ほうが確実で
+# ある。この鎖の生成物に 0 バイトが正しい場面は無い。
+nonempty() {
+    for _f in "$@"; do
+        if [ ! -s "$_f" ]; then
+            echo "error: $_f が空か存在しない (ビルドは失敗している)" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
 # run_stage <stage> <生成物 (tmp/build/ 内の名前)...> -- <入力ファイル...>
 run_stage() {
     name=$1; shift
@@ -45,6 +67,12 @@ run_stage() {
     # 「できている」と誤認して先へ進み，原因から遠い所で落ちる
     if ! "build_$name"; then
         echo "error: build_$name が失敗した" >&2
+        rm -f "$stamp"
+        return 1
+    fi
+    # shellcheck disable=SC2086
+    if ! nonempty $outs; then
+        echo "error: build_$name の生成物が空だった" >&2
         rm -f "$stamp"
         return 1
     fi
@@ -81,6 +109,8 @@ step() {
         return 0
     fi
     "$@" || return 1
+    # shellcheck disable=SC2086
+    nonempty $_outs || return 1
     # shellcheck disable=SC2086
     { echo "$_new"; sha256sum $_outs; } > "$_stamp"
 }
