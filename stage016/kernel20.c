@@ -121,6 +121,10 @@ int urun(void);
 #define E_FLAG  60
 #define F_USED  1
 #define F_DIR   2
+/* 消されたが，まだ開いている fd が指している項目 (第 4 部の 1)。
+ * F_USED は立てたままにするので sfsmk が再利用しない。名前と親は
+ * 消してあるので経路からは引けない。最後の fd が閉じたとき解放する */
+#define F_DEL   4
 
 /* syscall 番号。Linux 互換 (stage012-os.md 5.4) と独自の拡張
  * (500 番台。stage013-tools.md 3.2) */
@@ -210,6 +214,10 @@ int wcopy(unsigned d, unsigned s, unsigned n) {
   return 0;
 }
 
+/* 第 4 部の 1 で足したもの。sys_close が定義より前で呼ぶので宣言しておく */
+int inuse(int i);
+int freeent(int i);
+
 /* 表の項目 i の絶対アドレス */
 unsigned ent(int i) { return SFSA + tblo + i * ENTSZ; }
 
@@ -232,6 +240,7 @@ int childof(int par, char *s, int n) {
   for (i = 0; i < tbln; i++) {
     e = ent(i);
     if ((ld4(e + E_FLAG) & F_USED) == 0) continue;
+    if (ld4(e + E_FLAG) & F_DEL) continue;      /* 消された項目は引けない */
     if (i == 0) continue;               /* 索引 0 はルート (親は自分自身) */
     if ((int)ld4(e + E_PAR) != par) continue;
     if (nameeqn(e + E_NAME, s, n)) return i;
@@ -514,8 +523,12 @@ int sys_openat(int dirfd, unsigned path, int flags) {
 }
 
 int sys_close(int fd) {
+  int i;
   if (fd < 3 || fd >= NFD || fdent[fd] < 0) return 0 - EBADF;
+  i = fdent[fd];
   fdent[fd] = -1;
+  /* 消されるのを待っていた項目なら，最後の fd が閉じたここで解放する */
+  if ((ld4(ent(i) + E_FLAG) & F_DEL) && !inuse(i)) freeent(i);
   return 0;
 }
 
@@ -581,6 +594,27 @@ int sys_getcwd(unsigned buf, int size) {
  * fdent に番号を持ったままなので読み書きは続く —— これは Unix の
  * 「開いている間は消えない」に近い振舞いで，一時ファイルの常套手段
  * (作って開いてすぐ消す) がそのまま通る */
+/* 項目 i を指している fd があるか */
+int inuse(int i) {
+  int k;
+  for (k = 3; k < NFD; k++) if (fdent[k] == i) return 1;
+  if (fd0ent == i || fd1ent == i) return 1;
+  return 0;
+}
+
+/* 項目を本当に解放する (名前・親・長さ・flags をすべて消す)。
+ * データの穴は詰めない (docs/stage016-os.md 9.4 の D1) */
+int freeent(int i) {
+  unsigned e;
+  e = ent(i);
+  st4(e + E_FLAG, 0);
+  st4(e + E_PAR, 0);
+  st4(e + E_LEN, 0);
+  st4(e + E_OFF, 0);
+  *(char *)(e + E_NAME) = 0;
+  return 0;
+}
+
 int sys_unlinkat(int dirfd, unsigned path, int flags) {
   int i;
   unsigned e;
@@ -591,10 +625,21 @@ int sys_unlinkat(int dirfd, unsigned path, int flags) {
   /* ディレクトリは中身が残るので消さない。空かどうかを見て許す道も
    * あるが，要るまで作らない (要らない機能は bad の温床である) */
   if (ld4(e + E_FLAG) & F_DIR) return 0 - EISDIR;
-  st4(e + E_FLAG, 0);
-  st4(e + E_PAR, 0);
-  st4(e + E_LEN, 0);
-  *(char *)(e + E_NAME) = 0;
+  if (inuse(i)) {
+    /* まだ開いている。**名前と親だけ消して実体は残す。**
+     * 経路からは引けなくなるが，その fd からは読み書きできる ——
+     * Unix の「開いている間は消えない」である。一時ファイルの常套手段
+     * (作って開いてすぐ消す) がこれに依る。
+     *
+     * F_USED を落とさないのは sfsmk に再利用させないためである。
+     * 落とすと，まだ読んでいる fd の下で別のファイルが同じ項目に
+     * 割り当たり，**黙って別の中身が読める**ことになる */
+    st4(e + E_PAR, 0);
+    *(char *)(e + E_NAME) = 0;
+    st4(e + E_FLAG, ld4(e + E_FLAG) | F_DEL);
+    return 0;
+  }
+  freeent(i);
   return 0;
 }
 
@@ -625,7 +670,10 @@ int sys_getdents64(int fd, unsigned buf, int n) {
   if (i < 1) i = 1;                     /* 索引 0 はルート自身 */
   while (i < tbln) {
     e = ent(i);
-    if ((ld4(e + E_FLAG) & F_USED) != 0 && (int)ld4(e + E_PAR) == par) {
+    /* F_DEL は「消されたがまだ開いている」項目である。親を 0 にして
+     * あるので，除かないとルートの一覧に空の名前で現れてしまう */
+    if ((ld4(e + E_FLAG) & F_USED) != 0 && (ld4(e + E_FLAG) & F_DEL) == 0
+        && (int)ld4(e + E_PAR) == par) {
       nl = 0;
       while (*(char *)(e + E_NAME + nl)) nl = nl + 1;
       rl = (D_NAME + nl + 1 + 7) / 8 * 8;       /* 8 バイト境界へ */
