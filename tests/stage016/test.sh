@@ -241,4 +241,34 @@ r=$?
 report $? "run: kernel20 が消せて，libc17 の realpath が経路を畳める"
 [ -s "$out/rmprobe.diff" ] && sed -n '4,$p' "$out/rmprobe.diff"
 
+section "sh2: POSIX 部分集合のシェル (docs/stage016-os.md 10 章)"
+
+# **期待値は本物の POSIX シェルで作る。** 我々のシェルはそれに一致
+# しなければならない —— 我々が書いた期待値と突き合わせると，思い違いを
+# そのまま固定してしまう
+sh tests/stage016/user/shprobe.sh > "$out/shprobe.ref" 2>&1
+report $? "ref: 参照シェルで probe が通る"
+
+diff -q tests/stage016/expected/shprobe.txt "$out/shprobe.ref" > /dev/null
+report $? "ref: 記録した期待値が参照シェルの出力と一致する"
+
+srt=$out/sroot
+mkdir -p "$srt"
+cp tests/stage016/user/shprobe.sh "$srt/probe.sh"
+cp tmp/build/sh2.bin "$srt/sh2"
+printf 'sh2 probe.sh\n' > "$srt/boot"
+sh tools/sfs2.sh pack "$srt" "$out/sfs.img" 4194304 64 > /dev/null \
+    && rm -f "$out/sram" \
+    && dd if=/dev/null of="$out/sram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/sfs.img" of="$out/sram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/sram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel21.bin < /dev/null \
+        > "$out/shprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/shprobe.txt "$out/shprobe.out" \
+    > "$out/shprobe.diff"
+report $? "run: sh2 が kernel21 の上で参照シェルと同じ結果を出す"
+[ -s "$out/shprobe.diff" ] && sed -n '4,$p' "$out/shprobe.diff"
+
 summary
