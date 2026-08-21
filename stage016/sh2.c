@@ -2050,18 +2050,42 @@ static int t_ln(int ac, char **av) {
 
 /* 我々の OS の素性を答える (11.3)。configure はこれを見て targetos と
  * cpu を決める。stone は configure の知らない名前なので既定の経路に
- * 落ちる */
+ * 落ちる。
+ *
+ * **選択肢は複数を同時に受け，並べる順は指定の順ではなく uname が
+ * 定めた順である** (-s -n -r -v -m -p -i -o)。configure は
+ * `uname -m -s` と書くが，本物の uname はこれに「sysname machine」の
+ * 順で答える。ここを av[1] だけ見る作りにしていたときは -m だけを
+ * 返しており，本物と食い違っていた。しかも比較のために書いた代役も
+ * 同じ間違いをしていたので，**突き合わせでは露見しなかった** */
 static int t_uname(int ac, char **av) {
-  char *r;
-  r = "stone";
-  if (ac > 1) {
-    if (strcmp(av[1], "-m") == 0) r = "riscv32";
-    else if (strcmp(av[1], "-p") == 0) r = "riscv32";
-    else if (strcmp(av[1], "-r") == 0) r = "16";
-    else if (strcmp(av[1], "-o") == 0) r = "stone";
-    else if (strcmp(av[1], "-s") == 0) r = "stone";
+  int i;
+  int j;
+  int all;
+  int put;
+  char *ord;
+  ord = "srmpo";
+  all = 0;
+  put = 0;
+  for (i = 1; i < ac; i = i + 1)
+    if (av[i][0] == '-' && strchr(av[i] + 1, 'a')) all = 1;
+  for (j = 0; ord[j]; j = j + 1) {
+    char *r;
+    int hit;
+    hit = all;
+    for (i = 1; i < ac; i = i + 1)
+      if (av[i][0] == '-' && strchr(av[i] + 1, ord[j])) hit = 1;
+    if (!hit) continue;
+    r = "stone";
+    if (ord[j] == 'm' || ord[j] == 'p') r = "riscv32";
+    else if (ord[j] == 'r') r = "16";
+    if (put) emit(" ", 1);
+    emit(r, (int)strlen(r));
+    put = 1;
   }
-  emit(r, (int)strlen(r));
+  /* 選択肢が 1 つも無ければ sysname だけ。知らない選択肢しか
+   * 与えられなかったときも同じ扱いにする */
+  if (!put) emit("stone", 5);
   emit("\n", 1);
   return 0;
 }

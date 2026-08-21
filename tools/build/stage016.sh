@@ -32,6 +32,7 @@ build_stage016() {
     kern kernel19 stage016/kernel19.c        # 第 3 部 (記憶域の拡張)
     kern kernel20 stage016/kernel20.c        # 第 4 部の 1 (削除)
     kern kernel21 stage016/kernel21.c        # 第 4 部の 2 (標準エラー)
+    kern kernel22 stage016/kernel22.c        # 第 4 部の 3 (/dev/null)
 
     # libc の第 16 世代。libc15 との差は dirent / mkdir / chdir / getcwd と，
     # open が先頭の '/' を剥がすのをやめたこと (docs/stage016-os.md 7.4)。
@@ -110,7 +111,7 @@ libc16_run() {
 
 do_stage016() {
     run_stage stage016 kernel17.bin kernel18.bin kernel19.bin kernel20.bin \
-        kernel21.bin sh2.bin \
+        kernel21.bin kernel22.bin sh2.bin \
         l16_src_string.o l16_src_ctype.o l16_src_stdlib.o \
         l16_src_morecore.o l16_src_misc15.o \
         l16_posix_sys.o l16_posix_morecore.o l16_posix_stdio.o \
@@ -124,7 +125,8 @@ do_stage016() {
         l18_posix_sys.o l18_posix_morecore.o l18_posix_stdio.o \
         l18_posix_assert.o l18_posix_dir.o \
         -- stage016/kernel17.c stage016/kernel18.c stage016/kernel19.c \
-           stage016/kernel20.c stage016/kernel21.c stage016/sh2.c \
+           stage016/kernel20.c stage016/kernel21.c stage016/kernel22.c \
+           stage016/sh2.c \
            stage016/libc17/include/*.h \
            stage016/libc18/include/*.h stage016/libc18/include/sys/*.h \
            stage016/libc18/src/*.c stage016/libc18/posix/*.c \
