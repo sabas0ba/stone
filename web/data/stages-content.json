@@ -1345,35 +1345,45 @@
    "num": 14,
    "name": "external",
    "title": "external — reading other people's C",
-   "tagline": "The input becomes other people's C. A conformance ledger counts ok / gap / bad and tolerates no silent errors",
+   "tagline": "The input becomes other people's C. A conformance ledger counts ok / gap / bad and tolerates no silent errors — and at the end, unmodified bzip2 and zlib build and run",
    "phase": "phase-c",
    "lang_in": "C89 + real-world C idioms (multiple declarators, string literal concatenation, suffixes, nested initializers, etc.)",
    "lang_impl": "C89 (within what cc10l accepts; the extension stays .sc)",
-   "built_by": "cc.bin (= cc10l; step 1) → itself (fixed point). cc14b is built by cc14a",
-   "summary_md": "Until now, every input was C we wrote ourselves. A toolchain fed only its own code can get away without implementing idioms it never uses. Stage 14 is the entrance to Phase C, switching the input to other people's C. External sources are not imported into the repo; they are fetched and pinned by SHA-256.\n\n**Conformance ledger** (Part 1): 26 probes, each isolating one real-world C idiom, with measured results recorded in a ledger (tests/stage014/ledger.txt) and re-checked on every run. Three states:\n\n- `ok` — compiles and produces the expected output\n- `gap` — cc rejects it with the designated exit code (unimplemented; rejecting is itself correct)\n- `bad` — compiles but the result is wrong (the worst state)\n\nIf the ledger and the measurements disagree, the check fails. It equally catches \"fixed it but the table is stale\" and \"broke it without noticing\". The first measurement came out 13 ok / 12 gap / 1 bad — the sole bad was long long being silently treated as 32 bits.\n\n**cc14a** (Part 2): implements the top-priority multiple declarators (`int a, b;`), adjacent string literal concatenation, integer constant suffixes (U/L), and register, and turns long long from \"accept as 32 bits\" into a rejection. The ledger moved to 17 ok / 9 gap / 0 bad.\n\n**cc14b** (Part 3): nested initializers (`{{1,2},{3,4}}`). nestinit and fptab looked like one cause (ginit1 not accepting `{`), but after the fix the remainder of fptab turned out to be function pointers as struct members. The ledger currently stands at 18 ok / 8 gap / 0 bad.\n\n**cc.bin is not replaced**: pointing it at the newest generation would turn every frozen artifact from Stage 11 onward into different bytes, so the cc14 line is kept under separate names and used only for ledger measurement. Remaining gaps include function-scope static, K&R style, bit-fields, and floating point.",
+   "built_by": "cc.bin (= cc10l) builds cc14a; each later generation is built by the one before it and then by itself (fixed point)",
+   "summary_md": "Until now, every input was C we wrote ourselves. A toolchain fed only its own code can get away without implementing idioms it never uses. Stage 14 is the entrance to Phase C, switching the input to other people's C. External sources are not imported into the repo; they are fetched and pinned by SHA-256.\n\n**Conformance ledger** (Part 1): probes that each isolate one real-world C idiom, with measured results recorded in a ledger (tests/stage014/ledger.txt) and re-checked on every run. Three states:\n\n- `ok` — compiles and produces the expected output\n- `gap` — cc rejects it with the designated exit code (unimplemented; rejecting is itself correct)\n- `bad` — compiles but the result is wrong (the worst state)\n\nIf the ledger and the measurements disagree, the check fails. It equally catches \"fixed it but the table is stale\" and \"broke it without noticing\". The first measurement came out 13 ok / 12 gap / 1 bad — the sole bad was long long being silently treated as 32 bits.\n\n**cc14a … cc14g** (Parts 2–9) widened the language a generation at a time: multiple declarators (`int a, b;`), adjacent string literal concatenation, integer constant suffixes, nested initializers, function-scope static, forward-referenced tags, K&R definitions, bit-fields. The ledger below is read straight out of the file the tests use, so what you see is the current measurement — and every probe in it can be run right here.\n\n**The real targets.** Part 8 built unmodified **bzip2** (libbz2 1.0.8) with pp + cc14f + ld14 + libc14 and ran it on our own OS: compress → decompress round-trips, and the compressed output is readable by the host's `bzip2 -d`. Part 9 added **zlib 1.3.1**, which first broke the preprocessor rather than the compiler — crc32.h's tables make a 743 KiB bundle with 40-character macro names — so pp14 was built, then five compiler gaps were closed in cc14g. Three of those five looked like separate symptoms and had a single root cause: in a typedef-form struct definition, registering a nested struct overwrote the tag name.\n\n**cc.bin is not replaced**: pointing it at the newest generation would turn every frozen artifact from Stage 11 onward into different bytes, so the cc14 line is kept under separate names. The remaining gaps (floating point among them) are what Stage 15 goes after.",
    "new_capabilities": [
     "Making the unimplemented visible and mechanically detecting regressions via the conformance ledger",
     "Multiple declarators in one declaration (int a, b;) — present in nearly every real C file",
     "Adjacent string literal concatenation and integer constant suffixes (U / L)",
-    "Nested initializers (static tables become writable)",
-    "Elimination of silent long long miscompilation (0 bad)"
+    "Nested initializers, function-scope static, forward-referenced tags, K&R definitions, bit-fields",
+    "Elimination of silent long long miscompilation (0 bad)",
+    "pp14: bundles of hundreds of KiB and long macro names",
+    "Unmodified bzip2 and zlib build, run on our OS, and interoperate with the host's implementations"
    ],
    "artifacts": [
     {
-     "file": "cc14a0.bin",
-     "desc": "Bootstrap step 1 by cc10l"
-    },
-    {
      "file": "cc14a.bin",
-     "desc": "Canonical binary of Part 2 (declarations and lexical width)"
-    },
-    {
-     "file": "cc14b0.bin",
-     "desc": "Bootstrap step 1 by cc14a"
+     "desc": "Part 2 — declarations and lexical width"
     },
     {
      "file": "cc14b.bin",
-     "desc": "Canonical binary of Part 3 (nested initializers). The frontline generation used for ledger measurement"
+     "desc": "Part 3 — nested initializers"
+    },
+    {
+     "file": "cc14f.bin",
+     "desc": "The generation that built bzip2"
+    },
+    {
+     "file": "cc14g.bin",
+     "desc": "The frontline generation — built zlib; the ledger is measured against it"
+    },
+    {
+     "file": "pp14.bin",
+     "desc": "Preprocessor for large bundles and long macro names (zlib's crc32.h)"
+    },
+    {
+     "file": "ld14.bin",
+     "desc": "Linker with the 15-byte symbol name limit lifted"
     }
    ],
    "sources": [
@@ -1382,8 +1392,8 @@
      "desc": "Source of cc14a (copied from cc10l and extended)"
     },
     {
-     "path": "stage014/cc14b.sc",
-     "desc": "Source of cc14b (copied from cc14.sc and extended)"
+     "path": "stage014/cc14g.sc",
+     "desc": "Source of the frontline generation (the five zlib gaps)"
     },
     {
      "path": "tests/stage014/ledger.txt",
@@ -1392,14 +1402,666 @@
     {
      "path": "tests/stage014/probe",
      "desc": "Probe programs, each isolating one real-world C idiom"
+    },
+    {
+     "path": "tools/fetch.sh",
+     "desc": "Fetches external sources and pins them by SHA-256"
     }
    ],
    "docs": [
     "docs/stage014-external.md",
     "stage014/cc14.md",
-    "stage014/cc14b.md"
+    "stage014/cc14g.md"
    ],
    "trivia": "During Part 3, the frozen cc14.sc was at first edited in place. On remembering the freeze rule (never rewrite an input whose SHA-256 is recorded), the diff was moved into the new generation cc14b.sc — adding a generation always starts from a copy. Ledger entries are named by symptom, so two entries may share one cause, and one entry may hide two."
+  },
+  {
+   "id": "stage015",
+   "num": 15,
+   "name": "tcc",
+   "title": "tcc — self-hosting someone else's compiler",
+   "tagline": "64-bit integers, floating point, and a RV32 backend we wrote for tcc. T2 == T3 == tccH: the tcc our chain builds rebuilds itself, byte-identical to the reference",
+   "phase": "phase-c",
+   "lang_in": "C89 + long long + float / double (what tcc's own ~30,000 lines demand)",
+   "lang_impl": "C89 (the extension stays .sc; sixteen generations, cc15a … cc15p)",
+   "built_by": "cc14g → cc15a → … → cc15p, each generation built by the previous one and then by itself (fixed point)",
+   "summary_md": "Stage 14 proved the compiler could read other people's C, but the samples were libraries: bzip2 (~5,000 lines) and zlib (~20,000). Stage 15 picks a target that is itself a compiler — **tcc** — and demands the strongest form of correctness the chain knows: not \"it builds\", but \"what it builds can build itself\".\n\n**The completion criterion.** T1 is the tcc our chain (pp + cc + ld) produces from tcc's source. T2 is the tcc that T1 builds. T3 is the tcc that T2 builds. The bar is **T2 == T3**, byte for byte. T1 == T2 is not expected — T1 came out of our code generator, T2 out of tcc's — but if T2 == T3, then T1 emitted code correct enough to reproduce a working compiler.\n\n**tcc had no RV32 backend.** The first measurement of Part 1 found the gap: tcc supports i386, x86-64, arm, arm64 and riscv64 — not riscv32. So Part 5 wrote one (`stage015/tcc/riscv32.patch`, kept as a patch rather than a copied fork, so \"upstream stays unmodified\" remains literally true). Along the way it turned up a genuine upstream bug.\n\n**Parts 2–4 widened the language.** 64-bit integers first (a value is a register pair; division goes to a runtime helper `rt64.c`), then floating point as **software** floating point — a `double` is a bit pattern in two words and every operation is a call into `rtfp.c`, bit-compared against the host's IEEE-754 results. Then libc15: `%llu` / `%f` in printf, `snprintf`, `strtod`, `sscanf`, `setjmp`, `lseek`.\n\n**Self-hosting found eight silent miscompilations.** Every one of them passed the entire existing test suite first. Labelled statements inside `if`, octal literals, the preprocessor's recursion guard, floating point in a variadic tail, the type of an integer constant (C89 6.1.3.2), initialising a local struct from an expression, `strtod` dropping digits that overflowed the accumulator, and long double conversion producing a canonical NaN. A compiler that compiles a compiler is a test no unit test replaces.\n\n**The result.** T2 == T3 — and T2 is **byte-identical to tccH**, the tcc built by the host's gcc through a cross compiler. A chain that starts at 256 hand-encoded bytes emits the same executable as GCC does.\n\nThe self-host takes about 25 minutes for T1 and 30 each for T2 and T3, all under QEMU, so it is **not in CI**; CI guards the chain's reproducibility (SHA-256) and the unit checks, and the self-host is run by hand at milestones.\n\n**Two placement bugs survived to the end** — the storage unit of a bit-field, and the alignment of `long long` / `double` inside a struct. Both were self-consistent inside our own world, so self-hosting never tripped on them; they break the moment our structs meet someone else's. cc15p fixed them by asking `riscv32-tcc` — the backend we wrote — what ilp32 actually mandates.",
+   "new_capabilities": [
+    "64-bit integers: storage, widening, arithmetic, division, comparison, arguments, returns, initialisers (cc15a–cc15e)",
+    "Floating point: float / double literals, arithmetic, comparison, conversion, parameters and arguments (cc15f–cc15j)",
+    "Software floating point runtime (rtfp.c) bit-compared with the host's IEEE-754 double",
+    "Two-word values in a variadic tail (cc15k) — what printf(\"%f\", x) actually needs",
+    "Octal literals, labelled statements, C89 integer-constant typing, local struct initialisation (cc15m–cc15o)",
+    "C89 struct layout: bit-field storage units and long long / double alignment (cc15p)",
+    "pp15 / pp16: bigger macro tables and a correct recursion guard",
+    "ld15 / ld16: thousands of symbols, and mstatus.FS so U-mode may use the FPU",
+    "libc15: %llu / %f, snprintf, strtod, sscanf, setjmp / longjmp, lseek",
+    "kernel16: loads every PT_LOAD segment (tcc emits three)",
+    "A RV32 backend for tcc, written by us and kept as a patch"
+   ],
+   "artifacts": [
+    {
+     "file": "cc15a.bin",
+     "desc": "First 64-bit generation (storage and widening)"
+    },
+    {
+     "file": "cc15e.bin",
+     "desc": "64-bit arithmetic complete; also compiles the runtime helpers rt64 / rtfp"
+    },
+    {
+     "file": "cc15i.bin",
+     "desc": "Floating point arithmetic, comparison and conversion"
+    },
+    {
+     "file": "cc15k.bin",
+     "desc": "Two-word values in a variadic tail — the prerequisite for printf(\"%f\")"
+    },
+    {
+     "file": "cc15p.bin",
+     "desc": "The frontline generation. C89 struct layout corrected; the ledger is measured against this"
+    },
+    {
+     "file": "pp16.bin",
+     "desc": "Preprocessor with a corrected recursion guard (and pp15's larger tables)"
+    },
+    {
+     "file": "ld16.bin",
+     "desc": "Linker that scales to tcc's symbol count and enables the FPU for U-mode"
+    },
+    {
+     "file": "kernel16.bin",
+     "desc": "Kernel that loads every PT_LOAD segment — tcc's executables have three"
+    },
+    {
+     "file": "rt64.o",
+     "desc": "64-bit runtime support (division and remainder)"
+    },
+    {
+     "file": "rtfp.o",
+     "desc": "Software floating point runtime, written without using float or double"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage015/cc15a.sc",
+     "desc": "First 64-bit generation (copied from cc14g)"
+    },
+    {
+     "path": "stage015/cc15i.sc",
+     "desc": "Floating point arithmetic and comparison"
+    },
+    {
+     "path": "stage015/cc15p.sc",
+     "desc": "The frontline generation (C89 struct layout)"
+    },
+    {
+     "path": "stage015/rt64.c",
+     "desc": "64-bit division and remainder, in C"
+    },
+    {
+     "path": "stage015/rtfp.c",
+     "desc": "Software floating point — written without float or double, so an earlier generation can compile it"
+    },
+    {
+     "path": "stage015/kernel16.c",
+     "desc": "Kernel generation that loads every PT_LOAD segment"
+    },
+    {
+     "path": "stage015/tcc/riscv32.patch",
+     "desc": "The RV32 backend we wrote for tcc (a patch, so upstream stays unmodified)"
+    },
+    {
+     "path": "tests/stage015/ledger.txt",
+     "desc": "Conformance ledger for 64-bit and floating point"
+    },
+    {
+     "path": "tests/stage015/probe",
+     "desc": "Probe programs, one language feature each"
+    }
+   ],
+   "docs": [
+    "docs/stage015-tcc.md",
+    "docs/stage015-riscv32.md",
+    "stage015/cc15p.md",
+    "stage015/ld16.md"
+   ],
+   "trivia": "The two placement bugs that survived to the end are the interesting ones. Both were self-consistent — our compiler laid structs out one way, our libc agreed, our tests agreed — so nothing inside our world could see them. They only exist as bugs relative to an outside that we had not yet met. The fix asked the RV32 backend we ourselves had written for tcc what ilp32 mandates, which is a strange loop to be in: the chain checking one of its own products against another."
+  },
+  {
+   "id": "stage016",
+   "num": 16,
+   "name": "OS+",
+   "title": "OS — directories, and room to build in",
+   "tagline": "After tcc, the bottleneck was not the compiler but the OS: 14 MB of user space and a filesystem with no directories. This stage grows both",
+   "phase": "phase-c",
+   "lang_in": "C89 (the kernel is ordinary C; privileged instructions live in the linker's prologue)",
+   "lang_impl": "C89, compiled by cc15p through pp16 and linked by ld16",
+   "built_by": "cc15p + pp16 + ld16 (the Stage 15 frontline). No new compiler generation is needed",
+   "summary_md": "With tcc in hand, the branch point that Stage 15 deferred — how to reach GCC — was re-examined, and the answer was that **it does not depend on the compiler any more.** Measured against what a GCC 4.7 build demands, the gap is entirely in the operating system: 14 MB of user space against hundreds of megabytes, a flat namespace against a deep directory tree, and a toolbox with no awk, no sed and no real make. All three candidate routes to GCC need exactly the same work first, so the branch is deferred once more and this stage grows the OS instead.\n\n**Part 1 — sfs2, a filesystem with directories.** The old sfs kept the whole path (`a/b/c.h`) as one flat name. That is enough to open a file and nothing else: no relative paths, no listing, no creation. sfs2 keeps the flat table — the reason a kernel can read it in a few hundred lines — and adds two fields per entry: a **kind** (file or directory) and a **parent** index. Names become names within their directory, and a path is walked one component at a time. Entry 0 is the root and is its own parent. kernel17 resolves paths through that tree.\n\n**Part 2 — operating on the tree.** kernel18 adds a working directory and four Linux-compatible syscalls: `getcwd` (17), `mkdirat` (34), `chdir` (49), `getdents64` (61) — the last returning records in exactly Linux's layout, so the same code would work on a real kernel. `.` stays put, `..` goes up, and the root's parent is the root.\n\nThe work turned out to be less about adding syscalls than about **finding code that was correct while the namespace was flat and became a lie the moment it had a tree.** Two such bugs surfaced. libc's `open` stripped every leading `/` from a path, which was right when only the root existed and is catastrophic once there is a working directory — an absolute path silently resolves relative to wherever you happen to be. And `getcwd` simply returned `\"/\"`, always, which was true as long as you could never leave the root. The second one was found by accident, through a duplicate-symbol link error, not by a test. That is worth recording: **an implementation that returns a value but lies is invisible to every caller that behaves correctly.**\n\n**Part 3 — room to build in.** The ceiling on `malloc` was `UBRKMAX - UBASE`, 14 MB, and no amount of cleverness gets around that. The constants that could move turned out to be only the ones in the kernel's `#define`s: the trap frame, the kernel stack and the user load address are burned into the linker's prologue as machine code, so **nothing below 0x8600_0000 moves** and no new linker generation is needed. Everything grows upward instead. kernel19 raises `UBRKMAX` to 0x9600_0000, moves the spawn save area above it, and runs with 512 MB of RAM: **13 MiB → 255 MiB measured**, an eighteen-fold increase, with the old kernel measured alongside it in the same check because one number on its own proves nothing.\n\nThe probe deliberately distrusts `sbrk`. It writes a mark at the first and last byte of every megabyte it takes and reads them all back at the end, because \"the allocation succeeds and the write faults\" is exactly the kind of failure the ledger would call *bad*.\n\n**Deliberately out of balance.** The heap can reach 256 MB while the spawn save area is 144 MB, so a parent that has used a lot of memory cannot spawn a child. The kernel checks and returns `ENOMEM` rather than corrupting anything — a *gap*, not a *bad* — and the process that actually uses memory is the compiler, which is always the child at the end of the chain, never the one being saved.",
+   "new_capabilities": [
+    "sfs2: a filesystem with real directories (kind + parent per entry, root at index 0)",
+    "Path resolution through the tree: absolute, relative, nested, and duplicate names in different directories",
+    "getdents64 (61) — directory listing in Linux's exact record layout",
+    "mkdirat (34), chdir (49), getcwd (17) — a working directory that survives spawn",
+    ". and .. , with the root as its own parent",
+    "libc16: dirent.h, sys/stat.h, and the removal of two implementations that silently lied",
+    "Directory file descriptors that refuse read / write (EISDIR) instead of returning nonsense",
+    "User heap raised from 14 MB to 256 MB (13 MiB → 255 MiB measured)",
+    "512 MB memory layout that keeps every address below 0x8600_0000 fixed — no new linker generation"
+   ],
+   "artifacts": [
+    {
+     "file": "kernel17.bin",
+     "desc": "Part 1: reads sfs2 and resolves paths through the directory tree"
+    },
+    {
+     "file": "kernel18.bin",
+     "desc": "Part 2: working directory, getdents64 / mkdirat / chdir / getcwd"
+    },
+    {
+     "file": "kernel19.bin",
+     "desc": "Part 3: the 512 MB layout — 256 MB of user heap"
+    },
+    {
+     "file": "l16_posix_dir.o",
+     "desc": "libc16: opendir / readdir / closedir over getdents64"
+    },
+    {
+     "file": "l16_posix_sys.o",
+     "desc": "libc16 syscall wrappers — no longer strips leading slashes from paths"
+    },
+    {
+     "file": "l16_src_misc15.o",
+     "desc": "libc16 pure part — the fake getcwd that always answered \"/\" is gone"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage016/kernel17.c",
+     "desc": "Part 1: sfs2 and path resolution (copied from kernel16)"
+    },
+    {
+     "path": "stage016/kernel18.c",
+     "desc": "Part 2: working directory and the four directory syscalls"
+    },
+    {
+     "path": "stage016/kernel19.c",
+     "desc": "Part 3: the wider memory layout (four #defines differ from kernel18)"
+    },
+    {
+     "path": "stage016/libc/posix/dir.c",
+     "desc": "opendir / readdir / closedir on top of getdents64"
+    },
+    {
+     "path": "tools/sfs2.sh",
+     "desc": "Host-side pack / unpack / list for sfs2 images"
+    },
+    {
+     "path": "tests/stage016/user",
+     "desc": "The three probes: pathprobe, dirprobe, memprobe"
+    }
+   ],
+   "docs": [
+    "docs/stage016-os.md",
+    "docs/roadmap.md"
+   ],
+   "trivia": "The `getcwd` that always returned \"/\" was not found by a test. It surfaced as a duplicate-symbol error when the real implementation was added next to it — the linker noticed, nobody else could have. A function that returns a plausible value instead of the truth is invisible to every caller that uses it correctly, which is why the design notes treat \"silently wrong\" as strictly worse than \"not implemented\"."
+  }
+ ],
+ "tracks": [
+  {
+   "id": "notation",
+   "label": "Notation",
+   "kind": "compiler",
+   "features": [
+    {
+     "stage": 1,
+     "label": "hex pairs with comments"
+    },
+    {
+     "stage": 1,
+     "label": "self-regeneration as a transcription check"
+    },
+    {
+     "stage": 2,
+     "label": "labels and forward references"
+    },
+    {
+     "stage": 2,
+     "label": "B/J offsets computed and range-checked"
+    },
+    {
+     "stage": 3,
+     "label": "all 48 RV32IM mnemonics"
+    },
+    {
+     "stage": 3,
+     "label": "pseudo-instructions (li / la / call / ret)"
+    },
+    {
+     "stage": 3,
+     "label": "word / byte data directives"
+    }
+   ]
+  },
+  {
+   "id": "lang",
+   "label": "C language",
+   "kind": "compiler",
+   "features": [
+    {
+     "stage": 4,
+     "label": "structured if / else and loops"
+    },
+    {
+     "stage": 4,
+     "label": "named functions, globals, string literals"
+    },
+    {
+     "stage": 5,
+     "label": "infix expressions with precedence"
+    },
+    {
+     "stage": 5,
+     "label": "pointers, 1-D arrays, structs"
+    },
+    {
+     "stage": 5,
+     "label": "parameters, locals, return values"
+    },
+    {
+     "stage": 10,
+     "label": "for / switch / goto / ?: / ++ / sizeof / casts"
+    },
+    {
+     "stage": 10,
+     "label": "typedef / enum / union / prototypes / extern"
+    },
+    {
+     "stage": 10,
+     "label": "unsigned / short / long width and signedness"
+    },
+    {
+     "stage": 10,
+     "label": "function pointers and static linkage"
+    },
+    {
+     "stage": 10,
+     "label": "initializers, varargs, struct by value"
+    },
+    {
+     "stage": 14,
+     "label": "multiple declarators (int a, b;)"
+    },
+    {
+     "stage": 14,
+     "label": "string literal concatenation, U / L suffixes"
+    },
+    {
+     "stage": 14,
+     "label": "nested initializers, function-scope static"
+    },
+    {
+     "stage": 14,
+     "label": "forward-referenced tags, K&R definitions"
+    },
+    {
+     "stage": 14,
+     "label": "bit-fields"
+    },
+    {
+     "stage": 15,
+     "label": "64-bit integers (long long) end to end"
+    },
+    {
+     "stage": 15,
+     "label": "float / double literals and arithmetic"
+    },
+    {
+     "stage": 15,
+     "label": "floating point parameters and arguments"
+    },
+    {
+     "stage": 15,
+     "label": "two-word values in a variadic tail"
+    },
+    {
+     "stage": 15,
+     "label": "octal literals, labelled statements"
+    },
+    {
+     "stage": 15,
+     "label": "C89 integer-constant typing"
+    },
+    {
+     "stage": 15,
+     "label": "C89 struct layout (bit-fields, 8-byte alignment)"
+    }
+   ]
+  },
+  {
+   "id": "pp",
+   "label": "Preprocessor",
+   "kind": "compiler",
+   "features": [
+    {
+     "stage": 9,
+     "label": "#include and the bundle input format"
+    },
+    {
+     "stage": 9,
+     "label": "object / function / variadic macros, # and ##"
+    },
+    {
+     "stage": 9,
+     "label": "the #if family"
+    },
+    {
+     "stage": 9,
+     "label": "/* */ comments, line splicing, __FILE__"
+    },
+    {
+     "stage": 14,
+     "label": "bundles of hundreds of KiB, long macro names"
+    },
+    {
+     "stage": 15,
+     "label": "larger macro tables and arenas (pp15)"
+    },
+    {
+     "stage": 15,
+     "label": "correct recursion guard (pp16)"
+    }
+   ]
+  },
+  {
+   "id": "codegen",
+   "label": "Code generation",
+   "kind": "compiler",
+   "features": [
+    {
+     "stage": 7,
+     "label": "SSA-style IR replacing syntax templates"
+    },
+    {
+     "stage": 7,
+     "label": "constant folding and dead code elimination"
+    },
+    {
+     "stage": 7,
+     "label": "register allocation with spilling"
+    },
+    {
+     "stage": 7,
+     "label": "branches beyond the ±4 KiB limit"
+    },
+    {
+     "stage": 8,
+     "label": "crt0 preamble with external getc / putc / exit"
+    },
+    {
+     "stage": 15,
+     "label": "64-bit values as register pairs"
+    },
+    {
+     "stage": 15,
+     "label": "software floating point calls (rtfp)"
+    }
+   ]
+  },
+  {
+   "id": "link",
+   "label": "Objects & linker",
+   "kind": "compiler",
+   "features": [
+    {
+     "stage": 8,
+     "label": "ELF relocatable objects"
+    },
+    {
+     "stage": 8,
+     "label": "symbol resolution and 4 relocation types"
+    },
+    {
+     "stage": 8,
+     "label": "separate compilation"
+    },
+    {
+     "stage": 12,
+     "label": "'K' kernel and 'E' executable output forms"
+    },
+    {
+     "stage": 13,
+     "label": "generic sys_ecall stub in the 'E' prologue"
+    },
+    {
+     "stage": 14,
+     "label": "symbol names beyond 15 bytes"
+    },
+    {
+     "stage": 15,
+     "label": "thousands of symbols (ld15)"
+    },
+    {
+     "stage": 15,
+     "label": "mstatus.FS — U-mode may use the FPU (ld16)"
+    }
+   ]
+  },
+  {
+   "id": "libc",
+   "label": "Standard library",
+   "kind": "runtime",
+   "features": [
+    {
+     "stage": 11,
+     "label": "string.h and ctype.h"
+    },
+    {
+     "stage": 11,
+     "label": "malloc / free / calloc / realloc"
+    },
+    {
+     "stage": 11,
+     "label": "qsort / bsearch / strtol / atoi / div"
+    },
+    {
+     "stage": 12,
+     "label": "errno and the POSIX wrappers"
+    },
+    {
+     "stage": 12,
+     "label": "stdio: fopen / printf / fgets / ungetc"
+    },
+    {
+     "stage": 14,
+     "label": "assert.h, sprintf family, printf extensions"
+    },
+    {
+     "stage": 15,
+     "label": "%llu and %f, snprintf"
+    },
+    {
+     "stage": 15,
+     "label": "strtod, sscanf"
+    },
+    {
+     "stage": 15,
+     "label": "setjmp / longjmp, lseek"
+    },
+    {
+     "stage": 16,
+     "label": "dirent.h: opendir / readdir / closedir"
+    },
+    {
+     "stage": 16,
+     "label": "sys/stat.h and a truthful getcwd"
+    }
+   ]
+  },
+  {
+   "id": "kernel",
+   "label": "Kernel & syscalls",
+   "kind": "runtime",
+   "features": [
+    {
+     "stage": 12,
+     "label": "M-mode kernel, U-mode user processes"
+    },
+    {
+     "stage": 12,
+     "label": "ELF executable loading"
+    },
+    {
+     "stage": 12,
+     "label": "open / read / write / close / exit"
+    },
+    {
+     "stage": 12,
+     "label": "Linux-compatible syscall ABI"
+    },
+    {
+     "stage": 13,
+     "label": "spawn (500): sequential child, parent image saved"
+    },
+    {
+     "stage": 13,
+     "label": "fd 0 / fd 1 rewiring, blocking reads"
+    },
+    {
+     "stage": 15,
+     "label": "lseek (kernel15)"
+    },
+    {
+     "stage": 15,
+     "label": "every PT_LOAD segment loaded (kernel16)"
+    },
+    {
+     "stage": 16,
+     "label": "path resolution through a directory tree (kernel17)"
+    },
+    {
+     "stage": 16,
+     "label": "getdents64 / mkdirat / chdir / getcwd (kernel18)"
+    },
+    {
+     "stage": 16,
+     "label": "working directory, inherited across spawn"
+    },
+    {
+     "stage": 16,
+     "label": "EISDIR for read / write on a directory fd"
+    }
+   ]
+  },
+  {
+   "id": "fs",
+   "label": "Filesystem",
+   "kind": "runtime",
+   "features": [
+    {
+     "stage": 12,
+     "label": "sfs: flat table + data, injected as a RAM image"
+    },
+    {
+     "stage": 12,
+     "label": "file exchange with the host"
+    },
+    {
+     "stage": 14,
+     "label": "safe overwrite: rewrites never clobber neighbours"
+    },
+    {
+     "stage": 16,
+     "label": "sfs2: entries carry a kind and a parent"
+    },
+    {
+     "stage": 16,
+     "label": "directories as real objects; root is entry 0"
+    },
+    {
+     "stage": 16,
+     "label": ". and .., absolute and relative paths"
+    },
+    {
+     "stage": 16,
+     "label": "same name in different directories"
+    }
+   ]
+  },
+  {
+   "id": "mem",
+   "label": "Memory",
+   "kind": "runtime",
+   "features": [
+    {
+     "stage": 11,
+     "label": "heap in .bss, 1 MiB, K&R free list"
+    },
+    {
+     "stage": 12,
+     "label": "brk / sbrk — the 1 MiB cap lifted"
+    },
+    {
+     "stage": 12,
+     "label": "3 MB of user heap"
+    },
+    {
+     "stage": 16,
+     "label": "14 MB → 256 MB of user heap (255 MiB measured)"
+    },
+    {
+     "stage": 16,
+     "label": "512 MB layout with nothing below 0x8600_0000 moved"
+    }
+   ]
+  },
+  {
+   "id": "tools",
+   "label": "Self-hosting & tools",
+   "kind": "compiler",
+   "features": [
+    {
+     "stage": 1,
+     "label": "the chain regenerates its own seed"
+    },
+    {
+     "stage": 6,
+     "label": "self-hosting: sc written in sc"
+    },
+    {
+     "stage": 6,
+     "label": "fixed-point verification (B2 == B3)"
+    },
+    {
+     "stage": 13,
+     "label": "shell, line editor, mk (make), in-guest rebuild"
+    },
+    {
+     "stage": 13,
+     "label": "cc / pp / ld as OS commands"
+    },
+    {
+     "stage": 13,
+     "label": "fixed point holds on the OS itself"
+    },
+    {
+     "stage": 14,
+     "label": "conformance ledger: ok / gap / bad"
+    },
+    {
+     "stage": 14,
+     "label": "unmodified bzip2 and zlib build and run"
+    },
+    {
+     "stage": 15,
+     "label": "a RV32 backend written for tcc"
+    },
+    {
+     "stage": 15,
+     "label": "T2 == T3 == tccH — tcc self-hosts on our OS"
+    }
+   ]
   }
  ]
 }

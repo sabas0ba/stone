@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>stone — lineage of a bootstrap</title>
 <meta name="description"
-      content="A bootstrap chain that grows from a 256-byte hand-encoded seed into an assembler, a C compiler, a libc and a homemade OS. Every generation's artifact runs in your browser on a RV32 emulator.">
+      content="A bootstrap chain that grows from a 256-byte hand-encoded seed into an assembler, a C compiler, a libc and a homemade OS with directories and 256 MB of heap — far enough that tcc rebuilds itself on it. Every generation's artifact runs in your browser on a RV32 emulator.">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23282433'/%3E%3Ctext x='8' y='12' font-size='10' text-anchor='middle' fill='%23e8b04b' font-family='monospace'%3E石%3C/text%3E%3C/svg%3E">
 </head>
@@ -18,8 +18,10 @@
       a C compiler, a libc and a homemade OS — one generation at a time.
       Each stage is built <strong>only from the artifacts of the previous stage</strong>,
       and the whole process is bit-reproducible.</p>
-    <p class="lede sub">Every artifact on this page is a genuine chain product,
-      and runs right here in your browser on a RV32 emulator.</p>
+    <p class="lede sub">Sixteen generations in, the chain compiles <strong>tcc</strong>, which
+      rebuilds itself on our own OS and comes out <strong>byte-identical</strong> to the tcc
+      that GCC builds. Every artifact on this page is a genuine chain product, and runs right
+      here in your browser on a RV32 emulator.</p>
     <nav class="site-links">
       <a id="repo-link" href="#" rel="noopener">Repository</a>
       <span id="build-info"></span>
@@ -33,7 +35,7 @@
   <div class="tl-slider">
     <button id="tl-play" title="Auto-advance through the generations">▶ auto</button>
     <button id="tl-prev" title="Previous stage (←)">←</button>
-    <input type="range" id="tl-range" min="1" max="14" value="1" step="1"
+    <input type="range" id="tl-range" min="1" max="16" value="1" step="1"
            aria-label="Stage">
     <button id="tl-next" title="Next stage (→)">→</button>
   </div>
@@ -52,10 +54,27 @@
   <div class="md lede-md" id="st-lede"></div>
   <div class="cap-chips" id="st-caps"></div>
 
+  <section class="tracks" id="tracks">
+    <h3>Capability growth — where this generation sits</h3>
+    <p class="pg-note">Ten tracks, sixteen generations. A lit block is where capabilities landed,
+      and the number in it is how many; the brighter it is, the more arrived at once.
+      <b class="tk-compiler">Amber</b> is the compiler side, <b class="tk-runtime">violet</b> the
+      runtime and OS side — and the last two generations show why the bottleneck moved from one to
+      the other. The current generation's column is outlined; click any block to open that track
+      and jump to that generation.</p>
+    <div class="tk-grid" id="tk-grid"></div>
+    <div class="tk-detail" id="tk-detail"></div>
+  </section>
+
   <section class="playground" id="playground">
     <h3>Playground</h3>
     <p class="pg-note" id="pg-note"></p>
     <div id="pg-body">
+      <div class="pg-picker" id="pg-picker" hidden>
+        <label for="pg-sample">Conformance probe</label>
+        <select id="pg-sample"></select>
+        <span class="pg-ledger" id="pg-ledger"></span>
+      </div>
       <label class="pg-label" id="pg-input-label" for="pg-input"></label>
       <textarea id="pg-input" spellcheck="false" rows="14"></textarea>
       <details id="pg-stdin-box">
@@ -83,6 +102,8 @@
     <p class="pg-note" id="term-note"></p>
     <div class="term-cols">
       <div class="term-main">
+        <div class="term-scenarios" id="term-scenarios" hidden></div>
+        <p class="pg-note" id="term-blurb" hidden></p>
         <div class="term-bar">
           <button id="term-boot">Boot</button>
           <span class="term-status" id="term-status">not booted</span>
@@ -94,7 +115,7 @@
                  placeholder="type a command and press Enter">
         </div>
         <div id="term-files-box" hidden>
-          <div class="pg-out-head">Files in the sfs image after the session — click to download</div>
+          <div class="pg-out-head" id="term-files-head">Files in the sfs image after the session — click to download</div>
           <ul class="term-files" id="term-files"></ul>
         </div>
       </div>

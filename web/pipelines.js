@@ -113,19 +113,57 @@ export const PIPELINES = {
     stage012: null,     // OS。プレイグラウンドの代わりにターミナル (TERMINALS)
     stage013: null,
     stage014: {
-        sample: 'files/tests/stage014/probe/multidecl.c',
-        inputLabel: 'Real-world C idioms (try the conformance probes as-is)',
+        // 適合台帳 (tests/stage014/ledger.txt) の probe をそのまま選べる。
+        // 手順は tests/stage014/test.sh の probe() と同じ (pp -> cc14g -> ld)
+        // 見本の一覧は台帳 (coverage の kind:'ledger' の組) から作る。
+        // pipelines.js に名前を写さないので，台帳を直せば選択肢も直る
+        sampleDir: 'files/tests/stage014/probe',
+        samplesFromLedger: true,
+        inputLabel: 'Real-world C idioms — pick a conformance probe, or write your own',
         steps: [
             {
                 name: 'pp', bin: 'assets/bin/pp.bin', src: 'bundle',
-                members: [{ user: true, name: 'probe.c' }],
+                members: [
+                    { name: 'stdarg.h', asset: 'files/stage013/libc/include/stdarg.h' },
+                    { user: true, name: 'probe.c' },
+                ],
             },
-            { name: 'cc14b', bin: 'assets/bin/cc14b.bin', src: 'prev', term: null },
+            { name: 'cc14g', bin: 'assets/bin/cc14g.bin', src: 'prev', term: null },
             { name: 'ld', bin: 'assets/bin/ld.bin', src: 'prev', term: 'nul' },
         ],
         output: 'bin', run: true,
-        note: 'Multiple declarators like `int a, b;` now pass with the cc14 line (cc.bin = cc10l rejects them).',
+        note: 'Every probe below is a line in the conformance ledger. The ledger records what '
+            + 'the measurement **is**, not what we wish it were: `gap` means cc rejects the '
+            + 'program on purpose, and you will see it exit nonzero right here.',
     },
+    stage015: {
+        // tests/stage015/test.sh の probe() と同じ手順。実行時支援
+        // (rt64 / rtfp) を必ず並べる —— 64 bit の除算と浮動小数点の
+        // 変換がこれを呼ぶ
+        sampleDir: 'files/tests/stage015/probe',
+        samplesFromLedger: true,
+        inputLabel: 'C89 + long long + float / double (the Stage 15 conformance probes)',
+        steps: [
+            {
+                name: 'pp', bin: 'assets/bin/pp.bin', src: 'bundle',
+                members: [
+                    { name: 'stdarg.h', asset: 'files/stage015/libc/include/stdarg.h' },
+                    { user: true, name: 'probe.c' },
+                ],
+            },
+            { name: 'cc15p', bin: 'assets/bin/cc15p.bin', src: 'prev', term: null },
+            {
+                name: 'ld + rt64 + rtfp', bin: 'assets/bin/ld.bin', src: 'prev',
+                term: 'nul',
+                extra: ['assets/bin/rt64.o', 'assets/bin/rtfp.o'],
+            },
+        ],
+        output: 'bin', run: true,
+        note: 'Bare metal has no printf, so the probes print **raw IEEE-754 and 64-bit bit '
+            + 'patterns** — that is the point: the ledger compares bits, not rounded text. '
+            + 'For `printf("%f")` and `%llu`, boot the OS in the terminal below.',
+    },
+    stage016: null,     // OS。プレイグラウンドの代わりにターミナル (TERMINALS)
 };
 
 // OS 世代のターミナル。kernel + sfs で起動し，UART をそのまま端末へつなぐ。
@@ -134,6 +172,51 @@ export const PIPELINES = {
 // samples は「入力欄へ先置きする一連のコマンド」(Enter は利用者が押す)。
 const LIBC12 = ['ctype.h', 'errno.h', 'fcntl.h', 'limits.h', 'stdarg.h',
     'stddef.h', 'stdio.h', 'stdlib.h', 'string.h', 'unistd.h'];
+
+// libc15 / libc16 のヘッダ (tools/bundle.sh へ *.h で渡すものと同じ並び)
+const LIBC15 = ['assert.h', 'ctype.h', 'errno.h', 'fcntl.h', 'inttypes.h',
+    'limits.h', 'math.h', 'setjmp.h', 'stdarg.h', 'stddef.h', 'stdio.h',
+    'stdlib.h', 'string.h', 'time.h', 'unistd.h'];
+const LIBC16 = ['assert.h', 'ctype.h', 'dirent.h', 'errno.h', 'fcntl.h',
+    'inttypes.h', 'limits.h', 'math.h', 'setjmp.h', 'stdarg.h', 'stddef.h',
+    'stdio.h', 'stdlib.h', 'string.h', 'time.h', 'unistd.h'];
+
+// libc15 / libc16 の実体 (リンクの並びは tests/stage015・016 と同一)。
+// **経路は文字列そのままで書く。** web/build-site.sh は pipelines.js を
+// 正規表現でなめて資産を集めるので，テンプレート文字列にすると
+// 参照が拾えない
+const L15_OBJS = [
+    'assets/bin/l15_src_string.o', 'assets/bin/l15_src_stdlib.o',
+    'assets/bin/l15_src_misc15.o', 'assets/bin/l15_posix_sys.o',
+    'assets/bin/l15_posix_morecore.o', 'assets/bin/l15_posix_stdio.o',
+    'assets/bin/l15_posix_assert.o',
+    'assets/bin/rt64.o', 'assets/bin/rtfp.o',
+];
+const L16_OBJS = [
+    'assets/bin/l16_src_string.o', 'assets/bin/l16_src_stdlib.o',
+    'assets/bin/l16_src_misc15.o', 'assets/bin/l16_posix_sys.o',
+    'assets/bin/l16_posix_morecore.o', 'assets/bin/l16_posix_stdio.o',
+    'assets/bin/l16_posix_assert.o', 'assets/bin/l16_posix_dir.o',
+    'assets/bin/rt64.o', 'assets/bin/rtfp.o',
+];
+
+// 「ヘッダを束ねて pp16 -> cc15p -> ld16 ('E') で実行形式にする」手順。
+// tests/stage015・016 が sh で書いているものと同じ並びである
+const guestBuild = (headers, incDir, unit, objs, opts = {}) => [
+    {
+        name: 'pp16', bin: 'assets/bin/pp16.bin', src: 'bundle',
+        members: [
+            ...headers.map((h) => ({ name: h, asset: `${incDir}/${h}` })),
+            ...(opts.extraHeaders || []),
+            { name: unit.name, asset: unit.asset },
+        ],
+    },
+    { name: 'cc15p', bin: 'assets/bin/cc15p.bin', src: 'prev', term: null },
+    {
+        name: 'ld16', bin: 'assets/bin/ld16.bin',
+        src: 'prev', prefix: 'E', term: 'nul', extra: objs,
+    },
+];
 
 export const TERMINALS = {
     stage012: {
@@ -217,6 +300,149 @@ export const TERMINALS = {
             { cmd: 'ld < cc12.ld > cc10l.bin', note: 'byte-identical to the chain artifact — download it below after exit' },
             { cmd: 'mk -f mkfile all', note: 'optional: mk rebuilds pp / cc / ld from cc8.o (slow — about a minute)' },
             { cmd: 'exit 0', note: 'end the session and harvest the files' },
+        ],
+    },
+    // Stage 15: 64 bit と浮動小数点が **libc の上で** 効くところを見せる。
+    // lib15 は tests/stage015 が kernel15 / kernel16 の両方で走らせる
+    // 検査そのもの (期待値は tests/stage015/expected/lib15.txt)
+    stage015: {
+        kernel: 'assets/bin/kernel16.bin',
+        mode: 'boot',
+        imgSize: 4 << 20,
+        note: 'The playground above prints bit patterns because bare metal has no printf. '
+            + 'Here the same numbers go through **libc15 on the OS**: `%llu` on a 64-bit '
+            + 'value, `%f` on a double, `snprintf`, `strtod`, `sscanf`, `setjmp` / `longjmp` '
+            + 'and `lseek`. The program is compiled in your browser by pp → cc15p → ld14 and '
+            + 'linked against the real libc15 objects, then booted on kernel16 — the '
+            + 'generation that loads every PT_LOAD segment, which is what tcc\'s own '
+            + 'executables need.',
+        files: [{
+            name: 'lib15',
+            build: [
+                {
+                    name: 'pp', bin: 'assets/bin/pp.bin', src: 'bundle',
+                    members: [
+                        ...LIBC15.map((h) => ({
+                            name: h, asset: `files/stage015/libc/include/${h}`,
+                        })),
+                        { name: 'lib15.c', asset: 'files/tests/stage015/user/lib15.c' },
+                    ],
+                },
+                { name: 'cc15p', bin: 'assets/bin/cc15p.bin', src: 'prev', term: null },
+                {
+                    name: 'ld14', bin: 'assets/bin/ld14.bin', src: 'prev',
+                    prefix: 'E', term: 'nul', extra: L15_OBJS,
+                },
+            ],
+        }],
+        samples: [
+            { cmd: 'lib15', note: 'run it — the line it prints is checked byte for byte by tests/stage015' },
+        ],
+    },
+    // Stage 16: 3 つの世代を並べて見せる。**片方だけを見ても
+    // 「広がった」ことは言えない** (docs/stage016-os.md 8.6) ので，
+    // 記憶域は kernel18 と kernel19 の両方を置く
+    stage016: {
+        mode: 'boot',
+        fs: 2,                  // sfs2 (ディレクトリを持つ)
+        note: 'Three generations, three things to see. Each program below is the exact probe '
+            + 'that tests/stage016 runs under QEMU; here it is compiled in your browser by '
+            + 'pp16 → cc15p → ld16, packed into an **sfs2** image, and booted. Every line is '
+            + '`label expected actual` — so a mismatch is visible without a diff.',
+        scenarios: [
+            {
+                id: 'path',
+                label: 'kernel17 — paths through a tree',
+                kernel: 'assets/bin/kernel17.bin',
+                imgSize: 4 << 20,
+                maxEntries: 128,
+                blurb: 'sfs2 gives entries a **kind** and a **parent**, so a path is walked one '
+                    + 'component at a time. Note `/src/one.c` and `/inc/one.c`: the same name in '
+                    + 'two directories, which the old flat sfs could not even represent.',
+                files: [
+                    { name: 'top.txt', text: 'TOP\n' },
+                    { name: 'src/one.c', text: 'SRC-ONE\n' },
+                    { name: 'inc/one.c', text: 'INC-ONE\n' },
+                    { name: 'src/a/b/three.c', text: 'THREE\n' },
+                    {
+                        name: 'pathprobe',
+                        build: guestBuild(LIBC15, 'files/stage015/libc/include',
+                            { name: 'pathprobe.c',
+                                asset: 'files/tests/stage016/user/pathprobe.c' },
+                            L15_OBJS),
+                    },
+                ],
+                samples: [{ cmd: 'pathprobe', note: 'absolute, relative, deep, duplicate, missing, and through-a-file' }],
+            },
+            {
+                id: 'dir',
+                label: 'kernel18 — a working directory',
+                kernel: 'assets/bin/kernel18.bin',
+                imgSize: 4 << 20,
+                maxEntries: 128,
+                blurb: 'Listing, creating and moving. It must be linked against **libc16**, not '
+                    + 'libc15: libc15\'s `open` strips leading slashes, which was correct while '
+                    + 'the namespace was flat and silently wrong the moment there is a cwd. Watch '
+                    + 'the tree below the terminal — `out/` and `out/f.txt` are made by the program.',
+                files: [
+                    { name: 'top.txt', text: 'TOP\n' },
+                    { name: 'src/one.c', text: 'SRC-ONE\n' },
+                    { name: 'src/a/two.c', text: 'A-TWO\n' },
+                    { name: 'inc/one.c', text: 'INC-ONE\n' },
+                    {
+                        name: 'dirprobe',
+                        build: guestBuild(LIBC16, 'files/stage016/libc/include',
+                            { name: 'dirprobe.c',
+                                asset: 'files/tests/stage016/user/dirprobe.c' },
+                            L16_OBJS, {
+                                extraHeaders: [{
+                                    name: 'sys/stat.h',
+                                    asset: 'files/stage016/libc/include/sys/stat.h',
+                                }],
+                            }),
+                    },
+                ],
+                samples: [{ cmd: 'dirprobe', note: 'getdents64 / mkdirat / chdir / getcwd, and . / ..' }],
+            },
+            {
+                id: 'mem',
+                label: 'kernel19 — 256 MB of heap',
+                kernel: 'assets/bin/kernel19.bin',
+                imgSize: 4 << 20,
+                maxEntries: 32,
+                ramSize: 512 << 20,
+                heavy: true,
+                blurb: 'The probe takes memory a megabyte at a time, writes a mark at the first '
+                    + 'and last byte of each, and reads them all back — because "the allocation '
+                    + 'succeeds and the write faults" is the failure worth catching. Expect '
+                    + '**255**. The same program on kernel18 answers 13. This one asks your '
+                    + 'browser for a 512 MB emulator, so it is the slow one to start.',
+                files: [{
+                    name: 'memprobe',
+                    build: guestBuild(LIBC16, 'files/stage016/libc/include',
+                        { name: 'memprobe.c',
+                            asset: 'files/tests/stage016/user/memprobe.c' },
+                        L16_OBJS),
+                }],
+                samples: [{ cmd: 'memprobe', note: 'got <MiB> then verify ok — 255 on kernel19' }],
+            },
+            {
+                id: 'mem18',
+                label: 'kernel18 — the old ceiling, for comparison',
+                kernel: 'assets/bin/kernel18.bin',
+                imgSize: 4 << 20,
+                maxEntries: 32,
+                blurb: 'The identical binary on the previous generation. One number on its own '
+                    + 'proves nothing, which is why the check in tests/stage016 always runs both.',
+                files: [{
+                    name: 'memprobe',
+                    build: guestBuild(LIBC16, 'files/stage016/libc/include',
+                        { name: 'memprobe.c',
+                            asset: 'files/tests/stage016/user/memprobe.c' },
+                        L16_OBJS),
+                }],
+                samples: [{ cmd: 'memprobe', note: 'got 13 — UBRKMAX - UBASE = 14 MB, less the image and stack' }],
+            },
         ],
     },
 };
