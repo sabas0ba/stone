@@ -16,10 +16,14 @@
 #   STONE_QEMU_GDB    GDB stub の待受け TCP ポート。指定時は最初の命令を実行する前に
 #                     停止し (-S)，デバッガの接続を待つ
 #   STONE_QEMU_RAMFILE
-#                     RAM (128 MiB) 全体を裏づけるホスト側ファイル (share=on)。
+#                     RAM 全体を裏づけるホスト側ファイル (share=on)。
 #                     ゲストの書込みがそのままファイルへ現れるので，共有領域
 #                     (sfs イメージ) の注入と回収に使う (docs/stage012-os.md 4 章)。
-#                     こちらは観測専用ではなく，ファイル交換の正規の経路である
+#                     こちらは観測専用ではなく，ファイル交換の正規の経路である。
+#                     疎ファイルでよい (触れたページだけが実際に消費される)
+#   STONE_QEMU_RAM    RAM 量 (既定 128M)。RAMFILE を使うときだけ効く。
+#                     既定を変えないのは，凍結済みの世代を当時と同じ大きさで
+#                     走らせ続けるためである (docs/stage016-os.md 8 章)
 set -eu
 
 bios="$1"
@@ -51,8 +55,19 @@ else
 fi
 
 if [ -n "${STONE_QEMU_RAMFILE:-}" ]; then
-    set -- "$@" -m 128M \
-        -object memory-backend-file,id=stone-ram,size=128M,mem-path="$STONE_QEMU_RAMFILE",share=on \
+    # RAM 量は既定 128M。STONE_QEMU_RAM で変えられる
+    # (Stage 16 第 3 部。docs/stage016-os.md 8 章)。
+    #
+    # **既定を変えないのは，凍結済みの世代をそのままの環境で走らせ続ける
+    # ためである。** kernel15〜18 は 128 MB を前提にした配置を持っており，
+    # それらの検査は当時と同じ大きさで再現できるほうがよい。広い記憶域を
+    # 要るのは kernel19 以降だけなので，要る側が明示的に指定する。
+    #
+    # RAMFILE は疎ファイルでよい。QEMU が触れたページだけが実際に
+    # ディスクを消費する
+    _ram=${STONE_QEMU_RAM:-128M}
+    set -- "$@" -m "$_ram" \
+        -object memory-backend-file,id=stone-ram,size="$_ram",mem-path="$STONE_QEMU_RAMFILE",share=on \
         -machine memory-backend=stone-ram
 fi
 

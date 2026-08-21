@@ -29,6 +29,7 @@ kern_run() {
 build_stage016() {
     kern kernel17 stage016/kernel17.c        # 第 1 部
     kern kernel18 stage016/kernel18.c        # 第 2 部
+    kern kernel19 stage016/kernel19.c        # 第 3 部 (記憶域の拡張)
 
     # libc の第 16 世代。libc15 との差は dirent / mkdir / chdir / getcwd と，
     # open が先頭の '/' を剥がすのをやめたこと (docs/stage016-os.md 7.4)。
@@ -54,12 +55,12 @@ libc16_run() {
 }
 
 do_stage016() {
-    run_stage stage016 kernel17.bin kernel18.bin \
+    run_stage stage016 kernel17.bin kernel18.bin kernel19.bin \
         l16_src_string.o l16_src_ctype.o l16_src_stdlib.o \
         l16_src_morecore.o l16_src_misc15.o \
         l16_posix_sys.o l16_posix_morecore.o l16_posix_stdio.o \
         l16_posix_assert.o l16_posix_dir.o \
-        -- stage016/kernel17.c stage016/kernel18.c \
+        -- stage016/kernel17.c stage016/kernel18.c stage016/kernel19.c \
            stage016/libc/include/*.h stage016/libc/include/sys/*.h \
            stage016/libc/src/*.c stage016/libc/posix/*.c \
            tmp/build/stage015c.stamp tools/build/stage016.sh
