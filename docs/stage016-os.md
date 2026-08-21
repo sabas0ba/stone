@@ -1051,6 +1051,19 @@ tcc の `configure` はその機種を知らない (`riscv64` は知っている
 2 回目は機種を明示して最後まで通り，`config.h` / `config.mak` /
 `config.texi` が本物と 1 バイトの違いも無く出る。
 
+**この節は CI では走らない。** `configure` の実物が要るが，外部ソースは
+repo に取り込まない決まりで (`tools/fetch.sh` の頭)，`docs/external/` は
+git ignore である。Stage 14 の bzip2 / zlib と Stage 15 の tcc の検査も
+同じ扱いになっている。**手元では必ず走らせること**を検査の飛ばし文言に
+書いた。
+
+飛ばした回に「通った」と読めてはいけないので，飛ばしたことは
+はっきり出す。
+
+    -- configure を我々の OS の上で走らせる --
+       skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)
+       ** 第 4 部の完了条件はこの節である。手元では必ず走らせること **
+
 `--cc=false` を渡している。我々の OS にコンパイラが**コマンドとして**
 無いからである。`false` は本物のシェルにも `sh2` にも組込みで，
 どちらでも同じに「起動できて失敗する」。ここを `gcc` のままにすると

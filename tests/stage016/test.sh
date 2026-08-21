@@ -355,9 +355,25 @@ section "configure を我々の OS の上で走らせる (docs/stage016-os.md 11
 # 唯一そろえられないのが「Source path」の行である。configure は
 # pwd をそこへ書く。我々の OS では / だが，参照実行は作業用の
 # ディレクトリになる。**その 1 行だけを揃えてから比べる**
+#
+# **素材が無ければ飛ばす。** 外部ソースは repo に取り込まない決まりで
+# (tools/fetch.sh の頭)，docs/external/ は git ignore である。したがって
+# **この節は CI では走らない。** Stage 14 の bzip2 / zlib と Stage 15 の
+# tcc の検査も同じ扱いである。
+#
+# 飛ばした回に「通った」と読めてはいけないので，飛ばしたことをはっきり
+# 出す。第 4 部の完了条件そのものなので，手元では必ず走らせること
+tccdir=docs/external/tcc
+if [ ! -f "$tccdir/configure" ]; then
+    echo "   skip: $tccdir が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   ** 第 4 部の完了条件はこの節である。手元では必ず走らせること **"
+    summary
+    exit
+fi
+
 cfg=$out/cfgref
 mkdir -p "$cfg"
-cp docs/external/tcc/configure docs/external/tcc/VERSION "$cfg/"
+cp "$tccdir/configure" "$tccdir/VERSION" "$cfg/"
 ( cd "$cfg" && PATH="$repo_root/tests/stage016/refbin:$PATH" \
     sh "$repo_root/tests/stage016/user/cfgprobe.sh" ) > "$out/cfgprobe.raw" 2>&1
 r=$?
@@ -373,7 +389,7 @@ report $? "ref: 記録した期待値が参照シェルの出力と一致する"
 crt=$out/croot
 mkdir -p "$crt"
 cp tests/stage016/user/cfgprobe.sh "$crt/probe.sh"
-cp docs/external/tcc/configure docs/external/tcc/VERSION "$crt/"
+cp "$tccdir/configure" "$tccdir/VERSION" "$crt/"
 cp tmp/build/sh2.bin "$crt/sh2"
 printf 'sh2 probe.sh\n' > "$crt/boot"
 # configure は途中の産物をいくつも作る。項目数に余裕を持たせる
