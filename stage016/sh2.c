@@ -1226,3 +1226,291 @@ static int builtin(int ac, char **av, int *st) {
   }
   return 0;
 }
+
+/* ---- 実行 ---- */
+
+/* 簡単コマンド。代入だけの行は変数に入れて終わる */
+static int runsimple(int n) {
+  int i;
+  int st;
+  int k;
+  char *in;
+  char *out;
+  int app;
+  char *sin;
+  char *sout;
+  int sapp;
+  int nassign;
+
+  argc_ = 0;
+  nassign = 0;
+  /* 先頭に並ぶ VAR=val は代入である。展開してから入れる */
+  for (i = 0; i < nd[n].wn; i = i + 1) {
+    char *w;
+    char *eq;
+    w = wtab[nd[n].w0 + i];
+    eq = strchr(w, '=');
+    if (argc_ == 0 && eq != 0 && eq != w && isname1((int)(unsigned char)w[0])) {
+      int ok;
+      char *q;
+      ok = 1;
+      for (q = w; q < eq; q = q + 1)
+        if (!isnamec((int)(unsigned char)*q)) { ok = 0; break; }
+      if (ok) {
+        char *name;
+        name = sdup(w, (int)(eq - w));
+        vset(name, expandone(eq + 1));
+        nassign = nassign + 1;
+        continue;
+      }
+    }
+    addarg(w);
+  }
+
+  /* リダイレクトを解決する */
+  in = 0; out = 0; app = 0;
+  for (i = 0; i < nd[n].rn; i = i + 1) {
+    struct rdir *r;
+    r = &rdt[nd[n].r0 + i];
+    if (r->type == R_IN) in = expandone(r->word);
+    else if (r->type == R_OUT) { out = expandone(r->word); app = 0; }
+    else if (r->type == R_APP) { out = expandone(r->word); app = 1; }
+    else if (r->type == R_HERE) {
+      /* here-doc は一時ファイルへ落として < と同じにする */
+      char tn[64];
+      int fd;
+      tmpname(tn);
+      fd = open(tn, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+      if (fd >= 0) {
+        write(fd, r->word, strlen(r->word));
+        close(fd);
+      }
+      in = sdup0(tn);
+    }
+  }
+
+  if (argc_ == 0) return 0;                     /* 代入だけ */
+
+  /* 関数か? */
+  for (k = 0; k < nfun; k = k + 1) {
+    if (strcmp(funs[k].name, argv_[0]) == 0) {
+      int sp;
+      int i2;
+      int savedn;
+      char *saved[NPOS];
+      int vmark;
+      savedn = nposn;
+      for (i2 = 0; i2 <= nposn && i2 < NPOS; i2 = i2 + 1) saved[i2] = pos[i2];
+      for (i2 = 1; i2 < argc_ && i2 < NPOS; i2 = i2 + 1) pos[i2] = argv_[i2];
+      nposn = argc_ - 1;
+      vmark = nvar;                             /* local の境界 */
+      sp = runtree(funs[k].body);
+      nvar = vmark;                             /* local を捨てる */
+      nposn = savedn;
+      for (i2 = 0; i2 <= savedn && i2 < NPOS; i2 = i2 + 1) pos[i2] = saved[i2];
+      return sp;
+    }
+  }
+
+  /* 組込みか? リダイレクトは curout / curin を差し替えて効かせる */
+  sin = curin; sout = curout; sapp = curapp;
+  if (in) curin = in;
+  if (out) { curout = out; curapp = app; }
+  if (builtin(argc_, argv_, &st)) {
+    curin = sin; curout = sout; curapp = sapp;
+    return st;
+  }
+  curin = sin; curout = sout; curapp = sapp;
+
+  /* 外部コマンド。spawn がファイル名で入出力を受ける */
+  argv_[argc_] = 0;
+  if (in == 0) in = curin;
+  if (out == 0 && curout != 0) { out = curout; app = curapp; }
+  st = spawn(argv_[0], argv_, in, out);
+  if (st < 0) {
+    fputs(argv_[0], stderr);
+    fputs(": not found\n", stderr);
+    return 127;
+  }
+  return st;
+}
+
+/* パイプ: 左を一時ファイルへ流し切ってから右を走らせる (9.3) */
+static int runpipe(int n) {
+  char tn[64];
+  char *so;
+  char *si;
+  int sa;
+  int st;
+  tmpname(tn);
+  so = curout; sa = curapp;
+  curout = sdup0(tn); curapp = 0;
+  runtree(nd[n].a);
+  curout = so; curapp = sa;
+  si = curin;
+  curin = sdup0(tn);
+  st = runtree(nd[n].b);
+  curin = si;
+  unlink(tn);
+  return st;
+}
+
+static int runtree(int n) {
+  int st;
+  if (n < 0 || exiting) return lastst;
+  switch (nd[n].kind) {
+  case N_SIMPLE:
+    st = runsimple(n);
+    lastst = st;
+    return st;
+  case N_SEQ:
+    runtree(nd[n].a);
+    if (exiting) return lastst;
+    return runtree(nd[n].b);
+  case N_AND:
+    st = runtree(nd[n].a);
+    if (st != 0 || exiting) return st;
+    return runtree(nd[n].b);
+  case N_OR:
+    st = runtree(nd[n].a);
+    if (st == 0 || exiting) return st;
+    return runtree(nd[n].b);
+  case N_NOT:
+    st = runtree(nd[n].a);
+    lastst = st ? 0 : 1;
+    return lastst;
+  case N_PIPE:
+    st = runpipe(n);
+    lastst = st;
+    return st;
+  case N_GROUP:
+    return runtree(nd[n].a);
+  case N_IF:
+    if (runtree(nd[n].a) == 0) return runtree(nd[n].b);
+    return runtree(nd[n].c);
+  case N_WHILE:
+    st = 0;
+    while (!exiting && runtree(nd[n].a) == 0) st = runtree(nd[n].b);
+    return st;
+  case N_UNTIL:
+    st = 0;
+    while (!exiting && runtree(nd[n].a) != 0) st = runtree(nd[n].b);
+    return st;
+  case N_FUNC:
+    if (nfun >= NFUN) { fputs("sh2: too many functions\n", stderr); exit(2); }
+    funs[nfun].name = wtab[nd[n].w0];
+    funs[nfun].body = nd[n].a;
+    nfun = nfun + 1;
+    return 0;
+  case N_FOR: {
+    int i;
+    int k;
+    char *var;
+    char *items[NARG];
+    int nit;
+    var = wtab[nd[n].w0];
+    argc_ = 0;
+    for (i = 1; i < nd[n].wn; i = i + 1) addarg(wtab[nd[n].w0 + i]);
+    nit = argc_;
+    for (k = 0; k < nit; k = k + 1) items[k] = argv_[k];
+    st = 0;
+    for (k = 0; k < nit && !exiting; k = k + 1) {
+      vset(var, items[k]);
+      st = runtree(nd[n].b);
+    }
+    return st;
+  }
+  case N_CASE: {
+    int it;
+    char *subj;
+    subj = expandone(wtab[nd[n].w0]);
+    for (it = nd[n].a; it >= 0; it = nd[it].next) {
+      int i;
+      for (i = 0; i < nd[it].wn; i = i + 1) {
+        char *pat;
+        pat = expandone(wtab[nd[it].w0 + i]);
+        if (patmatch(pat, subj)) return runtree(nd[it].a);
+      }
+    }
+    return 0;
+  }
+  default:
+    return 0;
+  }
+}
+
+/* 文字列を構文木にして歩く。eval と関数と $() がこれを使う (10.2) */
+static int runstr(char *s) {
+  char *sip;
+  char *stok;
+  int stype;
+  int snnd;
+  int t;
+  int st;
+  sip = ip; stok = tok; stype = toktype;
+  snnd = nnd;
+  ip = s;
+  lex();
+  st = lastst;
+  for (;;) {
+    skipnl();
+    if (toktype == T_EOF) break;
+    t = p_list();
+    if (t < 0) break;
+    st = runtree(t);
+    if (exiting) break;
+  }
+  nnd = snnd;                   /* 使った節を返す (関数の本体は残らない) */
+  ip = sip; tok = stok; toktype = stype;
+  return st;
+}
+
+int main(int argc, char **argv) {
+  int fd;
+  int n;
+  int i;
+  int t;
+
+  pos[0] = (argc > 0) ? argv[0] : "sh2";
+  nposn = 0;
+
+  if (argc > 1) {
+    fd = open(argv[1], O_RDONLY);
+    if (fd < 0) {
+      fputs("sh2: cannot open ", stderr);
+      fputs(argv[1], stderr);
+      fputs("\n", stderr);
+      return 1;
+    }
+    pos[0] = argv[1];
+    for (i = 2; i < argc && i - 1 < NPOS; i = i + 1) {
+      pos[i - 1] = argv[i];
+      nposn = i - 1;
+    }
+  } else {
+    fd = 0;
+  }
+
+  n = 0;
+  for (;;) {
+    int r;
+    if (n >= NSRC - 1) break;
+    r = read(fd, src + n, (size_t)(NSRC - 1 - n));
+    if (r <= 0) break;
+    n = n + r;
+  }
+  if (fd != 0) close(fd);
+  src[n] = 0;
+
+  ip = src;
+  lex();
+  for (;;) {
+    skipnl();
+    if (toktype == T_EOF) break;
+    t = p_list();
+    if (t < 0) break;
+    runtree(t);
+    if (exiting) break;
+  }
+  return exiting ? exitst : lastst;
+}
