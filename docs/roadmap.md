@@ -111,7 +111,7 @@ stone の世代成果物 (実行環境を含む) に混ぜないことを優先�
 |---|---|---|
 | 14 | 外部の小規模 C プログラムのビルド | 無改変の外部ソース (例: bzip2, sqlite3 のような単一ファイル規模) をビルドし，正しく動作する |
 | 15 | tcc のセルフホスト | **完了。** tcc を我々の処理系でビルドし，その tcc が自分自身をビルドできる (T2 == T3 == tccH)。tcc に RV32 の backend が無かったので我々が書き足した ([stage015-riscv32.md](stage015-riscv32.md) / [stage015-tcc.md](stage015-tcc.md)) |
-| 16 | 実行環境の拡張 | 大きなビルドが成立する OS にする。ディレクトリを持つファイル系・広い記憶域・道具立て (設計は [stage016-os.md](stage016-os.md))。第 1 部 (sfs2 の経路解決) は完了 |
+| 16 | 実行環境の拡張 | 大きなビルドが成立する OS にする。ディレクトリを持つファイル系・広い記憶域・道具立て (設計は [stage016-os.md](stage016-os.md))。第 1 部 (sfs2 の経路解決)・第 2 部 (ディレクトリの操作) は完了 |
 
 **Stage 16 を挟むことにした経緯。** Stage 15 の後で 2.1 の分岐点を評価
 し直したところ，**律速はコンパイラではなく OS だった** (ユーザ空間
@@ -165,7 +165,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 12 | **完了** (第 1〜4 部すべて。共有領域と sfs・ld12 とカーネル・libc 環境部・stdio) (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
 | 13 | **完了** (第 1〜4 部すべて。spawn とシェル・ed・cc / ld / pp の移住・mk とゲスト内再生成)。**Phase B が終わった** | [stage013-tools.md](stage013-tools.md) |
 | 14 | **完了** (第 1〜9 部)。適合台帳・言語の拡幅 cc14a〜cc14g・libc 第 14 世代・ld14 / pp14。無改変の bzip2 (libbz2 1.0.8) と zlib 1.3.1 をビルドし，自作 OS 上で圧縮・伸長の往復一致とホスト側実装との相互運用を確認 | [stage014-external.md](stage014-external.md) |
-| 15 | **完了** (第 1〜6 部)。cc15a〜cc15o (64 bit 整数・浮動小数点・言語の穴)・pp15 / pp16・ld15 / ld16・libc15・kernel15 / kernel16，tcc への RV32 backend (riscv32.patch)。**T2 == T3 == tccH** —— 我々の鎖が作った tcc が自作 OS の上で自分自身を作り，その出力が動かない。さらに参照実装 (ホストの gcc が作った交差 tcc) が作る tcc と**バイト一致**する | [stage015-tcc.md](stage015-tcc.md) / [stage015-riscv32.md](stage015-riscv32.md) |
+| 15 | **完了** (第 1〜6 部)。cc15a〜cc15p (64 bit 整数・浮動小数点・言語の穴)・pp15 / pp16・ld15 / ld16・libc15・kernel15 / kernel16，tcc への RV32 backend (riscv32.patch)。**T2 == T3 == tccH** —— 我々の鎖が作った tcc が自作 OS の上で自分自身を作り，その出力がさらに自分自身を作れる (固定点)。しかもそれは参照実装 (ホストの gcc が作った交差 tcc) が作る tcc と**バイト一致**する | [stage015-tcc.md](stage015-tcc.md) / [stage015-riscv32.md](stage015-riscv32.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言

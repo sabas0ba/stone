@@ -101,4 +101,47 @@ r=$?
 report $? "run: kernel17 が sfs2 の木を経路で引ける (絶対・相対・深さ・同名・不在)"
 [ -s "$out/pathprobe.diff" ] && sed -n '4,$p' "$out/pathprobe.diff"
 
+section "kernel18: ディレクトリの操作 (docs/stage016-os.md 7 章)"
+
+# 検査用の木。中身をその経路の名札にしてある
+drt=$out/droot
+mkdir -p "$drt/src/a" "$drt/inc"
+echo "TOP"     > "$drt/top.txt"
+echo "SRC-ONE" > "$drt/src/one.c"
+echo "A-TWO"   > "$drt/src/a/two.c"
+echo "INC-ONE" > "$drt/inc/one.c"      # src/one.c と同名・別階層
+
+# dirprobe を **libc16** とリンクする。libc15 とリンクしてはいけない ——
+# libc15 の open は先頭の '/' を剥がすので，abs-from-src が黙って
+# 間違う (docs/stage016-os.md 7.4)
+sh tools/bundle.sh stage016/libc/include/*.h \
+    "sys/stat.h=stage016/libc/include/sys/stat.h" \
+    tests/stage016/user/dirprobe.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/dirprobe.i" 2> /dev/null \
+    && sh tools/env.sh qemu tmp/build/cc15p.bin < "$out/dirprobe.i" \
+        > "$out/dirprobe.o" 2> /dev/null \
+    && { printf 'E'; cat "$out/dirprobe.o" \
+         tmp/build/l16_src_string.o tmp/build/l16_src_stdlib.o \
+         tmp/build/l16_src_misc15.o tmp/build/l16_posix_sys.o \
+         tmp/build/l16_posix_morecore.o tmp/build/l16_posix_stdio.o \
+         tmp/build/l16_posix_assert.o tmp/build/l16_posix_dir.o \
+         tmp/build/rt64.o tmp/build/rtfp.o; \
+         printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "$drt/dirprobe"
+report $? "build: dirprobe を libc16 とリンクできる"
+
+printf 'dirprobe\n' > "$drt/boot"
+sh tools/sfs2.sh pack "$drt" "$out/dfs.img" 4194304 128 > /dev/null \
+    && rm -f "$out/dram" \
+    && dd if=/dev/null of="$out/dram" bs=1 seek=134217728 2> /dev/null \
+    && dd if="$out/dfs.img" of="$out/dram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/dram" sh tools/env.sh qemu \
+        tmp/build/kernel18.bin < /dev/null > "$out/dirprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/dirprobe.txt "$out/dirprobe.out" \
+    > "$out/dirprobe.diff"
+report $? "run: kernel18 が一覧・作成・移動と . / .. を扱える"
+[ -s "$out/dirprobe.diff" ] && sed -n '4,$p' "$out/dirprobe.diff"
+
 summary
