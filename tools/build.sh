@@ -39,6 +39,11 @@ mkdir -p tmp/build
 #
 # 各 *_run に set -e を入れて回るより，**出来上がりを見る**ほうが確実で
 # ある。この鎖の生成物に 0 バイトが正しい場面は無い。
+#
+# **キャッシュの経路でも見る。** 印は「0 バイトの SHA-256」とも一致して
+# しまうので，一度 0 バイトの印が書かれると sha256sum -c は通ってしまう。
+# 作業環境が巻き戻って古い tmp/build が戻ったときに実際に起きた
+# (cc14e.bin が 0 バイトで残っていた)。作った直後だけ見ていては遅い。
 nonempty() {
     for _f in "$@"; do
         if [ ! -s "$_f" ]; then
@@ -57,9 +62,11 @@ run_stage() {
     shift
     stamp=tmp/build/$name.stamp
     new=$(sha256sum "$@" | sha256sum | cut -d' ' -f1)
+    # shellcheck disable=SC2086
     if [ -z "${STONE_FORCE_BUILD:-}" ] && [ -f "$stamp" ] \
         && [ "$(head -n 1 "$stamp")" = "$new" ] \
-        && tail -n +2 "$stamp" | sha256sum -c --status - 2>/dev/null; then
+        && tail -n +2 "$stamp" | sha256sum -c --status - 2>/dev/null \
+        && nonempty $outs 2> /dev/null; then
         echo "cached $name (stamp: 入力と生成物が前回と一致)" >&2
         return 0
     fi
@@ -102,9 +109,11 @@ step() {
     _stamp=tmp/build/step-$_name.stamp
     # shellcheck disable=SC2086
     _new=$(sha256sum $_ins 2> /dev/null | sha256sum | cut -d' ' -f1)
+    # shellcheck disable=SC2086
     if [ -z "${STONE_FORCE_BUILD:-}" ] && [ -f "$_stamp" ] \
         && [ "$(head -n 1 "$_stamp")" = "$_new" ] \
-        && tail -n +2 "$_stamp" | sha256sum -c --status - 2> /dev/null; then
+        && tail -n +2 "$_stamp" | sha256sum -c --status - 2> /dev/null \
+        && nonempty $_outs 2> /dev/null; then
         echo "cached $_name" >&2
         return 0
     fi
