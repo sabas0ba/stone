@@ -91,7 +91,9 @@ int main(void) {
 
   /* 1. 起動直後はルートにいる */
   wcwd("cwd-boot", "/");
-  wdir("ls-root", "/", "inc:d,src:d,top.txt:f");
+  /* boot と dirprobe は検査の仕掛けそのもの。像に入っている以上，
+   * 一覧に出るのが正しい */
+  wdir("ls-root", "/", "inc:d,src:d,boot:f,dirprobe:f,top.txt:f");
   wdir("ls-src", "/src", "a:d,one.c:f");
 
   /* 2. 移動して相対経路で引く */

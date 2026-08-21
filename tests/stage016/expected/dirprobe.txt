@@ -1,5 +1,5 @@
 cwd-boot / /
-ls-root inc:d,src:d,top.txt:f inc:d,src:d,top.txt:f
+ls-root inc:d,src:d,boot:f,dirprobe:f,top.txt:f inc:d,src:d,boot:f,dirprobe:f,top.txt:f
 ls-src a:d,one.c:f a:d,one.c:f
 chdir-src 0 0
 cwd-src /src /src
