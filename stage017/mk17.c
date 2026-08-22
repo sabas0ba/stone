@@ -44,10 +44,19 @@
 #define NRULE  256              /* 規則の数 */
 #define NLIST  4096             /* 依存・命令の総数 */
 #define NTXT   262144           /* 記述の置き場 */
-#define NEXP   65536            /* 展開の器 */
+#define NEXP   16384            /* 展開の器 (下の註を見よ) */
 #define NCOND  32               /* 条件の入れ子 */
 #define NGOAL  32               /* 目標の数 */
 #define NSTK   64               /* 作る途中の深さ */
+
+/* NEXP を 16384 にしてあるのは**器の都合**である。cc15p は 1 つの
+ * 関数のフレームがおよそ 32 KB を超えると終了コード 6 で落ちる。
+ * parselines は tg[NEXP] と dp[NEXP] を並べて持つので，NEXP を
+ * 32768 にすると 64 KB になって通らない (実測: 16384 通る /
+ * 32768 落ちる)。
+ *
+ * **溢れたときは黙って切らず die する。** 16384 は tcc の Makefile の
+ * どの展開よりも十分に大きいが，足りなくなったら分かるようにしておく */
 
 #define TMP "_mk.sh"
 
