@@ -49,6 +49,12 @@ build_stage017() {
            tmp/build/ld16.bin tmp/build/l18_posix_dir.o \
         -- osprog_run ar17 stage017/ar17.c
 
+    # make の第 17 世代 (第 3 部の 1)
+    step mk17 mk17 \
+        -- stage017/mk17.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin tmp/build/l18_posix_dir.o \
+        -- osprog_run mk17 stage017/mk17.c
+
     # カーネルの第 23 世代。kernel22 との差は引数の数と長さだけ
     # (docs/stage017-cc.md 8 章)。前置部は 'K' である
     step kernel23 kernel23.bin \
@@ -109,9 +115,10 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 kernel23.bin \
+    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17 \
+        kernel23.bin \
         -- stage017/cc17.c stage017/cc18.c stage017/ar17.c \
-           stage017/kernel23.c \
+           stage017/mk17.c stage017/kernel23.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh

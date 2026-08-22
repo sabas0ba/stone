@@ -41,6 +41,8 @@ mkroot() {
     cp tmp/build/cc17 "$_r/cc"
     cp tmp/build/cc18 "$_r/cc18"
     cp tmp/build/ar17 "$_r/ar"
+    cp tmp/build/mk17 "$_r/mk"
+    cp tmp/build/sh2.bin "$_r/bin/sh2"
     cp tmp/build/sh2.bin "$_r/sh2"
 }
 
@@ -72,11 +74,11 @@ section "cc: 駆動役が我々の OS の上で C を翻訳する (docs/stage017
 # 平らな像を OS の実行形式へ組み直したものが ELF であること。
 # **ここを取り違えると spawn が ENOEXEC で落ちる**
 ok=0
-for f in pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17; do
+for f in pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17; do
     [ "$(od -An -c -N 4 "tmp/build/$f" | tr -d ' ')" = '177ELF' ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: pp16cmd / cc15pcmd / ld16cmd / cc17 / cc18 / ar17 が ELF である"
+report $? "build: pp16cmd / cc15pcmd / ld16cmd / cc17 / cc18 / ar17 / mk17 が ELF である"
 
 r=$out/root
 mkroot "$r"
@@ -339,5 +341,81 @@ report $? "run: 32 語の引数が 1 語も欠けずに届く"
 report $? "run: 64 語を超える呼び出しは成功を返さない"
 [ "$rc" -eq 0 ] && ! grep -q '^argc 96 ' "$out/args.out"
 report $? "run: 溢れた呼び出しはそもそも走っていない"
+
+section "第 3 部の 1: make が libc を組む (docs/stage017-cc.md 9.5)"
+
+# **第 3 部の 1 の完了条件である。** 第 2 部では go.sh に 8 行並べて
+# 書いていたものを，型規則と自動変数で書き直した記述 (tests/stage017/mk/
+# libc.mk) を mk に食わせる。同じことを 1 つの規則で言えることが，
+# make を持った意味である。
+#
+# /lib に置くのは走り時の下働きだけ (第 2 部と同じ配置)。書庫から
+# 本当に引けていなければリンクが落ちる
+r=$out/kroot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/src" "$r/posix"
+cp tmp/build/pp16cmd "$r/bin/pp16"
+cp tmp/build/cc15pcmd "$r/bin/cc15p"
+cp tmp/build/ld16cmd "$r/bin/ld16"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp stage016/libc18/include/*.h "$r/include/"
+cp stage016/libc18/include/sys/*.h "$r/include/sys/"
+cp tmp/build/rt64.o tmp/build/rtfp.o "$r/lib/"
+cp stage016/libc18/src/*.c "$r/src/"
+cp stage016/libc18/posix/*.c "$r/posix/"
+cp tmp/build/cc18 "$r/cc18"
+cp tmp/build/ar17 "$r/ar"
+cp tmp/build/mk17 "$r/mk"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tests/stage017/user/uselibc.c "$r/uselibc.c"
+cp tests/stage017/mk/libc.mk "$r/Makefile"
+cat > "$r/go.sh" <<'EOF'
+mk
+echo "mk $?"
+uselibc
+echo "run $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot "$r" "$out/mk.out" 33554432 512
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/mk.txt "$out/mk.out" \
+    > "$out/mk.diff"
+report $? "run: mk が Makefile どおりに libc を組み，繋いだものが走る"
+[ -s "$out/mk.diff" ] && sed -n '4,$p' "$out/mk.diff"
+
+# **同じ記述を本物の make に食わせたとき，命令の並びが一致すること。**
+# 出来上がりだけ見ていると，別の順で別のものを作っても気づけない
+if command -v make > /dev/null 2>&1 && command -v gcc > /dev/null 2>&1; then
+    d=$out/mkdry
+    rm -rf "$d"
+    mkdir -p "$d/src" "$d/posix"
+    cp tests/stage017/mk/libc.mk "$d/Makefile"
+    touch "$d/uselibc.c"
+    for f in src/string src/stdlib src/misc15 posix/sys posix/morecore \
+             posix/stdio posix/assert posix/dir; do
+        touch "$d/$f.c"
+    done
+    gcc -w -o "$out/mkhost" tests/stage017/host/mkhost.c 2> /dev/null
+    r2=$?
+    ( cd "$d" && make -n --no-print-directory ) > "$out/mkdry.ref" 2>&1
+    [ "$r2" -eq 0 ] && ( cd "$d" && "$OLDPWD/$out/mkhost" -n ) \
+        > "$out/mkdry.got" 2>&1
+    [ "$r2" -eq 0 ] && diff -q "$out/mkdry.ref" "$out/mkdry.got" > /dev/null
+    report $? "ref: 本物の make と命令の並びが一致する (libc.mk)"
+    [ -s "$out/mkdry.got" ] && diff -u "$out/mkdry.ref" "$out/mkdry.got" \
+        | sed -n '4,$p'
+else
+    echo "   skip: host に make か gcc が無い (並びの裏取りができない)"
+fi
+
+# **関数は黙って空に展開しない** (9.5)。第 3 部の 2 まで落ちること
+if [ -x "$out/mkhost" ]; then
+    d=$out/mkfn
+    rm -rf "$d" && mkdir -p "$d"
+    printf 'A = $(subst x,y,axb)\nall:\n\t@echo $(A)\n' > "$d/Makefile"
+    ( cd "$d" && "$OLDPWD/$out/mkhost" ) > "$out/mkfn.out" 2>&1
+    [ $? -ne 0 ] && grep -q 'functions are not implemented' "$out/mkfn.out"
+    report $? "spec: 未実装の関数は空に展開せず落ちる (9.5)"
+fi
 
 summary

@@ -1,0 +1,13 @@
+cc18 -c src/string.c -o src/string.o
+cc18 -c src/stdlib.c -o src/stdlib.o
+cc18 -c src/misc15.c -o src/misc15.o
+cc18 -c posix/sys.c -o posix/sys.o
+cc18 -c posix/morecore.c -o posix/morecore.o
+cc18 -c posix/stdio.c -o posix/stdio.o
+cc18 -c posix/assert.c -o posix/assert.o
+cc18 -c posix/dir.c -o posix/dir.o
+ar rcs libc.a src/string.o src/stdlib.o src/misc15.o posix/sys.o posix/morecore.o posix/stdio.o posix/assert.o posix/dir.o
+cc18 -o uselibc uselibc.c libc.a
+mk 0
+linked against libc.a (6)
+run 0

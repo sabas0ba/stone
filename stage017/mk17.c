@@ -787,7 +787,9 @@ static void runcmd(char *raw) {
   }
   c = skipb(c);
   if (*c == 0) return;
-  if (!quiet && !silent) {
+  /* -n では @ の行も出す。**出さないと「何を走らせる気なのか」を
+   * 見るための -n が用を成さない** (本物の make も出す) */
+  if ((!quiet || dryrun) && !silent) {
     fputs(c, stdout);
     fputs("\n", stdout);
   }
