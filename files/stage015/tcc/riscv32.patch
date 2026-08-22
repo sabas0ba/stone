@@ -1,0 +1,1111 @@
+tcc に RV32 の対象 (riscv32) を足す。
+
+上流: https://github.com/TinyCC/tinycc  mob 2ba12e83b3599ca8f5d50c179fe5138fe956f0c9
+説明: docs/stage015-riscv32.md
+
+RISC-V の backend (riscv64-gen.c / riscv64-link.c) は RV32 と RV64 で
+大半が共通なので，ファイルを写さず**同じファイルを XLEN で切り替える**
+形にしてある。この patch の差分がそのまま「RV32 に要る違い」である。
+
+RV32 の対応とは別に，**上流の誤りの修正が 1 つ入っている** (store が
+番地を絶対値で書くときに枠の指し手 s0 を潰す)。RV64 でも同じ誤りが
+出るので RV32 固有ではない。docs/stage015-riscv32.md 10 章。
+
+対象は -DTCC_TARGET_RISCV64 -DTCC_TARGET_RISCV32 の 2 つを定義して選ぶ。
+TCC_TARGET_RISCV64 は「RISC-V であること」を表し，TCC_TARGET_RISCV32 が
+「語長が 32 bit であること」を絞り込む。こうすると core (tccgen.c・
+tccelf.c・tccasm.c・tccdbg.c) にある 40 箇所あまりの `#ifdef
+TCC_TARGET_RISCV64` を 1 つも書き換えずに済む。
+
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/Makefile ../../tmp/tcc/src/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -117,6 +117,7 @@
+ DEF-arm64-OpenBSD  = $(DEF-arm64) -DTARGETOS_OpenBSD
+ DEF-arm64-win32    = $(DEF-arm64) -DTCC_TARGET_PE
+ DEF-riscv64        = -DTCC_TARGET_RISCV64
++DEF-riscv32        = -DTCC_TARGET_RISCV64 -DTCC_TARGET_RISCV32
+ DEF-c67            = -DTCC_TARGET_C67 -w # disable warnigs
+ DEF-x86_64-FreeBSD = $(DEF-x86_64) -DTARGETOS_FreeBSD
+ DEF-x86_64-NetBSD  = $(DEF-x86_64) -DTARGETOS_NetBSD
+@@ -134,7 +135,7 @@
+ 
+ # cross compiler targets to build
+ TCC_X = i386 x86_64 i386-win32 x86_64-win32 x86_64-osx arm arm64 arm64-win32 arm-wince c67
+-TCC_X += riscv64 arm64-osx
++TCC_X += riscv64 arm64-osx riscv32
+ # TCC_X += arm-fpa arm-fpa-ld arm-vfp arm-eabi
+ 
+ # cross libtcc1.a targets to build
+@@ -217,6 +218,7 @@
+ arm64-win32_FILES = $(arm64_FILES) tccpe.c
+ c67_FILES = $(CORE_FILES) c67-gen.c c67-link.c tcccoff.c
+ riscv64_FILES = $(CORE_FILES) riscv64-gen.c riscv64-link.c riscv64-asm.c
++riscv32_FILES = $(riscv64_FILES)
+ 
+ TCCDEFS_H$(subst yes,,$(CONFIG_predefs)) = tccdefs_.h
+ 
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/lib/Makefile ../../tmp/tcc/src/lib/Makefile
+--- a/lib/Makefile
++++ b/lib/Makefile
+@@ -74,6 +74,8 @@
+ OBJ-arm-eabihf = $(OBJ-arm)
+ OBJ-arm-wince = $(ARM_O) $(WIN_O)
+ OBJ-riscv64 = $(RISCV64_O) armflush.o $(LIN_O)
++RISCV32_O = libtcc1.o riscv32.o $(COMMON_O)
++OBJ-riscv32 = $(RISCV32_O) armflush.o $(LIN_O)
+ 
+ OBJ-extra = $(filter $(EXTRA_O),$(OBJ-$T))
+ OBJ-libtcc1 = $(addprefix $(X),$(filter-out $(OBJ-extra),$(OBJ-$T)))
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/lib/riscv32.c ../../tmp/tcc/src/lib/riscv32.c
+--- a/lib/riscv32.c
++++ b/lib/riscv32.c
+@@ -0,0 +1,148 @@
++/* RV32 (ilp32) の実行時支援。
++ *
++ * 32 bit を対象にすると，tccgen.c の gen_opl が 64 bit の除算・剰余・
++ * 可変桁のシフトをここへ落としてくる。同じものが libtcc1.c にもあるが，
++ * あちらは `#if defined __i386__` の中にあり，i386 のインライン
++ * アセンブラ (sub_ddmmss) に依っているので使えない。素の C で書く。
++ *
++ * **ここでは 64 bit の / % と可変桁のシフトを使ってはいけない。**
++ * 使うと自分自身を呼ぶことになる。除算は 32 bit の桁ごとに組み立て，
++ * シフトは上下の語に分けて 32 bit のシフトで行う。桁数が定数の
++ * シフトと，加減算・比較は tcc がその場で展開するので使ってよい。 */
++
++typedef unsigned int u32;
++typedef unsigned long long u64;
++typedef long long i64;
++
++typedef union {
++    struct { u32 low, high; } s;   /* RV32 は little endian */
++    u64 ll;
++    i64 sll;
++} DW;
++
++/* 引き算しながら 1 桁ずつ商を立てる長除法。
++   a を左へ送り出しながら余り r に取り込む (桁数はすべて定数) */
++static u64 udivmod(u64 a, u64 b, u64 *rem)
++{
++    u64 q = 0, r = 0;
++    int i;
++
++    if (b == 0) {              /* 0 除算は値を決めておく */
++        if (rem)
++            *rem = 0;
++        return 0;
++    }
++    for (i = 0; i < 64; i++) {
++        r = (r << 1) | ((a >> 63) & 1);
++        a = a << 1;
++        q = q << 1;
++        if (r >= b) {
++            r = r - b;
++            q = q | 1;
++        }
++    }
++    if (rem)
++        *rem = r;
++    return q;
++}
++
++u64 __udivdi3(u64 a, u64 b)
++{
++    return udivmod(a, b, 0);
++}
++
++u64 __umoddi3(u64 a, u64 b)
++{
++    u64 r;
++    udivmod(a, b, &r);
++    return r;
++}
++
++i64 __divdi3(i64 a, i64 b)
++{
++    int neg = 0;
++    u64 q;
++
++    if (a < 0) { a = -a; neg = !neg; }
++    if (b < 0) { b = -b; neg = !neg; }
++    q = udivmod((u64)a, (u64)b, 0);
++    return neg ? -(i64)q : (i64)q;
++}
++
++i64 __moddi3(i64 a, i64 b)
++{
++    int neg = 0;
++    u64 r;
++
++    if (a < 0) { a = -a; neg = 1; }   /* 剰余の符号は被除数に合わせる */
++    if (b < 0) b = -b;
++    udivmod((u64)a, (u64)b, &r);
++    return neg ? -(i64)r : (i64)r;
++}
++
++i64 __ashldi3(i64 a, int b)
++{
++    DW u;
++    u.sll = a;
++    if (b >= 32) {
++        u.s.high = u.s.low << (b - 32);
++        u.s.low = 0;
++    } else if (b != 0) {
++        u.s.high = (u.s.high << b) | (u.s.low >> (32 - b));
++        u.s.low = u.s.low << b;
++    }
++    return u.sll;
++}
++
++i64 __ashrdi3(i64 a, int b)
++{
++    DW u;
++    u.sll = a;
++    if (b >= 32) {
++        u.s.low = (u32)((int)u.s.high >> (b - 32));
++        u.s.high = (u32)((int)u.s.high >> 31);   /* 符号で埋める */
++    } else if (b != 0) {
++        u.s.low = (u.s.low >> b) | (u.s.high << (32 - b));
++        u.s.high = (u32)((int)u.s.high >> b);
++    }
++    return u.sll;
++}
++
++u64 __lshrdi3(u64 a, int b)
++{
++    DW u;
++    u.ll = a;
++    if (b >= 32) {
++        u.s.low = u.s.high >> (b - 32);
++        u.s.high = 0;
++    } else if (b != 0) {
++        u.s.low = (u.s.low >> b) | (u.s.high << (32 - b));
++        u.s.high = u.s.high >> b;
++    }
++    return u.ll;
++}
++
++/* 符号つき 64 bit から浮動小数点へ。
++ *
++ * **libtcc1.c の __floatundidf を呼んではいけない。** あちらは
++ * `(double)uu.ll` (uu.ll は符号つき) と書いており，それがこちらへ
++ * 戻ってくる。互いに呼び合って戻らなくなる。
++ *
++ * 上下の語に分けて 32 bit の変換命令 (fcvt.d.w / fcvt.d.wu) で作る。
++ * 32 bit の整数は double にそのまま収まり，2^32 倍も指数を動かすだけ
++ * なので誤差が出ない。丸めが起きるのは最後の足し算 1 回だけである。 */
++
++double __floatdidf(i64 a)
++{
++    DW u;
++    u.sll = a;
++    return (double)(int)u.s.high * 4294967296.0 + (double)u.s.low;
++}
++
++/* float は double を経由する。**丸めが 2 回起きる**ので，
++ * 最後の 1 bit が libgcc と食い違うことがありうる。tcc の自己ホストに
++ * float の 64 bit 変換は出てこないので，ここは簡単な方を採る。 */
++float __floatdisf(i64 a)
++{
++    return (float)__floatdidf(a);
++}
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/riscv64-gen.c ../../tmp/tcc/src/riscv64-gen.c
+--- a/riscv64-gen.c
++++ b/riscv64-gen.c
+@@ -21,12 +21,21 @@
+ #define REG_IRE2 (TREG_R(1)) // int 2nd return register number
+ #define REG_FRET (TREG_F(0)) // float return register number
+ 
++#ifdef TCC_TARGET_RISCV32
++#define PTR_SIZE 4
++
++#define LDOUBLE_SIZE 8
++#define LDOUBLE_ALIGN 8
++
++#define MAX_ALIGN 8
++#else
+ #define PTR_SIZE 8
+ 
+ #define LDOUBLE_SIZE 16
+ #define LDOUBLE_ALIGN 16
+ 
+ #define MAX_ALIGN 16
++#endif
+ 
+ #define CHAR_IS_UNSIGNED
+ 
+@@ -46,7 +55,11 @@
+ 
+ ST_DATA const char * const target_machine_defs =
+     "__riscv\0"
++#ifdef TCC_TARGET_RISCV32
++    "__riscv_xlen 32\0"
++#else
+     "__riscv_xlen 64\0"
++#endif
+     "__riscv_flen 64\0"
+     "__riscv_div\0"
+     "__riscv_mul\0"
+@@ -55,7 +68,23 @@
+     "__riscv_float_abi_double\0"
+     ;
+ 
+-#define XLEN 8
++#define XLEN PTR_SIZE
++#define XBITS (XLEN * 8)
++
++/* 語 1 本の読み書き: RV64 は ld/sd (funct3 = 3)，RV32 は lw/sw (= 2) */
++#define F3_LX (XLEN == 8 ? 3 : 2)
++/* 語 1 本ぶんの値を表す型 (ポインタと同じ幅) */
++#define VT_XWORD (XLEN == 8 ? VT_LLONG : VT_INT)
++
++/* RV32 では long double は double と同じ 8 バイトである。RV64 の
++   16 バイトの long double (整数レジスタ 2 本で運ぶ) とは別物なので，
++   「本当に長い方か」と「倍精度の幅か」を分けて見る */
++#define IS_LDBL(t) (XLEN == 8 && (t) == VT_LDOUBLE)
++#define IS_DBL(t)  ((t) == VT_DOUBLE || (XLEN == 4 && (t) == VT_LDOUBLE))
++
++/* opcode に足すと 32 bit 幅の演算になる (RV64 の OP-IMM-32 / OP-32)。
++   RV32 には無く，素の演算がそのまま 32 bit である */
++#define OP32 (XLEN == 8 ? 8 : 0)
+ 
+ #define TREG_RA 17
+ #define TREG_SP 18
+@@ -213,7 +242,7 @@
+                 doload || !forstore
+                   ? R_RISCV_PCREL_LO12_I : R_RISCV_PCREL_LO12_S, 0);
+         if (doload) {
+-            EI(0x03, 3, rr, rr, 0); // ld RR, 0(RR)
++            EI(0x03, F3_LX, rr, rr, 0); // l[wd] RR, 0(RR)
+             if (large_addend) {
+                 o(0x37 | (6 << 7) | UPPER(fc)); //lui t1, high(fc)
+                 ER(0x33, 0, rr, rr, 6, 0); // add RR, RR, t1
+@@ -259,9 +288,12 @@
+     if (fr & VT_LVAL) {
+         int func3, opcode = is_freg(r) ? 0x07 : 0x03, br;
+         size = type_size(&sv->type, &align);
+-        assert (!is_freg(r) || bt == VT_FLOAT || bt == VT_DOUBLE);
++        assert (!is_freg(r) || bt == VT_FLOAT || IS_DBL(bt));
+         if (bt == VT_PTR || bt == VT_FUNC) /* XXX should be done in generic code */
+           size = PTR_SIZE;
++        /* 書く側と同じく，読むのも語 1 本ぶんである (store の注記を見よ) */
++        if (size > XLEN && !is_freg(r))
++          size = XLEN;
+         func3 = size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3;
+         if (size < 4 && !is_float(sv->type.t) && (sv->type.t & VT_UNSIGNED))
+           func3 |= 4;
+@@ -274,7 +306,7 @@
+             fc = 0; // XXX store ofs in LVAL(reg)
+         } else if (v == VT_LLOCAL) {
+             br = load_symofs(r, sv, 0, &fc);
+-            EI(0x03, 3, rr, br, fc); // ld RR, fc(BR)
++            EI(0x03, F3_LX, rr, br, fc); // l[wd] RR, fc(BR)
+             br = rr;
+             fc = 0;
+         } else if (v == VT_CONST) {
+@@ -293,11 +325,11 @@
+         }
+         EI(opcode, func3, rr, br, fc); // l[bhwd][u] / fl[wd] RR, fc(BR)
+     } else if (v == VT_CONST) {
+-        int rb = 0, do32bit = 8, zext = 0;
+-        if (is_float(sv->type.t) && bt != VT_LDOUBLE) {
++        int rb = 0, do32bit = OP32, zext = 0;
++        if (is_float(sv->type.t) && !IS_LDBL(bt)) {
+             /* load float/double constant: move bit pattern from int reg */
+             uint64_t val = sv->c.i;
+-            int is_dbl = bt == VT_DOUBLE;
++            int is_dbl = IS_DBL(bt);
+             if (val == 0) {
+                 o(0x53 | (rr << 7) | ((unsigned)(0x78 | is_dbl) << 25));
+                 return;
+@@ -307,12 +339,12 @@
+             } else {
+                 if (LOW_OVERFLOW(fc))
+                     o(0x37 | (6 << 7) | UPPER(fc)); // lui t1, upper
+-                EI(0x13 | 8, 0, 6, LOW_OVERFLOW(fc) ? 6 : 0, SIGN11(fc)); // addiw t1,...
++                EI(0x13 | OP32, 0, 6, LOW_OVERFLOW(fc) ? 6 : 0, SIGN11(fc)); // addi[w] t1,...
+             }
+             o(0x53 | (rr << 7) | (6 << 15) | ((unsigned)(0x78 | is_dbl) << 25));
+             return;
+         }
+-        assert(is_ireg(r) || bt == VT_LDOUBLE);
++        assert(is_ireg(r) || IS_LDBL(bt));
+         if (fr & VT_SYM) {
+             rb = load_symofs(r, sv, 0, &fc);
+             do32bit = 0;
+@@ -346,7 +378,7 @@
+     } else if (v < VT_CONST) { /* reg-reg */
+         //assert(!fc); XXX support offseted regs
+         if (is_freg(r) && is_freg(v))
+-          ER(0x53, 0, rr, freg(v), freg(v), bt == VT_DOUBLE ? 0x11 : 0x10); //fsgnj.[sd] RR, V, V == fmv.[sd] RR, V
++          ER(0x53, 0, rr, freg(v), freg(v), IS_DBL(bt) ? 0x11 : 0x10); //fsgnj.[sd] RR, V, V == fmv.[sd] RR, V
+         else if (is_ireg(r) && is_ireg(v))
+           EI(0x13, 0, rr, ireg(v), 0); // addi RR, V, 0 == mv RR, V
+         else {
+@@ -412,15 +444,23 @@
+     int fc = sv->c.i;
+     int bt = sv->type.t & VT_BTYPE;
+     int align, size = type_size(&sv->type, &align);
+-    assert(!is_float(bt) || is_freg(r) || bt == VT_LDOUBLE);
++    /* RV32 では，可変長引数の可変部や退避で，浮動小数点の値が整数
++       レジスタに乗ることがある (RISC-V の ABI どおり) */
++    assert(!is_float(bt) || is_freg(r) || IS_LDBL(bt) || XLEN == 4);
+     /* long doubles are in two integer registers, but the load/store
+        primitives only deal with one, so do as if it's one reg.  */
+-    if (bt == VT_LDOUBLE)
++    if (IS_LDBL(bt))
+       size = align = 8;
+     if (bt == VT_STRUCT)
+       tcc_error("unimp: store(struct)");
+     if (size > 8)
+       tcc_error("unimp: large sized store");
++    /* 語 1 本ぶんだけ書く。store() に渡るのはレジスタ 1 本であり，
++       語 2 本ぶんの値は**呼ぶ側が上下 2 回に分けて**渡してくる
++       (tccgen.c の vstore と save_reg_upstack。i386 や arm と同じ約束)。
++       型が 64 bit でも，ここで書くのは語 1 本である */
++    if (size > XLEN && !is_freg(r))
++      size = XLEN;
+     assert(sv->r & VT_LVAL);
+     if (fr == VT_LOCAL || (sv->r & VT_SYM)) {
+         ptrreg = load_symofs(-1, sv, 1, &fc);
+@@ -431,7 +471,10 @@
+         fc = 0; // XXX support offsets regs
+     } else if (fr == VT_CONST) {
+         int64_t si = sv->c.i;
+-        ptrreg = 8; // s0
++        /* 番地を絶対値で書く場合の base。**s0 を使ってはいけない。**
++           s0 は枠の指し手であり，ここで潰すと後片付け (mv sp,s0 と
++           ra / s0 の復元) が壊れる。t0 は割付けの対象外なので安全 */
++        ptrreg = 5; // t0
+         si >>= 32;
+         if (si != 0) {
+ 	    load_large_constant(ptrreg, fc, si);
+@@ -519,7 +562,7 @@
+         greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
+         o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
+         greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
+-        EI(0x03, 3, 10, 10, 0); // ld a0, 0(a0)
++        EI(0x03, F3_LX, 10, 10, 0); // l[wd] a0, 0(a0)
+         gen_bounds_call(TOK___bound_local_new);
+         ind = saved_ind;
+         label.c = 0; /* force new local ELF symbol */
+@@ -532,15 +575,26 @@
+     greloca(cur_text_section, sym_data, ind, R_RISCV_GOT_HI20, 0);
+     o(0x17 | (10 << 7));    // auipc a0, 0 %pcrel_hi(sym)+addend
+     greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
+-    EI(0x03, 3, 10, 10, 0); // ld a0, 0(a0)
++    EI(0x03, F3_LX, 10, 10, 0); // l[wd] a0, 0(a0)
+     gen_bounds_call(TOK___bound_local_delete);
+     o(0x65a26502); /* ld   a0,0(sp)   ld   a1,8(sp)   */
+     o(0x61052542); /* fld  fa0,16(sp) addi sp,sp,32   */
+ }
+ #endif
+ 
++/* 語 1 本 (XLEN バイト) に収まる大きさ size を，載せる型で表す。
++   端数のときは狭い型にして，はみ出しを読まないようにする */
++static int chunkt(int size)
++{
++    if (size <= 1) return VT_BYTE;
++    if (size <= 2) return VT_SHORT;
++    if (XLEN == 4 || size <= 4) return VT_INT;
++    return VT_LLONG;
++}
++
+ static void reg_pass_rec(CType *type, int *rc, int *fieldofs, int ofs)
+ {
++    int ofs_align;
+     if ((type->t & VT_BTYPE) == VT_STRUCT) {
+         Sym *f;
+         if (type->ref->type.t == VT_UNION)
+@@ -562,11 +616,17 @@
+             } else if (type->ref->c == 2)
+               rc[0] = -1;
+         }
+-    } else if (rc[0] == 2 || rc[0] < 0 || (type->t & VT_BTYPE) == VT_LDOUBLE)
++    } else if (rc[0] == 2 || rc[0] < 0 || IS_LDBL(type->t & VT_BTYPE))
++      rc[0] = -1;
++    else if (!is_float(type->t) && type_size(type, &ofs_align) > XLEN)
++      /* 語より大きい整数 (RV32 の long long) はレジスタ 1 本に載らない。
++         -1 にして reg_pass の「大きさで語ごとに割る」方へ落とす。
++         RV64 では long long は語ちょうどなのでここは通らない */
+       rc[0] = -1;
+     else if (!rc[0] || rc[1] == RC_FLOAT || is_float(type->t)) {
+       rc[++rc[0]] = is_float(type->t) ? RC_FLOAT : RC_INT;
+-      fieldofs[rc[0]] = (ofs << 4) | ((type->t & VT_BTYPE) == VT_PTR ? VT_LLONG : type->t & VT_BTYPE);
++      fieldofs[rc[0]] = (ofs << 4)
++        | ((type->t & VT_BTYPE) == VT_PTR ? VT_XWORD : type->t & VT_BTYPE);
+     } else
+       rc[0] = -1;
+ }
+@@ -577,13 +637,21 @@
+     reg_pass_rec(type, prc, fieldofs, 0);
+     if (prc[0] <= 0 || !named) {
+         int align, size = type_size(type, &align);
+-        prc[0] = (size + 7) >> 3;
++        prc[0] = (size + XLEN - 1) / XLEN;
+         prc[1] = prc[2] = RC_INT;
+-        fieldofs[1] = (0 << 4) | (size <= 1 ? VT_BYTE : size <= 2 ? VT_SHORT : size <= 4 ? VT_INT : VT_LLONG);
+-        fieldofs[2] = (8 << 4) | (size <= 9 ? VT_BYTE : size <= 10 ? VT_SHORT : size <= 12 ? VT_INT : VT_LLONG);
++        fieldofs[1] = (0 << 4) | chunkt(size);
++        fieldofs[2] = (XLEN << 4) | chunkt(size - XLEN);
+     }
+ }
+ 
++/* レジスタ 2 本に載る「まとまった値」か。RV64 では long double，
++   RV32 では long long がこれにあたる。構造体と違って記憶域から
++   読み直せない (定数でありうる) ので，レジスタ対のまま運ぶ */
++static int is_pair_scalar(int bt)
++{
++    return XLEN == 4 ? bt == VT_LLONG : bt == VT_LDOUBLE;
++}
++
+ ST_FUNC void gfunc_call(int nb_args)
+ {
+     int i, align, size, areg[2];
+@@ -608,13 +676,13 @@
+         sv = &vtop[1 + i - nb_args];
+         sv->type.t &= ~VT_ARRAY; // XXX this should be done in tccgen.c
+         size = type_size(&sv->type, &align);
+-        if (size > 16) {
++        if (size > 2 * XLEN) {
+             if (align < XLEN)
+               align = XLEN;
+             tempspace = (tempspace + align - 1) & -align;
+             tempofs = tempspace;
+             tempspace += size;
+-            size = align = 8;
++            size = align = XLEN;   /* 渡すのは番地 1 本 */
+             byref = 64 | (tempofs << 7);
+         }
+         reg_pass(&sv->type, prc, fieldofs, old || sa != 0);
+@@ -645,7 +713,7 @@
+                   info[i] |= (1 + areg[prc[2] - 1]++) << 7;
+                 else {
+                     info[i] |= 16;
+-                    stack_adj += 8;
++                    stack_adj += XLEN;
+                 }
+                 if (!byref) {
+                     assert((fieldofs[2] >> 4) < 2048);
+@@ -684,7 +752,7 @@
+                     vswap();
+                     vstore();
+                     vpop();
+-                    size = align = 8;
++                    size = align = XLEN;   /* 渡すのは番地 1 本 */
+                 }
+                 if (info[i] & 32) {
+                     if (align < XLEN)
+@@ -708,7 +776,7 @@
+             } else if (info[i] & 16) {
+                 assert(!splitofs);
+                 splitofs = ofs;
+-                ofs += 8;
++                ofs += XLEN;
+             }
+         }
+     }
+@@ -733,10 +801,24 @@
+                 assert(!r2);
+                 r2 = 1 + TREG_RA;
+             }
+-            if (loadt == VT_LDOUBLE) {
++            if (is_pair_scalar(loadt)) {
+                 assert(r2);
+                 r2--;
+             } else if (r2) {
++                if (!(vtop->r & VT_LVAL)) {
++                    /* 計算した 2 語の値を整数レジスタ対で渡す場合
++                       (RV32 の可変部の double)。値は記憶域に無く，
++                       RV32 には浮動小数点レジスタから整数レジスタ 2 本
++                       への直接の移動も無いので，いったんフレーム上の
++                       一時領域へ落として左辺値にする */
++                    int a2 = 0, s2 = type_size(&vtop->type, &a2);
++                    loc = (loc - s2) & -(a2 < XLEN ? XLEN : a2);
++                    vset(&vtop->type, VT_LOCAL | VT_LVAL, loc);
++                    vswap();
++                    vstore();
++                    vpop();
++                    vset(&origtype, VT_LOCAL | VT_LVAL, loc);
++                }
+                 test_lvalue();
+                 vpushv(vtop);
+             }
+@@ -744,7 +826,7 @@
+             gv(r < 8 ? RC_R(r) : RC_F(r - 8));
+             vtop->type = origtype;
+ 
+-            if (r2 && loadt != VT_LDOUBLE) {
++            if (r2 && !is_pair_scalar(loadt)) {
+                 r2--;
+                 assert(r2 < 16 || r2 == TREG_RA);
+                 vswap();
+@@ -773,9 +855,9 @@
+                 vtop->r2 = r2;
+             }
+             if (info[nb_args - 1 - i] & 16) {
+-                ES(0x23, 3, 2, ireg(vtop->r2), splitofs); // sd t0, ofs(sp)
++                ES(0x23, F3_LX, 2, ireg(vtop->r2), splitofs); // s[wd] t0, ofs(sp)
+                 vtop->r2 = VT_CONST;
+-            } else if (loadt == VT_LDOUBLE && vtop->r2 != r2) {
++            } else if (is_pair_scalar(loadt) && vtop->r2 != r2) {
+                 assert(vtop->r2 <= 7 && r2 <= 7);
+                 /* XXX we'd like to have 'gv' move directly into
+                    the right class instead of us fixing it up.  */
+@@ -814,7 +896,7 @@
+     CType *type;
+ 
+     sym = func_type->ref;
+-    loc = -16; // for ra and s0
++    loc = -2 * XLEN; // for ra and s0
+     func_sub_sp_offset = ind;
+     ind += 5 * 4;
+ 
+@@ -824,9 +906,9 @@
+        implicit pointer parameter */
+     size = type_size(&func_vt, &align);
+     if (size > 2 * XLEN) {
+-        loc -= 8;
++        loc -= XLEN;
+         func_vc = loc;
+-        ES(0x23, 3, 8, 10 + areg[0]++, loc); // sd a0, loc(s0)
++        ES(0x23, F3_LX, 8, 10 + areg[0]++, loc); // s[wd] a0, loc(s0)
+     }
+     /* define parameters */
+     while ((sym = sym->next) != NULL) {
+@@ -837,7 +919,7 @@
+         size = type_size(type, &align);
+         if (size > 2 * XLEN) {
+             type = &char_pointer_type;
+-            size = align = byref = 8;
++            size = align = byref = XLEN;
+         }
+         reg_pass(type, prc, fieldofs, 1);
+         regcount = prc[0];
+@@ -851,18 +933,28 @@
+             param_addr = addr;
+             addr += size;
+         } else {
+-            loc -= regcount * 8; // XXX could reserve only 'size' bytes
++            /* 場所は**大きさで**取る。レジスタの本数で取ると RV32 で
++               double (f レジスタ 1 本だが 8 バイト) が入りきらない。
++               整列も型のものに合わせる (RV32 の double は 8 バイト境界) */
++            {
++                int need = regcount * XLEN;
++                if (need < size)
++                  need = size;
++                if (align < XLEN)
++                  align = XLEN;
++                loc = (loc - need) & -align;
++            }
+             param_addr = loc;
+             for (i = 0; i < regcount; i++) {
+                 if (areg[prc[1+i] - 1] >= 8) {
+                     assert(i == 1 && regcount == 2 && !(addr & 7));
+-                    EI(0x03, 3, 5, 8, addr); // ld t0, addr(s0)
+-                    addr += 8;
+-                    ES(0x23, 3, 8, 5, loc + i*8); // sd t0, loc(s0)
++                    EI(0x03, F3_LX, 5, 8, addr); // l[wd] t0, addr(s0)
++                    addr += XLEN;
++                    ES(0x23, F3_LX, 8, 5, loc + i*XLEN); // s[wd] t0, loc(s0)
+                 } else if (prc[1+i] == RC_FLOAT) {
+                     ES(0x27, (size / regcount) == 4 ? 2 : 3, 8, 10 + areg[1]++, loc + (fieldofs[i+1] >> 4)); // fs[wd] FAi, loc(s0)
+                 } else {
+-                    ES(0x23, 3, 8, 10 + areg[0]++, loc + i*8); // sd aX, loc(s0) // XXX
++                    ES(0x23, F3_LX, 8, 10 + areg[0]++, loc + i*XLEN); // s[wd] aX, loc(s0) // XXX
+                 }
+             }
+         }
+@@ -873,7 +965,7 @@
+     if (func_var) {
+         for (; areg[0] < 8; areg[0]++) {
+             num_va_regs++;
+-            ES(0x23, 3, 8, 10 + areg[0], -8 + num_va_regs * 8); // sd aX, loc(s0)
++            ES(0x23, F3_LX, 8, 10 + areg[0], -XLEN + num_va_regs * XLEN); // s[wd] aX, loc(s0)
+         }
+     }
+ #ifdef CONFIG_TCC_BCHECK
+@@ -888,8 +980,8 @@
+     int align, size = type_size(vt, &align), nregs;
+     int prc[3], fieldofs[3];
+     *ret_align = 1;
+-    *regsize = 8;
+-    if (size > 16)
++    *regsize = XLEN;
++    if (size > 2 * XLEN)
+       return 0;
+     reg_pass(vt, prc, fieldofs, 1);
+     nregs = prc[0];
+@@ -927,18 +1019,18 @@
+         gen_bounds_epilog();
+ #endif
+ 
+-    loc = (loc - num_va_regs * 8);
++    loc = (loc - num_va_regs * XLEN);
+     d = v = (-loc + 15) & -16;
+ 
+-    EI(0x13, 0, 2, 8, num_va_regs * 8); // addi sp, s0, num_va_regs*8
+-    EI(0x03, 3, 1, 8, -8); // ld ra, -8(s0)
+-    EI(0x03, 3, 8, 8, -16); // ld s0, -16(s0)
++    EI(0x13, 0, 2, 8, num_va_regs * XLEN); // addi sp, s0, num_va_regs*8
++    EI(0x03, F3_LX, 1, 8, -XLEN); // l[wd] ra, -XLEN(s0)
++    EI(0x03, F3_LX, 8, 8, -2 * XLEN); // l[wd] s0, -2*XLEN(s0)
+     EI(0x67, 0, 0, 1, 0); // jalr x0, 0(x1), aka ret
+ 
+     large_ofs_ind = ind;
+     if (v >= (1 << 11)) {
+         d = 16;
+-        EI(0x13, 0, 8, 2, d - num_va_regs * 8);      // addi s0, sp, d
++        EI(0x13, 0, 8, 2, d - num_va_regs * XLEN);      // addi s0, sp, d
+         o(0x37 | (5 << 7) | UPPER(v-16)); //lui t0, upper(v)
+         EI(0x13, 0, 5, 5, SIGN11(v-16)); // addi t0, t0, lo(v)
+         ER(0x33, 0, 2, 2, 5, 0x20); // sub sp, sp, t0
+@@ -948,10 +1040,10 @@
+ 
+     ind = func_sub_sp_offset;
+     EI(0x13, 0, 2, 2, -d);     // addi sp, sp, -d
+-    ES(0x23, 3, 2, 1, d - 8 - num_va_regs * 8);  // sd ra, d-8(sp)
+-    ES(0x23, 3, 2, 8, d - 16 - num_va_regs * 8); // sd s0, d-16(sp)
++    ES(0x23, F3_LX, 2, 1, d - XLEN - num_va_regs * XLEN);  // s[wd] ra, d-XLEN(sp)
++    ES(0x23, F3_LX, 2, 8, d - 2 * XLEN - num_va_regs * XLEN); // s[wd] s0, d-2*XLEN(sp)
+     if (v < (1 << 11))
+-      EI(0x13, 0, 8, 2, d - num_va_regs * 8);      // addi s0, sp, d
++      EI(0x13, 0, 8, 2, d - num_va_regs * XLEN);      // addi s0, sp, d
+     else
+       gjmp_addr(large_ofs_ind);
+     if ((ind - func_sub_sp_offset) != 5*4)
+@@ -1040,12 +1132,15 @@
+ {
+     int a, b, d;
+     int func3 = 0;
+-    ll = ll ? 0 : 8;
++    /* ll は「64 bit の演算か」を表す。RV64 では 32 bit の演算に w 付きの
++       命令 (OP-32 / OP-IMM-32) を使うので opcode への足し込みへ変える。
++       RV32 では語がもともと 32 bit なので足し込みは常に 0 である */
++    ll = XLEN == 8 ? (ll ? 0 : 8) : 0;
+     if ((vtop->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST) {
+         int fc = vtop->c.i;
+         if (fc == vtop->c.i && !LOW_OVERFLOW(fc)) {
+             int cll = 0;
+-            int m = ll ? 31 : 63;
++            int m = (ll || XLEN == 4) ? 31 : 63;
+             vswap();
+             gv(RC_INT);
+             a = ireg(vtop[0].r);
+@@ -1106,6 +1201,30 @@
+             }
+         }
+     }
++#ifdef TCC_TARGET_RISCV32
++    if (op == TOK_UMULL) {
++        /* 符号なし 32x32 -> 64。下位を mul，上位を mulhu で作り，
++           レジスタ 2 本の組で返す。64 bit の乗算を組み立てる
++           tccgen.c の gen_opl がこれを使う (i386 と arm も同じ形)。
++
++           結果はいったん t0 / t1 (割付けの対象外) に置く。行き先を
++           先に取ると，取った先が掛ける側と重なって値を潰しうる */
++        int ml, mh, ma, mb;
++        gv2(RC_INT, RC_INT);
++        ma = ireg(vtop[-1].r);
++        mb = ireg(vtop[0].r);
++        ER(0x33, 3, 6, ma, mb, 1); // mulhu t1, a, b
++        ER(0x33, 0, 5, ma, mb, 1); // mul   t0, a, b
++        vtop -= 2;
++        ml = get_reg(RC_INT);
++        vtop++;
++        vtop[0].r = ml;            /* 先に押さえてから 2 本目を取る */
++        vtop[0].r2 = mh = get_reg(RC_INT);
++        EI(0x13, 0, ireg(ml), 5, 0); // mv ML, t0
++        EI(0x13, 0, ireg(mh), 6, 0); // mv MH, t1
++        return;
++    }
++#endif
+     gv2(RC_INT, RC_INT);
+     a = ireg(vtop[-1].r);
+     b = ireg(vtop[0].r);
+@@ -1164,6 +1283,32 @@
+     case TOK_UDIV:
+         ER(0x33 | ll, 5, d, a, b, 1); // divu d, a, b
+         break;
++
++#ifdef TCC_TARGET_RISCV32
++    /* 64 bit の加減算を 32 bit 2 回に分けるための桁上げ付き演算
++       (tccgen.c の gen_opl が下位で C1，上位で C2 を呼ぶ)。
++       RISC-V に桁上げの旗は無いので，**t2 に持って次へ渡す**。
++       t0 / t2 は割付けの対象外なので，行き先が掛ける側と重なっても
++       壊れない。C1 と C2 の間に挟まるのは退避の書出しだけであり，
++       これらは t2 を触らない (旗を使う i386 / arm と同じ前提) */
++    case TOK_ADDC1: // 下位: 足して桁上げを t2 へ
++        ER(0x33, 0, 5, a, b, 0);   // add  t0, a, b
++        ER(0x33, 3, 7, 5, a, 0);   // sltu t2, t0, a
++        EI(0x13, 0, d, 5, 0);      // mv   d, t0
++        break;
++    case TOK_ADDC2: // 上位: 足して桁上げを足す
++        ER(0x33, 0, 5, a, b, 0);   // add  t0, a, b
++        ER(0x33, 0, d, 5, 7, 0);   // add  d, t0, t2
++        break;
++    case TOK_SUBC1: // 下位: 引いて桁借りを t2 へ
++        ER(0x33, 3, 7, a, b, 0);   // sltu t2, a, b
++        ER(0x33, 0, d, a, b, 0x20);// sub  d, a, b
++        break;
++    case TOK_SUBC2: // 上位: 引いて桁借りを引く
++        ER(0x33, 0, 5, a, b, 0x20);// sub  t0, a, b
++        ER(0x33, 0, d, 5, 7, 0x20);// sub  d, t0, t2
++        break;
++#endif
+     }
+ }
+ 
+@@ -1172,15 +1317,18 @@
+     gen_opil(op, 0);
+ }
+ 
++#ifndef TCC_TARGET_RISCV32
++/* 32 bit 対象の 64 bit 演算は tccgen.c の gen_opl が組み立てる */
+ ST_FUNC void gen_opl(int op)
+ {
+     gen_opil(op, 1);
+ }
++#endif
+ 
+ ST_FUNC void gen_opf(int op)
+ {
+     int rs1, rs2, rd, dbl, invert;
+-    if (vtop[0].type.t == VT_LDOUBLE) {
++    if (IS_LDBL(vtop[0].type.t)) {
+         CType type = vtop[0].type;
+         int func = 0;
+         int cond = -1;
+@@ -1213,8 +1361,8 @@
+     }
+ 
+     gv2(RC_FLOAT, RC_FLOAT);
+-    assert(vtop->type.t == VT_DOUBLE || vtop->type.t == VT_FLOAT);
+-    dbl = vtop->type.t == VT_DOUBLE;
++    assert(IS_DBL(vtop->type.t) || vtop->type.t == VT_FLOAT);
++    dbl = IS_DBL(vtop->type.t);
+     rs1 = freg(vtop[-1].r);
+     rs2 = freg(vtop->r);
+     vtop--;
+@@ -1279,25 +1427,28 @@
+     int r = ireg(gv(RC_INT));
+     if ((t & VT_BTYPE) == VT_SHORT) {
+         if (t & VT_UNSIGNED) {
+-            EI(0x13, 1, r, r, 48); // slli r, r, 48
+-            EI(0x13, 5, r, r, 48); // srli r, r, 48
++            EI(0x13, 1, r, r, XBITS - 16); // slli r, r, XBITS-16
++            EI(0x13, 5, r, r, XBITS - 16); // srli r, r, XBITS-16
+         } else {
+-            EI(0x13, 1, r, r, 48); // slli r, r, 48
+-            EIu(0x13, 5, r, r, 0x400 | 48); // srai r, r, 48
++            EI(0x13, 1, r, r, XBITS - 16); // slli r, r, XBITS-16
++            EIu(0x13, 5, r, r, 0x400 | (XBITS - 16)); // srai r, r, XBITS-16
+         }
+     } else {
+         if (t & VT_UNSIGNED) {
+             EI(0x13, 7, r, r, 0xff); // andi r, r, 0xff
+         } else {
+-            EI(0x13, 1, r, r, 56); // slli r, r, 56
+-            EIu(0x13, 5, r, r, 0x400 | 56); // srai r, r, 56
++            EI(0x13, 1, r, r, XBITS - 8); // slli r, r, XBITS-8
++            EIu(0x13, 5, r, r, 0x400 | (XBITS - 8)); // srai r, r, XBITS-8
+         }
+     }
+ }
+ 
+ ST_FUNC void gen_cvt_sxtw(void)
+ {
+-    int r = ireg(gv(RC_INT));
++    int r;
++    if (XLEN == 4)
++      return; /* 語が 32 bit なので int から語への符号拡張は要らない */
++    r = ireg(gv(RC_INT));
+     EI(0x1b, 0, r, r, 0); // addiw r, r, 0
+ }
+ 
+@@ -1306,7 +1457,7 @@
+     int rr = ireg(gv(RC_INT)), dr;
+     int u = vtop->type.t & VT_UNSIGNED;
+     int l = (vtop->type.t & VT_BTYPE) == VT_LLONG;
+-    if (t == VT_LDOUBLE) {
++    if (IS_LDBL(t)) {
+         int func = l ?
+           (u ? TOK___floatunditf : TOK___floatditf) :
+           (u ? TOK___floatunsitf : TOK___floatsitf);
+@@ -1317,13 +1468,27 @@
+         vtop->type.t = t;
+         vtop->r = REG_IRET;
+         vtop->r2 = TREG_R(1);
++#ifdef TCC_TARGET_RISCV32
++    } else if (l) {
++        /* RV32 に fcvt.[sd].l[u] は無い (語をまたぐ整数との変換は
++           RV64 だけの命令)。実行時支援を呼ぶ */
++        int func = t == VT_FLOAT
++          ? (u ? TOK___floatundisf : TOK___floatdisf)
++          : (u ? TOK___floatundidf : TOK___floatdidf);
++        vpush_helper_func(func);
++        vrott(2);
++        gfunc_call(1);
++        vpushi(0);
++        vtop->type.t = t;
++        vtop->r = REG_FRET;
++#endif
+     } else {
+         vtop--;
+         dr = get_reg(RC_FLOAT);
+         vtop++;
+         vtop->r = dr;
+         dr = freg(dr);
+-        EIu(0x53, 7, dr, rr, ((0x68 | (t == VT_DOUBLE ? 1 : 0)) << 5) | (u ? 1 : 0) | (l ? 2 : 0)); // fcvt.[sd].[wl][u]
++        EIu(0x53, 7, dr, rr, ((0x68 | (IS_DBL(t) ? 1 : 0)) << 5) | (u ? 1 : 0) | (l ? 2 : 0)); // fcvt.[sd].[wl][u]
+     }
+ }
+ 
+@@ -1332,7 +1497,7 @@
+     int ft = vtop->type.t & VT_BTYPE;
+     int l = (t & VT_BTYPE) == VT_LLONG;
+     int u = t & VT_UNSIGNED;
+-    if (ft == VT_LDOUBLE) {
++    if (IS_LDBL(ft)) {
+         int func = l ?
+           (u ? TOK___fixunstfdi : TOK___fixtfdi) :
+           (u ? TOK___fixunstfsi : TOK___fixtfsi);
+@@ -1342,6 +1507,20 @@
+         vpushi(0);
+         vtop->type.t = t;
+         vtop->r = REG_IRET;
++#ifdef TCC_TARGET_RISCV32
++    } else if (l) {
++        /* RV32 に fcvt.l[u].[sd] は無い。実行時支援を呼ぶ */
++        int func = ft == VT_FLOAT
++          ? (u ? TOK___fixunssfdi : TOK___fixsfdi)
++          : (u ? TOK___fixunsdfdi : TOK___fixdfdi);
++        vpush_helper_func(func);
++        vrott(2);
++        gfunc_call(1);
++        vpushi(0);
++        vtop->type.t = t;
++        vtop->r = REG_IRET;
++        vtop->r2 = REG_IRE2;
++#endif
+     } else {
+         int rr = freg(gv(RC_FLOAT)), dr;
+         vtop--;
+@@ -1349,7 +1528,7 @@
+         vtop++;
+         vtop->r = dr;
+         dr = ireg(dr);
+-        EIu(0x53, 1, dr, rr, ((0x60 | (ft == VT_DOUBLE ? 1 : 0)) << 5) | (u ? 1 : 0) | (l ? 2 : 0)); // fcvt.[wl][u].[sd] rtz
++        EIu(0x53, 1, dr, rr, ((0x60 | (IS_DBL(ft) ? 1 : 0)) << 5) | (u ? 1 : 0) | (l ? 2 : 0)); // fcvt.[wl][u].[sd] rtz
+     }
+ }
+ 
+@@ -1359,8 +1538,15 @@
+     dt &= VT_BTYPE;
+     if (st == dt)
+       return;
+-    if (dt == VT_LDOUBLE || st == VT_LDOUBLE) {
+-        int func = (dt == VT_LDOUBLE) ?
++    /* RV32 (ilp32) では long double は double そのものである
++       (LDOUBLE_SIZE 8)。VT_DOUBLE と VT_LDOUBLE は別のトークンなので
++       上の st == dt では抜けられないが，変換は要らない。ここで抜けないと
++       下の fcvt.d.s (単精度 -> 倍精度) が double の値に掛かり，
++       NaN ボクシングの規則で正準 NaN になる。 */
++    if (IS_DBL(st) && IS_DBL(dt))
++      return;
++    if (IS_LDBL(dt) || IS_LDBL(st)) {
++        int func = IS_LDBL(dt) ?
+             (st == VT_FLOAT ? TOK___extendsftf2 : TOK___extenddftf2) :
+             (dt == VT_FLOAT ? TOK___trunctfsf2 : TOK___trunctfdf2);
+         /* We can't use gfunc_call, as func_old_type works like vararg
+@@ -1368,7 +1554,7 @@
+            integers.  But we really need them in the float argument registers
+            for extendsftf2/extenddftf2.  So, do it explicitely.  */
+         save_regs(1);
+-        if (dt == VT_LDOUBLE)
++        if (IS_LDBL(dt))
+           gv(RC_F(0));
+         else {
+             gv(RC_R(0));
+@@ -1383,16 +1569,16 @@
+         vtop -= 2;
+         vpushi(0);
+         vtop->type.t = dt;
+-        if (dt == VT_LDOUBLE)
++        if (IS_LDBL(dt))
+           vtop->r = REG_IRET, vtop->r2 = REG_IRET+1;
+         else
+           vtop->r = REG_FRET;
+     } else {
+-        assert (dt == VT_FLOAT || dt == VT_DOUBLE);
+-        assert (st == VT_FLOAT || st == VT_DOUBLE);
++        assert (dt == VT_FLOAT || IS_DBL(dt));
++        assert (st == VT_FLOAT || IS_DBL(st));
+         rs = gv(RC_FLOAT);
+         rd = get_reg(RC_FLOAT);
+-        if (dt == VT_DOUBLE)
++        if (IS_DBL(dt))
+           EI(0x53, 0, freg(rd), freg(rs), 0x21 << 5); // fcvt.d.s RD, RS (no rm)
+         else
+           EI(0x53, 7, freg(rd), freg(rs), (0x20 << 5) | 1); // fcvt.s.d RD, RS (dyn rm)
+@@ -1416,14 +1602,14 @@
+     put_extern_sym(&label, cur_text_section, ind, 0);
+     o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
+     greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_I, 0);
+-    EI(0x03, 3, r2, r1, 0); // ld r2, x[r1]
++    EI(0x03, F3_LX, r2, r1, 0); // l[wd] r2, x[r1]
+     EI(0x13, 0, r2, r2, 1); // addi r2, r2, #1
+     greloca(cur_text_section, sv->sym, ind, R_RISCV_PCREL_HI20, 0);
+     label.c = 0; /* force new local ELF symbol */
+     put_extern_sym(&label, cur_text_section, ind, 0);
+     o(0x17 | (r1 << 7)); // auipc RR, 0 %pcrel_hi(sym)
+     greloca(cur_text_section, &label, ind, R_RISCV_PCREL_LO12_S, 0);
+-    ES(0x23, 3, r1, r2, 0); // sd r2, [r1]
++    ES(0x23, F3_LX, r1, r2, 0); // s[wd] r2, [r1]
+     vpop();
+ }
+ 
+@@ -1438,10 +1624,10 @@
+     if (LOW_OVERFLOW(addr)) {
+ 	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
+         ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
+-        ES(0x23, 3, 5, 2, SIGN11(addr)); // sd sp, fc(t0)
++        ES(0x23, F3_LX, 5, 2, SIGN11(addr)); // s[wd] sp, fc(t0)
+     }
+     else
+-        ES(0x23, 3, 8, 2, addr); // sd sp, fc(s0)
++        ES(0x23, F3_LX, 8, 2, addr); // s[wd] sp, fc(s0)
+ }
+ 
+ ST_FUNC void gen_vla_sp_restore(int addr)
+@@ -1449,10 +1635,10 @@
+     if (LOW_OVERFLOW(addr)) {
+ 	o(0x37 | (5 << 7) | UPPER(addr)); //lui t0,upper(addr)
+         ER(0x33, 0, 5, 5, 8, 0); // add t0, t0, s0
+-        EI(0x03, 3, 2, 5, SIGN11(addr)); // ld sp, fc(t0)
++        EI(0x03, F3_LX, 2, 5, SIGN11(addr)); // l[wd] sp, fc(t0)
+     }
+     else
+-        EI(0x03, 3, 2, 8, addr); // ld sp, fc(s0)
++        EI(0x03, F3_LX, 2, 8, addr); // l[wd] sp, fc(s0)
+ }
+ 
+ ST_FUNC void gen_vla_alloc(CType *type, int align)
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/tcc.h ../../tmp/tcc/src/tcc.h
+--- a/tcc.h
++++ b/tcc.h
+@@ -401,6 +401,14 @@
+ # define ElfW_Rel ElfW(Rela)
+ # define SHT_RELX SHT_RELA
+ # define REL_SECTION_FMT ".rela%s"
++#elif defined TCC_TARGET_RISCV32
++/* RISC-V の再配置は 32 bit でも加数を項目に持つ (RELA) */
++# define ELFCLASSW ELFCLASS32
++# define ElfW(type) Elf##32##_##type
++# define ELFW(type) ELF##32##_##type
++# define ElfW_Rel ElfW(Rela)
++# define SHT_RELX SHT_RELA
++# define REL_SECTION_FMT ".rela%s"
+ #else
+ # define ELFCLASSW ELFCLASS32
+ # define ElfW(type) Elf##32##_##type
+@@ -1720,7 +1728,9 @@
+ 
+ /* ------------ riscv64-gen.c ------------ */
+ #ifdef TCC_TARGET_RISCV64
+-ST_FUNC void gen_opl(int op);
++#ifndef TCC_TARGET_RISCV32
++ST_FUNC void gen_opl(int op); /* 32 bit 対象では tccgen.c が持つ */
++#endif
+ ST_FUNC void gen_va_start(void);
+ ST_FUNC void arch_transfer_ret_regs(int);
+ ST_FUNC void gen_cvt_sxtw(void);
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/tccgen.c ../../tmp/tcc/src/tccgen.c
+--- a/tccgen.c
++++ b/tccgen.c
+@@ -237,7 +237,9 @@
+ #ifdef TCC_TARGET_X86_64
+     if ((t & VT_BTYPE) == VT_LDOUBLE)
+         return TREG_ST0;
+-#elif defined TCC_TARGET_RISCV64
++#elif defined TCC_TARGET_RISCV64 && !defined TCC_TARGET_RISCV32
++    /* RV32 の long double は double と同じ 8 バイトなので f レジスタに
++       返る。整数レジスタ 2 本で運ぶのは RV64 の 16 バイトの方だけ */
+     if ((t & VT_BTYPE) == VT_LDOUBLE)
+         return REG_IRET;
+ #endif
+@@ -288,7 +290,8 @@
+         return RC_ST0;
+     if ((t & VT_BTYPE) == VT_QFLOAT)
+         return RC_FRET;
+-#elif defined TCC_TARGET_RISCV64
++#elif defined TCC_TARGET_RISCV64 && !defined TCC_TARGET_RISCV32
++    /* RV32 の long double は double と同じ 8 バイトで f レジスタに乗る */
+     if ((t & VT_BTYPE) == VT_LDOUBLE)
+         return RC_INT;
+ #endif
+@@ -1906,8 +1909,9 @@
+         if (bt == VT_VOID || bt == VT_STRUCT) /* should not happen */
+             return vtop->r;
+ 
+-#ifdef TCC_TARGET_RISCV64
++#if defined TCC_TARGET_RISCV64 && !defined TCC_TARGET_RISCV32
+         /* XXX mega hack */
++        /* RV32 では long double は double と同じなので f レジスタのまま */
+         if (bt == VT_LDOUBLE && rc == RC_FLOAT)
+           rc = RC_INT;
+ #endif
+@@ -2298,6 +2302,22 @@
+             op1 = TOK_UGE;
+         a = 0;
+         b = 0;
++#ifdef TCC_TARGET_RISCV32
++        /* **旗の無い機械では「直前の比較の続き」が書けない。**
++           下の non equal test は，i386 や arm では直前の比較が立てた旗を
++           そのまま読み直すことで成り立っている。RISC-V に旗は無く，
++           比較は 2 つのレジスタを名指しする分岐そのものなので，
++           上位語をもう一度比べる必要がある。そのために**上位語の複製を
++           先に積んでおく** (比較で消費される前に取っておく)。
++           複製は値スタックに載るので，割付けがそのレジスタを取ることも
++           無い */
++        if (op != TOK_EQ && op != TOK_NE) {
++            vpushv(vtop - 1);   /* H1 の複製 */
++            vpushv(vtop - 1);   /* H2 の複製 */
++            vrotb(4);           /* 複製を下へ回し */
++            vrotb(4);           /* 元の H1 H2 を上に戻す */
++        }
++#endif
+         gen_op(op1);
+         if (op == TOK_NE) {
+             b = gvtst(0, 0);
+@@ -2305,8 +2325,12 @@
+             a = gvtst(1, 0);
+             if (op != TOK_EQ) {
+                 /* generate non equal test */
++#ifdef TCC_TARGET_RISCV32
++                gen_op(TOK_NE);   /* 取っておいた上位語の複製を比べる */
++#else
+                 vpushi(0);
+                 vset_VT_CMP(TOK_NE);
++#endif
+                 b = gvtst(0, 0);
+             }
+         }
+diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x config.mak -x tcc -x '*.log' -x '*.exe' -x tccdefs_.h tcc/tcctok.h ../../tmp/tcc/src/tcctok.h
+--- a/tcctok.h
++++ b/tcctok.h
+@@ -239,6 +239,14 @@
+ # endif
+      DEF(TOK___fixunssfdi, "__fixunssfdi")
+      DEF(TOK___fixunsdfdi, "__fixunsdfdi")
++# ifdef TCC_TARGET_RISCV32
++     /* RV32 には 64 bit 整数と浮動小数点を直に変換する命令が無いので
++        符号つきの分も実行時支援を呼ぶ (docs/stage015-riscv32.md 13) */
++     DEF(TOK___floatdisf, "__floatdisf")
++     DEF(TOK___floatdidf, "__floatdidf")
++     DEF(TOK___fixsfdi, "__fixsfdi")
++     DEF(TOK___fixdfdi, "__fixdfdi")
++# endif
+ #endif
+ 
+ #if defined TCC_TARGET_ARM
