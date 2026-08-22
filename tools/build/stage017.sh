@@ -48,6 +48,23 @@ build_stage017() {
         -- stage017/ar17.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin tmp/build/l18_posix_dir.o \
         -- osprog_run ar17 stage017/ar17.c
+
+    # カーネルの第 23 世代。kernel22 との差は引数の数と長さだけ
+    # (docs/stage017-cc.md 8 章)。前置部は 'K' である
+    step kernel23 kernel23.bin \
+        -- stage017/kernel23.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin \
+        -- kernel23_run
+}
+
+kernel23_run() {
+    sh tools/bundle.sh stage017/kernel23.c \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/build/kernel23.i
+    sh tools/env.sh qemu tmp/build/cc15p.bin < tmp/build/kernel23.i \
+        > tmp/build/kernel23.o
+    { printf 'K'; cat tmp/build/kernel23.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/build/kernel23.bin
+    echo "built tmp/build/kernel23.bin" >&2
 }
 
 # OS の上で動く実行形式を 1 つ作る。osprog_run <名前> <ソース>
@@ -92,8 +109,9 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 \
+    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 kernel23.bin \
         -- stage017/cc17.c stage017/cc18.c stage017/ar17.c \
+           stage017/kernel23.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh
