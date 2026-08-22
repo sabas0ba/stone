@@ -2,14 +2,19 @@
 //
 // チェーンの実成果物 (tmp/build/。QEMU + コンテナで生成したもの) を
 // エミュレータで実行し，出力が QEMU での出力とビット一致することを確かめる。
-// フィルタ実行 (Stage 1〜11, 14) に加えて，OS (kernel12/13 + sfs) の起動と
-// ゲスト内ビルドまで tests/stage012・013 と同じ素材・期待値で検査する。
+// フィルタ実行 (Stage 1〜11, 14, 15) に加えて，OS (kernel12/13 + sfs,
+// kernel17/18/19 + sfs2) の起動とゲスト内ビルドまで tests/stage012・013・
+// 015・016 と同じ素材・期待値で検査する。
 // 事前に sh tools/build.sh all を済ませておくこと。
 //
 // 使用法: node web/test-emu.mjs
 import { readFileSync, existsSync } from 'node:fs';
 import { Machine, runFilter, withTerminator, concatBytes, buildBundle } from './rv32.js';
 import { packSfs, unpackSfs, SFS_OFFSET } from './sfs.js';
+import { packSfs2, unpackSfs2 } from './sfs2.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 process.chdir(new URL('..', import.meta.url).pathname);
 
@@ -122,20 +127,84 @@ const run = (bin, input) => runFilter(read(bin), input);
     'libc: bundle -> pp -> cc -> ld(+string.o) -> 実行が expected と一致');
 }
 
-// --- Stage 14: cc14b -------------------------------------------------------
+// --- 適合台帳 (Stage 14 / 15) ---------------------------------------------
+// 台帳の書式は tests/stage014/ledger.txt 冒頭。期待値は sh の側で
+// エスケープしてあるので (改行が \n)，実測を同じ形へ直して突き合わせる
+const ledger = (path) => readFileSync(path, 'utf8').split('\n')
+    .map((ln) => ln.trim())
+    .filter((ln) => ln && !ln.startsWith('#'))
+    .map((ln) => {
+        const [name, state, want] = ln.split(/\s+/);
+        return { name, state, want };
+    });
+
+// tests/stage*/test.sh の probe() が期待値を作るのと同じ変換
+const asLedger = (bytes) => `${new TextDecoder().decode(bytes).replace(/\n+$/, '')}\n`
+    .replace(/\\/g, '\\\\').replace(/\t/g, '\\t').replace(/\n/g, '\\n');
+
+// --- Stage 14: cc14g (台帳の最前線) ---------------------------------------
 {
-    const bundle = buildBundle([{
-        name: 'multidecl.c', data: read('tests/stage014/probe/multidecl.c'),
-    }]);
-    const i = run('tmp/build/pp.bin', bundle);
-    const o = run('tmp/build/cc14b.bin', i.output);
-    const bin = runFilter(read('tmp/build/ld.bin'),
-        withTerminator(o.output, 'nul'));
-    const r = runFilter(bin.output, new Uint8Array(0));
-    report(i.exitCode === 0 && o.exitCode === 0 && bin.exitCode === 0
-        && r.exitCode === 0
-        && new TextDecoder().decode(r.output).trim() === '7',
-    'cc14b: 適合プローブ multidecl.c が通り実行できる (台帳の期待値 "7")');
+    const led = ledger('tests/stage014/ledger.txt');
+    const pick = ['multidecl', 'nestinit', 'bitfield', 'kr_func', 'vaforward'];
+    let bad = null;
+    for (const name of pick) {
+        const e = led.find((x) => x.name === name);
+        if (!e || e.state !== 'ok') { bad = `${name}: 台帳に ok が無い`; break; }
+        const bundle = buildBundle([
+            { name: 'stdarg.h', data: read('stage013/libc/include/stdarg.h') },
+            { name: `${name}.c`, data: read(`tests/stage014/probe/${name}.c`) },
+        ]);
+        const i = run('tmp/build/pp.bin', bundle);
+        const o = run('tmp/build/cc14g.bin', i.output);
+        const bin = runFilter(read('tmp/build/ld.bin'),
+            withTerminator(o.output, 'nul'));
+        const r = runFilter(bin.output, new Uint8Array(0));
+        if (i.exitCode || o.exitCode || bin.exitCode || r.exitCode) {
+            bad = `${name}: 途中で失敗した`;
+            break;
+        }
+        if (asLedger(r.output) !== e.want) {
+            bad = `${name}: ${asLedger(r.output)} != ${e.want}`;
+            break;
+        }
+    }
+    report(bad === null,
+        `cc14g: 適合プローブ ${pick.join(' / ')} が台帳の期待値どおり${bad ? ` — ${bad}` : ''}`);
+}
+
+// --- Stage 15: cc15p + rt64 + rtfp (64 bit と浮動小数点) ------------------
+// 手順は tests/stage015/test.sh の probe() と同じ (pp -> cc15p ->
+// ld(+rt64,+rtfp))。web/pipelines.js の stage015 が同じ並びを使う
+{
+    const led = ledger('tests/stage015/ledger.txt');
+    const pick = ['llarith', 'lldiv', 'llvarg', 'fparith', 'fpstore'];
+    const hdr = read('stage015/libc/include/stdarg.h');
+    let bad = null;
+    for (const name of pick) {
+        const e = led.find((x) => x.name === name);
+        if (!e || e.state !== 'ok') { bad = `${name}: 台帳に ok が無い`; break; }
+        const bundle = buildBundle([
+            { name: 'stdarg.h', data: hdr },
+            { name: `${name}.c`, data: read(`tests/stage015/probe/${name}.c`) },
+        ]);
+        const i = run('tmp/build/pp.bin', bundle);
+        const o = run('tmp/build/cc15p.bin', i.output);
+        const bin = runFilter(read('tmp/build/ld.bin'), concatBytes([
+            o.output, read('tmp/build/rt64.o'), read('tmp/build/rtfp.o'),
+            Uint8Array.of(0)]));
+        const r = runFilter(bin.output, new Uint8Array(0));
+        if (i.exitCode || o.exitCode || bin.exitCode || r.exitCode) {
+            bad = `${name}: 途中で失敗した`;
+            break;
+        }
+        if (asLedger(r.output) !== e.want) {
+            bad = `${name}: ${asLedger(r.output)} != ${e.want}`;
+            break;
+        }
+    }
+    report(bad === null,
+        `cc15p: 64 bit と浮動小数点の probe ${pick.join(' / ')} が台帳とビット一致`
+        + `${bad ? ` — ${bad}` : ''}`);
 }
 
 // ===========================================================================
@@ -267,6 +336,183 @@ const dec = (b) => new TextDecoder().decode(b);
         && r2.status === 'waiting' && r2.text.includes('interactive')
         && r3.status === 'exit' && m.exitCode === 4,
     'os13: 対話実行 — 入力待ちで止まり，1 行ずつ流すと応答して exit 4 で終わる');
+}
+
+// ===========================================================================
+// sfs2 と Stage 16 のカーネル。手順・素材・期待値は tests/stage016 と同一
+
+// --- sfs2: JS 版がホスト側の道具 (tools/sfs2.sh) とバイト一致すること ----
+{
+    const dir = mkdtempSync(`${tmpdir()}/stone-sfs2-`);
+    try {
+        const tree = [
+            { name: 'top.txt', data: text('hello\n') },
+            { name: 'src/one.c', data: text('aaa\n') },
+            { name: 'src/a/two.c', data: text('bbb\n') },
+            { name: 'src/a/b/three.c', data: text('ccc\n') },
+            { name: 'inc/one.c', data: text('ddd\n') },   // src/one.c と同名・別階層
+            { name: 'inc/empty.h', data: new Uint8Array(0) },
+            { name: 'empty', dir: true },
+        ];
+        for (const f of tree) {
+            const full = `${dir}/root/${f.name}`;
+            if (f.dir) { mkdirSync(full, { recursive: true }); continue; }
+            mkdirSync(full.slice(0, full.lastIndexOf('/')), { recursive: true });
+            writeFileSync(full, f.data);
+        }
+        execFileSync('sh', ['tools/sfs2.sh', 'pack', `${dir}/root`,
+            `${dir}/ref.img`, '1048576', '64'], { stdio: 'pipe' });
+        const mine = packSfs2(tree, 1 << 20, 64);
+        const ref = read(`${dir}/ref.img`);
+        report(eq(mine, ref),
+            'sfs2: JS の pack がホスト側 tools/sfs2.sh の像とバイト一致');
+
+        const back = unpackSfs2(mine);
+        const got = Object.fromEntries(back.map((f) => [f.path, f]));
+        report(back.length === 11                       // 6 ファイル + 5 ディレクトリ
+            && got['src/one.c'] && dec(got['src/one.c'].data) === 'aaa\n'
+            && dec(got['inc/one.c'].data) === 'ddd\n'   // 同名で取り違えない
+            && got['src/a/b'].dir === true
+            && got['empty'].dir === true
+            && got['inc/empty.h'].data.length === 0,
+        'sfs2: unpack が木をそのまま戻す (空の階層・同名別階層を含む)');
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+}
+
+// sfs2 の木でカーネルを起動する (tests/stage016 と同じ注入位置・大きさ)
+const runOS2 = (kernel, files, opts = {}) => {
+    const imgSize = opts.imgSize || (4 << 20);
+    const m = new Machine(read(kernel), { ramSize: opts.ramSize });
+    m.mem.set(packSfs2(files, imgSize, opts.maxEntries || 128), SFS_OFFSET);
+    const chunks = [];
+    for (;;) {
+        const r = m.run(4_000_000_000);
+        chunks.push(r.output);
+        if (r.status === 'exit') {
+            return { exitCode: m.exitCode, output: concatBytes(chunks), m, imgSize };
+        }
+        if (r.status !== 'budget') {
+            return { exitCode: -1, status: r.status, output: concatBytes(chunks), m, imgSize };
+        }
+    }
+};
+
+// libc15 / libc16 とリンクした 'E' 実行形式を作る。並びは tests/stage016
+const OBJ15 = ['l15_src_string', 'l15_src_stdlib', 'l15_src_misc15',
+    'l15_posix_sys', 'l15_posix_morecore', 'l15_posix_stdio', 'l15_posix_assert'];
+const OBJ16 = ['l16_src_string', 'l16_src_stdlib', 'l16_src_misc15',
+    'l16_posix_sys', 'l16_posix_morecore', 'l16_posix_stdio', 'l16_posix_assert',
+    'l16_posix_dir'];
+const HDR15 = ['assert.h', 'ctype.h', 'errno.h', 'fcntl.h', 'inttypes.h',
+    'limits.h', 'math.h', 'setjmp.h', 'stdarg.h', 'stddef.h', 'stdio.h',
+    'stdlib.h', 'string.h', 'time.h', 'unistd.h'];
+const HDR16 = ['assert.h', 'ctype.h', 'dirent.h', 'errno.h', 'fcntl.h',
+    'inttypes.h', 'limits.h', 'math.h', 'setjmp.h', 'stdarg.h', 'stddef.h',
+    'stdio.h', 'stdlib.h', 'string.h', 'time.h', 'unistd.h'];
+
+function guestElf(gen, unit, extraHeaders = []) {
+    const inc = gen === 16 ? 'stage016/libc/include' : 'stage015/libc/include';
+    const hdrs = (gen === 16 ? HDR16 : HDR15)
+        .map((h) => ({ name: h, data: read(`${inc}/${h}`) }));
+    const objs = (gen === 16 ? OBJ16 : OBJ15)
+        .map((n) => read(`tmp/build/${n}.o`))
+        .concat([read('tmp/build/rt64.o'), read('tmp/build/rtfp.o')]);
+    const i = run('tmp/build/pp16.bin', buildBundle([
+        ...hdrs, ...extraHeaders,
+        { name: unit.replace(/^.*\//, ''), data: read(unit) }]));
+    const o = run('tmp/build/cc15p.bin', i.output);
+    const elf = runFilter(read('tmp/build/ld16.bin'), concatBytes([
+        text('E'), o.output, ...objs, Uint8Array.of(0)]));
+    if (i.exitCode || o.exitCode || elf.exitCode) {
+        throw new Error(`guestElf ${unit}: pp ${i.exitCode} cc ${o.exitCode} ld ${elf.exitCode}`);
+    }
+    return elf.output;
+}
+
+// --- OS: libc15 の 64 bit / 浮動小数点が OS の上で効く (Stage 15 第 4 部) --
+// 手順・素材・期待値は tests/stage015 の lib15 と同じ。ただしリンカは
+// ld14 (tests/stage015 と同じ) で，走らせるのは kernel16
+{
+    const hdrs = HDR15.map((h) => ({
+        name: h, data: read(`stage015/libc/include/${h}`),
+    }));
+    const objs = OBJ15.map((n) => read(`tmp/build/${n}.o`))
+        .concat([read('tmp/build/rt64.o'), read('tmp/build/rtfp.o')]);
+    const i = run('tmp/build/pp.bin', buildBundle([...hdrs,
+        { name: 'lib15.c', data: read('tests/stage015/user/lib15.c') }]));
+    const o = run('tmp/build/cc15p.bin', i.output);
+    const elf = runFilter(read('tmp/build/ld14.bin'), concatBytes([
+        text('E'), o.output, ...objs, Uint8Array.of(0)]));
+    const r = runOS('tmp/build/kernel16.bin',
+        [{ name: 'lib15', data: elf.output }, boot('lib15\n')], new Uint8Array(0));
+    report(i.exitCode === 0 && o.exitCode === 0 && elf.exitCode === 0
+        && r.exitCode === 0
+        && eq(r.output, read('tests/stage015/expected/lib15.txt')),
+    'os15: kernel16 の上で %llu / %f / snprintf / strto / sscanf / setjmp / lseek が通る');
+}
+
+// --- OS: kernel17 が sfs2 の木を経路で引く (第 1 部) ----------------------
+{
+    const r = runOS2('tmp/build/kernel17.bin', [
+        { name: 'top.txt', data: text('TOP\n') },
+        { name: 'src/one.c', data: text('SRC-ONE\n') },
+        { name: 'inc/one.c', data: text('INC-ONE\n') },     // 同名・別階層
+        { name: 'src/a/b/three.c', data: text('THREE\n') },
+        { name: 'pathprobe', data: guestElf(15, 'tests/stage016/user/pathprobe.c') },
+        boot('pathprobe\n'),
+    ]);
+    report(r.exitCode === 0
+        && eq(r.output, read('tests/stage016/expected/pathprobe.txt')),
+    'os16: kernel17 が経路を解決する (絶対・相対・深さ・同名・不在。pathprobe)');
+}
+
+// --- OS: kernel18 がディレクトリを操作する (第 2 部) ----------------------
+{
+    const r = runOS2('tmp/build/kernel18.bin', [
+        { name: 'top.txt', data: text('TOP\n') },
+        { name: 'src/one.c', data: text('SRC-ONE\n') },
+        { name: 'src/a/two.c', data: text('A-TWO\n') },
+        { name: 'inc/one.c', data: text('INC-ONE\n') },
+        {
+            name: 'dirprobe',
+            data: guestElf(16, 'tests/stage016/user/dirprobe.c', [{
+                name: 'sys/stat.h',
+                data: read('stage016/libc/include/sys/stat.h'),
+            }]),
+        },
+        boot('dirprobe\n'),
+    ]);
+    // 走らせたあとの像に out/ と out/f.txt が増えていること
+    // (プレイグラウンドの木表示が見せるのはこれである)
+    const made = unpackSfs2(r.m.mem.subarray(SFS_OFFSET, SFS_OFFSET + r.imgSize));
+    const out = made.find((f) => f.path === 'out');
+    const made2 = made.find((f) => f.path === 'out/f.txt');
+    report(r.exitCode === 0
+        && eq(r.output, read('tests/stage016/expected/dirprobe.txt'))
+        && out && out.dir === true && made2 && dec(made2.data) === 'MADE\n',
+    'os16: kernel18 が一覧・作成・移動と . / .. を扱う (dirprobe)');
+}
+
+// --- OS: 記憶域が 14 MB から 256 MB へ広がった (第 3 部) ------------------
+// **片方だけを見ても「広がった」ことは言えない** (docs/stage016-os.md 8.6)
+{
+    const elf = guestElf(16, 'tests/stage016/user/memprobe.c');
+    const files = [{ name: 'memprobe', data: elf }, boot('memprobe\n')];
+    const got = (kernel, ramSize) => {
+        const r = runOS2(kernel, files, { maxEntries: 32, ramSize });
+        const s = dec(r.output);
+        const m = s.match(/^got (\d+)$/m);
+        return { mib: m ? Number(m[1]) : -1, ok: /^verify ok$/m.test(s),
+            exitCode: r.exitCode };
+    };
+    const old = got('tmp/build/kernel18.bin');
+    const wide = got('tmp/build/kernel19.bin', 512 << 20);
+    report(old.exitCode === 0 && old.ok && old.mib > 0 && old.mib < 14,
+        `os16: kernel18 (128 MB) の上限は 14 MiB 未満 (got ${old.mib} MiB, verify ok)`);
+    report(wide.exitCode === 0 && wide.ok && wide.mib >= 250,
+        `os16: kernel19 (512 MB) は 250 MiB 以上を取って書き戻せる (got ${wide.mib} MiB)`);
 }
 
 console.log(`\npassed: ${pass}, failed: ${fail} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);

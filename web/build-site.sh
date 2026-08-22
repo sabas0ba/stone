@@ -29,37 +29,58 @@ rm -rf "$dist"
 mkdir -p "$dist/data" "$dist/assets/bin" "$dist/files"
 
 cp web/index.html web/style.css web/app.js web/rv32.js web/sfs.js \
-   web/worker.js web/pipelines.js "$dist/"
+   web/sfs2.js web/worker.js web/pipelines.js "$dist/"
 touch "$dist/.nojekyll"
 
 # stages.json: コンテンツに成果物のサイズと SHA-256 を付与する。
-# stage014 には適合台帳 (tests/stage014/ledger.txt) の実データを
-# カバレッジとして取り込む (台帳の書式は同ファイル冒頭)
+# stage014 / stage015 には適合台帳 (tests/stageNNN/ledger.txt) の実データを
+# カバレッジとして取り込む (台帳の書式は同ファイル冒頭)。
+# 取り込んだ組には kind='ledger' を付ける —— プレイグラウンドの
+# probe 選択がこれを見て選択肢を作る (web/app.js)
 python3 - "$dist" <<'EOF'
 import hashlib, json, os, subprocess, sys
 
 dist = sys.argv[1]
 data = json.load(open('web/data/stages-content.json'))
+by_id = {st['id']: st for st in data['stages']}
 
-items = []
-for ln in open('tests/stage014/ledger.txt'):
-    ln = ln.rstrip('\n')
-    if not ln or ln.startswith('#'):
-        continue
-    parts = ln.split(None, 3)         # 説明欄は無い行もある
-    name, state, expect = parts[:3]
-    desc = parts[3] if len(parts) > 3 else ''
-    note = (f'expected output: {expect}' if state == 'ok'
-            else f'rejected by cc with exit code {expect}' if state == 'gap'
-            else f'WRONG output: {expect}') + (f' — {desc}' if desc else '')
-    items.append({'label': name, 'state': state, 'note': note})
-st14 = data['stages'][13]
-st14.setdefault('coverage', []).insert(0, {
-    'title': 'Conformance ledger — real-world C idioms (tests/stage014/ledger.txt)',
-    'note': 'measured against the newest generation; `gap` means the compiler '
-            'rejects it explicitly (never silently miscompiles)',
-    'items': items,
-})
+def read_ledger(path):
+    items = []
+    for ln in open(path):
+        ln = ln.rstrip('\n')
+        if not ln or ln.startswith('#'):
+            continue
+        parts = ln.split(None, 3)         # 説明欄は無い行もある
+        name, state, expect = parts[:3]
+        desc = parts[3] if len(parts) > 3 else ''
+        note = (f'expected output: {expect}' if state == 'ok'
+                else f'rejected by cc with exit code {expect}' if state == 'gap'
+                else f'WRONG output: {expect}') + (f' — {desc}' if desc else '')
+        items.append({'label': name, 'state': state, 'note': note})
+    return items
+
+LEDGERS = [
+    ('stage014', 'tests/stage014/ledger.txt',
+     'Conformance ledger — real-world C idioms (tests/stage014/ledger.txt)',
+     'measured against cc14g through pp14 and ld14; `gap` means the compiler '
+     'rejects it explicitly (never silently miscompiles)'),
+    ('stage015', 'tests/stage015/ledger.txt',
+     'Conformance ledger — 64-bit integers and floating point '
+     '(tests/stage015/ledger.txt)',
+     'measured against cc15p, linked with the runtime helpers rt64 and rtfp; '
+     'the expectations are bit patterns, compared with the host\'s IEEE-754'),
+]
+for sid, path, title, note in LEDGERS:
+    items = read_ledger(path)
+    if not items:
+        sys.exit(f'error: 台帳が空: {path}')
+    for it in items:
+        probe = f'tests/{sid}/probe/{it["label"]}.c'
+        if not os.path.exists(probe):
+            sys.exit(f'error: 台帳の probe が無い: {probe}')
+    by_id[sid].setdefault('coverage', []).insert(0, {
+        'kind': 'ledger', 'title': title, 'note': note, 'items': items,
+    })
 
 def artifact_path(name):
     # hex0.bin だけは git 管理の seed。他は tmp/build の生成物

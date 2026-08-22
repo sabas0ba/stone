@@ -11,11 +11,12 @@ const PHASES = [
     { from: 1, to: 7, label: 'Foundations (seed → self-host → optimizer)', cls: 'seed', color: 'var(--phase-seed)' },
     { from: 8, to: 10, label: 'Phase A: language & toolchain', cls: 'a', color: 'var(--phase-a)' },
     { from: 11, to: 13, label: 'Phase B: self-sufficient environment', cls: 'b', color: 'var(--phase-b)' },
-    { from: 14, to: 14, label: 'Phase C: external code', cls: 'c', color: 'var(--phase-c)' },
+    { from: 14, to: 16, label: 'Phase C: external code & OS', cls: 'c', color: 'var(--phase-c)' },
 ];
 
 let DATA = null;
 let current = 1;
+const lastStage = () => (DATA ? DATA.stages.length : 1);
 const worker = new Worker('worker.js', { type: 'module' });
 let runId = 0;
 
@@ -141,14 +142,15 @@ function buildTimeline() {
         b.onclick = () => { stopAuto(); select(st.num); };
         nodes.appendChild(b);
     }
+    $('tl-range').max = String(DATA.stages.length);
     $('tl-range').oninput = (e) => { stopAuto(); select(Number(e.target.value)); };
     $('tl-prev').onclick = () => { stopAuto(); select(Math.max(1, current - 1)); };
-    $('tl-next').onclick = () => { stopAuto(); select(Math.min(14, current + 1)); };
+    $('tl-next').onclick = () => { stopAuto(); select(Math.min(lastStage(), current + 1)); };
     $('tl-play').onclick = () => (autoTimer ? stopAuto() : startAuto());
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
         if (e.key === 'ArrowLeft') { stopAuto(); select(Math.max(1, current - 1)); }
-        if (e.key === 'ArrowRight') { stopAuto(); select(Math.min(14, current + 1)); }
+        if (e.key === 'ArrowRight') { stopAuto(); select(Math.min(lastStage(), current + 1)); }
     });
 }
 
@@ -156,10 +158,10 @@ function buildTimeline() {
 let autoTimer = null;
 
 function startAuto() {
-    autoTimer = setInterval(() => select(current >= 14 ? 1 : current + 1), 7000);
+    autoTimer = setInterval(() => select(current >= lastStage() ? 1 : current + 1), 7000);
     $('tl-play').classList.add('playing');
     $('tl-play').textContent = '⏸ auto';
-    select(current >= 14 ? 1 : current + 1);
+    select(current >= lastStage() ? 1 : current + 1);
 }
 
 function stopAuto() {
@@ -170,29 +172,137 @@ function stopAuto() {
     $('tl-play').textContent = '▶ auto';
 }
 
-// ---- 推移チャート (主成果物のサイズ，対数目盛) ----
-function buildChart() {
-    const stages = DATA.stages;
-    // 各世代の最大の成果物 (その世代の規模の代表として)
-    const mains = stages.map((s) => s.artifacts.reduce(
-        (a, b) => ((b.size || 0) > (a.size || 0) ? b : a), s.artifacts[0] || {}));
+// ---- 能力の推移 + 成果物の大きさ (横軸が世代のものを 1 枚にまとめる) ----
+// data/stages.json の tracks を「系統 x 世代」の格子にする。世代ごとの
+// 新機能はチップで読めるが，**積み上がっている**ことは 1 世代だけを見ても
+// 分からない。成果物の大きさも横軸が同じなので同じ格子の 1 行に置く。
+// 系統の行は世代 (kernel17 / cc15p など) へ開ける。
+const openTracks = new Set();
+let detailKey = null;           // 明細を出している "track|sub|stage"
+let mainArtifacts = [];         // 世代ごとの最大の成果物 (大きさの行と読み取りが使う)
+
+const trackCount = (t, num) => t.features.filter((f) => f.stage === num).length;
+
+// その系統に現れる世代を，初出の順に
+function subsOf(t) {
+    const out = [];
+    for (const f of t.features) if (f.sub && !out.includes(f.sub)) out.push(f.sub);
+    return out;
+}
+
+function cells(feats, n, kind, key) {
+    let html = '';
+    for (let i = 1; i <= n; i++) {
+        const c = feats.filter((f) => f.stage === i).length;
+        html += `<button class="tk-cell tk-${kind} lv${Math.min(4, c)}"`
+            + ` data-stage="${i}" data-key="${escapeHtml(key)}"`
+            + ` title="Stage ${i}: ${c || 'nothing'} new">${c || ''}</button>`;
+    }
+    return html;
+}
+
+function buildTracks() {
+    const tracks = DATA.tracks || [];
+    if (!tracks.length) { $('tracks').hidden = true; return; }
+    const n = DATA.stages.length;
+    const el = $('tk-grid');
+    el.style.setProperty('--tk-cols', String(n));
+
+    let html = '<div class="tk-row tk-head"><span class="tk-label"></span>';
+    for (let i = 1; i <= n; i++) {
+        html += `<span class="tk-col" data-stage="${i}">${i}</span>`;
+    }
+    html += '</div>';
+
+    // 成果物の大きさ (その世代の最大の成果物。対数目盛)
+    mainArtifacts = DATA.stages.map((st) => st.artifacts.reduce(
+        (a, b) => ((b.size || 0) > (a.size || 0) ? b : a), st.artifacts[0] || {}));
+    const mains = mainArtifacts;
     const sizes = mains.map((a) => a.size || 1);
     const maxLog = Math.max(...sizes.map((v) => Math.log10(v)));
-    const W = 1040, H = 130, bw = W / stages.length;
-    let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Artifact size over generations">`;
-    stages.forEach((st, i) => {
-        const h = Math.max(4, (Math.log10(sizes[i]) / maxLog) * 84);
-        const x = i * bw + 4, y = 104 - h;
-        svg += `<rect class="evo-bar" data-num="${st.num}" x="${x}" y="${y}"`
-            + ` width="${bw - 8}" height="${h}" rx="3"><title>${mains[i].file || st.name}: ${fmtSize(sizes[i])}</title></rect>`;
-        svg += `<text class="evo-size" x="${x + (bw - 8) / 2}" y="${y - 5}" text-anchor="middle">${fmtSize(sizes[i])}</text>`;
-        svg += `<text class="evo-label" x="${x + (bw - 8) / 2}" y="${H - 8}" text-anchor="middle">${st.num}</text>`;
+    html += '<div class="tk-row tk-sizes"><span class="tk-label">artifact size</span>';
+    DATA.stages.forEach((st, i) => {
+        const h = Math.max(8, (Math.log10(sizes[i]) / maxLog) * 100);
+        const title = `${mains[i].file || st.name}: ${fmtSize(sizes[i])}`;
+        html += `<button class="tk-cell tk-size" data-stage="${st.num}"`
+            + ` title="${escapeHtml(title)}"><i style="height:${h}%"></i></button>`;
     });
-    svg += '</svg>';
-    $('evo-chart').innerHTML = svg;
-    $('evo-chart').querySelectorAll('.evo-bar').forEach((r) => {
-        r.addEventListener('click', () => { stopAuto(); select(Number(r.dataset.num)); });
-    });
+    html += '</div>';
+
+    for (const t of tracks) {
+        const subs = subsOf(t);
+        html += `<div class="tk-row" data-track="${t.id}">`
+            + `<button class="tk-label tk-${t.kind}" data-toggle="${t.id}"`
+            + ` title="${escapeHtml(`${t.label} — split into ${subs.length} generations`)}">`
+            + `<span class="tk-caret">▸</span>${escapeHtml(t.label)}</button>`
+            + cells(t.features, n, t.kind, t.id) + '</div>';
+        for (const sub of subs) {
+            const feats = t.features.filter((f) => f.sub === sub);
+            html += `<div class="tk-row tk-subrow" data-parent="${t.id}" hidden>`
+                + `<span class="tk-label tk-${t.kind}">${escapeHtml(sub)}</span>`
+                + cells(feats, n, t.kind, `${t.id}|${sub}`) + '</div>';
+        }
+    }
+    el.innerHTML = html;
+
+    for (const b of el.querySelectorAll('.tk-label[data-toggle]')) {
+        b.onclick = () => toggleTrack(b.dataset.toggle);
+    }
+    for (const b of el.querySelectorAll('.tk-cell')) {
+        b.onclick = () => {
+            stopAuto();
+            const stage = Number(b.dataset.stage);
+            if (b.dataset.key) showDetail(b.dataset.key, stage);
+            select(stage);
+        };
+    }
+}
+
+function toggleTrack(id) {
+    if (openTracks.has(id)) openTracks.delete(id);
+    else openTracks.add(id);
+    const open = openTracks.has(id);
+    for (const r of $('tk-grid').querySelectorAll(`.tk-subrow[data-parent="${id}"]`)) {
+        r.hidden = !open;
+    }
+    const lab = $('tk-grid').querySelector(`.tk-label[data-toggle="${id}"]`);
+    lab.classList.toggle('open', open);
+    lab.querySelector('.tk-caret').textContent = open ? '▾' : '▸';
+}
+
+// 押した升 (系統 x 世代) の中身だけを出す。もう一度押すと畳む
+function showDetail(key, stage) {
+    const box = $('tk-detail');
+    if (detailKey === `${key}|${stage}`) {
+        detailKey = null;
+        box.hidden = true;
+        return;
+    }
+    const [id, sub] = key.split('|');
+    const t = (DATA.tracks || []).find((x) => x.id === id);
+    if (!t) return;
+    const feats = t.features.filter((f) => f.stage === stage
+        && (sub === undefined || f.sub === sub));
+    detailKey = `${key}|${stage}`;
+    box.hidden = false;
+    const name = sub === undefined ? t.label : `${t.label} · ${sub}`;
+    box.innerHTML = `<span class="tk-detail-head tk-${t.kind}">`
+        + `${escapeHtml(name)} — Stage ${stage}</span>`
+        + (feats.length
+            ? `<ul class="tk-list">${feats.map((f) => `<li>${inlineMd(f.label)}`
+                + `${sub === undefined && f.sub ? ` <em>${escapeHtml(f.sub)}</em>` : ''}`
+                + '</li>').join('')}</ul>`
+            : '<span class="tk-none">nothing new — everything earlier still holds</span>');
+}
+
+// 世代が変わったら列の強調だけを動かす (明細は押したときにだけ出す)
+function renderTracks(num) {
+    for (const c of $('tk-grid').querySelectorAll('.tk-cell, .tk-col')) {
+        c.classList.toggle('now', Number(c.dataset.stage) === num);
+    }
+    const a = mainArtifacts[num - 1];
+    $('tk-size-now').innerHTML = a && a.size != null
+        ? `${escapeHtml(a.file || '')} <b>${fmtSize(a.size)}</b>` : '';
 }
 
 // ---- Stage パネル ----
@@ -203,9 +313,6 @@ function select(num, push = true) {
     $('tl-range').value = String(num);
     document.querySelectorAll('.tl-node').forEach((n) => n.classList.remove('active'));
     $(`node-${num}`).classList.add('active');
-    document.querySelectorAll('.evo-bar').forEach((r) => {
-        r.classList.toggle('active', Number(r.dataset.num) === num);
-    });
 
     $('st-num').textContent = String(num).padStart(2, '0');
     $('st-title').textContent = st.title;
@@ -214,7 +321,8 @@ function select(num, push = true) {
         ['reads', st.lang_in],
         ['written in', st.lang_impl],
         ['built by', st.built_by],
-    ].map(([k, v]) => `<span>${k}: <b>${escapeHtml(v)}</b></span>`).join('');
+    ].map(([k, v]) => `<span title="${escapeHtml(`${k}: ${v}`)}">`
+        + `${k}: <b>${escapeHtml(v)}</b></span>`).join('');
 
     // 冒頭段落だけを見せ，全文はアコーディオンへ (プレイグラウンドを主役にする)
     const lines = st.summary_md.split('\n');
@@ -227,6 +335,8 @@ function select(num, push = true) {
 
     $('st-caps').innerHTML = st.new_capabilities
         .map((c) => `<span class="cap-chip">${inlineMd(c)}</span>`).join('');
+    $('acc-caps-sum').textContent =
+        `New in this generation (${st.new_capabilities.length})`;
     $('acc-trivia').hidden = !st.trivia;
     if (st.trivia) $('st-trivia').innerHTML = inlineMd(st.trivia);
 
@@ -234,6 +344,7 @@ function select(num, push = true) {
     for (const d of document.querySelectorAll('.acc')) d.open = false;
 
     renderCoverage(st);
+    renderTracks(num);
 
     $('acc-art-sum').textContent = 'Artifacts, sources & design documents '
         + `(${st.artifacts.length} artifacts, ${st.sources.length} sources)`;
@@ -334,6 +445,24 @@ async function showSource(path) {
 // ---- プレイグラウンド ----
 let pgConfig = null;
 
+// 適合台帳の組 (build-site.sh が ledger.txt から差し込む)
+const ledgerGroup = (st) => (st.coverage || []).find((g) => g.kind === 'ledger');
+
+async function loadSample(path) {
+    $('pg-input').value = 'Loading…';
+    try {
+        const res = await fetch(path);
+        $('pg-input').value = res.ok ? await res.text() : '';
+    } catch { $('pg-input').value = ''; }
+}
+
+function showLedgerNote(it) {
+    $('pg-ledger').innerHTML = it
+        ? `<span class="cov-chip ${it.state}">${it.state}</span>`
+          + `<span class="pg-ledger-note">${escapeHtml(it.note || '')}</span>`
+        : '';
+}
+
 async function setupPlayground(st) {
     pgConfig = PIPELINES[st.id] || null;
     $('pg-result').hidden = true;
@@ -351,11 +480,28 @@ async function setupPlayground(st) {
     $('pg-input-label').textContent = pgConfig.inputLabel || '';
     $('pg-stdin-box').hidden = !pgConfig.run;
     $('pg-stdin').value = pgConfig.stdin || '';
-    $('pg-input').value = 'Loading…';
-    try {
-        const res = await fetch(pgConfig.sample);
-        $('pg-input').value = res.ok ? await res.text() : '';
-    } catch { $('pg-input').value = ''; }
+
+    // 台帳を持つ世代は probe を選べるようにする。名前は pipelines.js に
+    // 写さず台帳から取るので，台帳を直せば選択肢も追随する
+    const led = pgConfig.samplesFromLedger ? ledgerGroup(st) : null;
+    const items = led ? led.items : [];
+    $('pg-picker').hidden = items.length === 0;
+    if (!items.length) {
+        showLedgerNote(null);
+        await loadSample(pgConfig.sample);
+        return;
+    }
+    $('pg-sample').innerHTML = items.map((it, i) =>
+        `<option value="${i}">${escapeHtml(it.label)} · ${it.state}</option>`).join('');
+    $('pg-sample').value = '0';
+    $('pg-sample').onchange = () => {
+        const it = items[Number($('pg-sample').value)];
+        if (!it) return;
+        showLedgerNote(it);
+        loadSample(`${pgConfig.sampleDir}/${it.label}.c`);
+    };
+    showLedgerNote(items[0]);
+    await loadSample(`${pgConfig.sampleDir}/${items[0].label}.c`);
 }
 
 $('pg-run').onclick = () => {
@@ -428,39 +574,73 @@ $('pg-run').onclick = () => {
 };
 
 // ---- ターミナル (OS 世代の対話セッション) ----
+// 1 つの世代が複数の筋書き (別のカーネル・別の木) を持つことがある。
+// Stage 16 は kernel17 / 18 / 19 を並べて見せる (記憶域は 2 つ並べないと
+// 「広がった」ことが言えない。docs/stage016-os.md 8.6)
 let termConfig = null;
+let termScen = null;
 let termId = null;
 let termSampleIdx = 0;
+
+const scenariosOf = (cfg) => cfg.scenarios || [cfg];
 
 function setupTerminal(st) {
     termConfig = TERMINALS[st.id] || null;
     $('terminal').hidden = !termConfig;
-    if (termId != null) {                       // 前の世代のセッションは破棄
-        worker.postMessage({ kind: 'tkill', id: termId });
-        handlers.delete(termId);
-        termId = null;
-    }
+    killTermSession();
     if (!termConfig) return;
     $('term-note').innerHTML = inlineMd(termConfig.note || '');
+    const scen = scenariosOf(termConfig);
+    const box = $('term-scenarios');
+    box.hidden = scen.length < 2;
+    box.innerHTML = '';
+    if (scen.length > 1) {
+        scen.forEach((sc, i) => {
+            const b = document.createElement('button');
+            b.className = 'term-scen';
+            b.textContent = sc.label || `scenario ${i + 1}`;
+            b.onclick = () => selectScenario(i);
+            box.appendChild(b);
+        });
+    }
+    selectScenario(0);
+}
+
+function killTermSession() {
+    if (termId == null) return;
+    worker.postMessage({ kind: 'tkill', id: termId });
+    handlers.delete(termId);
+    termId = null;
+}
+
+function selectScenario(i) {
+    const scen = scenariosOf(termConfig);
+    termScen = scen[i] || scen[0];
+    killTermSession();
+    [...$('term-scenarios').children].forEach((b, k) => {
+        b.classList.toggle('active', k === i);
+    });
+    $('term-blurb').hidden = !termScen.blurb;
+    if (termScen.blurb) $('term-blurb').innerHTML = inlineMd(termScen.blurb);
     $('term-out').textContent = '';
     $('term-status').textContent = 'not booted';
     $('term-status').className = 'term-status';
     $('term-files-box').hidden = true;
+    $('term-files-head').textContent = termConfig.fs === 2
+        ? 'The sfs2 tree after the session — click a file to download'
+        : 'Files in the sfs image after the session — click to download';
     termSampleIdx = 0;
     renderTermSamples();
-    if (termConfig.mode === 'boot') {
-        $('term-boot').textContent = 'Boot';
-        $('term-in').placeholder = 'boot line (program + argv) — press Enter to boot';
-    } else {
-        $('term-boot').textContent = 'Boot';
-        $('term-in').placeholder = 'type a command and press Enter';
-    }
+    $('term-boot').textContent = 'Boot';
+    $('term-in').placeholder = termConfig.mode === 'boot'
+        ? 'boot line (program + argv) — press Enter to boot'
+        : 'type a command and press Enter';
     loadTermSample();
 }
 
 function renderTermSamples() {
     $('term-samples').innerHTML = '';
-    termConfig.samples.forEach((s, i) => {
+    termScen.samples.forEach((s, i) => {
         const li = document.createElement('li');
         li.className = i < termSampleIdx ? 'done' : i === termSampleIdx ? 'current' : '';
         li.innerHTML = `<code>${escapeHtml(s.cmd)}</code>`
@@ -471,7 +651,7 @@ function renderTermSamples() {
 }
 
 function loadTermSample() {
-    const s = termConfig.samples[termSampleIdx];
+    const s = termScen.samples[termSampleIdx];
     if (s) $('term-in').value = s.cmd;
 }
 
@@ -493,15 +673,61 @@ const termStatus = (text, cls) => {
     $('term-status').className = `term-status ${cls || ''}`;
 };
 
-function termBoot(bootLine) {
-    if (termId != null) {
-        worker.postMessage({ kind: 'tkill', id: termId });
-        handlers.delete(termId);
+// 起動前から置いてあった名前 (親のディレクトリも含む)。
+// セッション中に増えたものへ new を付けるために使う
+function seededNames() {
+    const names = new Set();
+    for (const f of termScen.files || []) {
+        const parts = f.name.split('/');
+        for (let i = 1; i <= parts.length; i++) names.add(parts.slice(0, i).join('/'));
     }
+    return names;
+}
+
+// sfs / sfs2 の中身を出す。sfs2 は木なので経路順に並べて字下げする
+function renderTermFiles(files) {
+    const names = seededNames();
+    const tree = termConfig.fs === 2;
+    const list = [...files].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    $('term-files-box').hidden = false;
+    $('term-files').innerHTML = '';
+    for (const f of list) {
+        const parts = f.name.split('/');
+        const li = document.createElement('li');
+        if (tree) li.style.paddingLeft = `${(parts.length - 1) * 16}px`;
+        const label = tree ? parts[parts.length - 1] : f.name;
+        if (f.dir) {
+            li.insertAdjacentHTML('beforeend',
+                `<span class="tf-dir">${escapeHtml(label)}/</span>`);
+        } else {
+            const a = document.createElement('a');
+            a.textContent = label;
+            a.onclick = () => {
+                const url = URL.createObjectURL(new Blob([f.data]));
+                const dl = document.createElement('a');
+                dl.href = url;
+                dl.download = parts[parts.length - 1];
+                dl.click();
+                URL.revokeObjectURL(url);
+            };
+            li.appendChild(a);
+            li.insertAdjacentHTML('beforeend',
+                `<span class="tf-size">${fmtSize(f.data.length)}</span>`);
+        }
+        if (!names.has(f.name)) {
+            li.insertAdjacentHTML('beforeend', '<span class="tf-new">new</span>');
+        }
+        $('term-files').appendChild(li);
+    }
+}
+
+function termBoot(bootLine) {
+    killTermSession();
     termId = ++runId;
     $('term-out').textContent = '';
     $('term-files-box').hidden = true;
-    termStatus('preparing…', 'running');
+    termStatus(termScen.heavy ? 'preparing… (allocating a large emulator)' : 'preparing…',
+        'running');
     termPrint(`— boot: ${bootLine.trim()} —\n`, 'echo');
     handlers.set(termId, (m) => {
         if (m.kind === 'tout') {
@@ -518,44 +744,27 @@ function termBoot(bootLine) {
                 termStatus(m.error || 'crashed', 'err');
             }
         } else if (m.kind === 'tfiles') {
-            const names = new Set((termConfig.files || []).map((f) => f.name));
-            $('term-files-box').hidden = false;
-            $('term-files').innerHTML = '';
-            for (const f of m.files) {
-                const li = document.createElement('li');
-                const a = document.createElement('a');
-                a.textContent = f.name;
-                a.onclick = () => {
-                    const url = URL.createObjectURL(new Blob([f.data]));
-                    const dl = document.createElement('a');
-                    dl.href = url;
-                    dl.download = f.name;
-                    dl.click();
-                    URL.revokeObjectURL(url);
-                };
-                li.appendChild(a);
-                li.insertAdjacentHTML('beforeend',
-                    `<span class="tf-size">${fmtSize(f.data.length)}</span>`
-                    + (names.has(f.name) ? '' : '<span class="tf-new">new</span>'));
-                $('term-files').appendChild(li);
-            }
+            renderTermFiles(m.files);
         }
     });
     worker.postMessage({
         kind: 'boot',
         id: termId,
-        kernel: termConfig.kernel,
-        files: termConfig.files,
-        imgSize: termConfig.imgSize,
+        kernel: termScen.kernel,
+        files: termScen.files,
+        imgSize: termScen.imgSize,
+        maxEntries: termScen.maxEntries,
+        ramSize: termScen.ramSize,
+        fs: termConfig.fs || 1,
         bootLine,
     });
 }
 
 $('term-boot').onclick = () => {
-    if (!termConfig) return;
+    if (!termConfig || !termScen) return;
     termBoot(termConfig.mode === 'boot'
-        ? `${$('term-in').value.trim() || termConfig.samples[0].cmd}\n`
-        : termConfig.bootLine);
+        ? `${$('term-in').value.trim() || termScen.samples[0].cmd}\n`
+        : termScen.bootLine);
     $('term-in').focus();
 };
 
@@ -563,20 +772,20 @@ $('term-in').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || !termConfig) return;
     const line = $('term-in').value;
     if (termConfig.mode === 'boot') {
-        termBoot(`${line.trim() || 'hello'}\n`);
+        termBoot(`${line.trim() || termScen.samples[0].cmd}\n`);
     } else {
-        if (termId == null) { termBoot(termConfig.bootLine); }
+        if (termId == null) { termBoot(termScen.bootLine); }
         termPrint(`${line}\n`, 'echo');
         const bytes = new Uint8Array([...`${line}\n`].map((c) => c.charCodeAt(0) & 0xff));
         worker.postMessage({ kind: 'tin', id: termId, data: bytes });
     }
     // 送った行が案内どおりなら次の手順を先置きする
-    const cur = termConfig.samples[termSampleIdx];
+    const cur = termScen.samples[termSampleIdx];
     if (cur && line.trim() === cur.cmd) {
         termSampleIdx++;
         renderTermSamples();
         loadTermSample();
-        if (!termConfig.samples[termSampleIdx]) $('term-in').value = '';
+        if (!termScen.samples[termSampleIdx]) $('term-in').value = '';
     } else {
         $('term-in').value = '';
     }
@@ -596,7 +805,7 @@ async function main() {
         $('build-info').textContent = `artifacts built from chain @ ${DATA.commit.slice(0, 9)}`;
     }
     buildTimeline();
-    buildChart();
+    buildTracks();
     const m = location.hash.match(/^#stage(\d{3})$/);
     select(m ? Number(m[1]) : 1, false);
 }

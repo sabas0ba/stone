@@ -32,8 +32,11 @@ const CSR_MTVAL = 0x343;
 // 逐次実行できる計算機。UART の入力が尽きると 'waiting' で停止し，
 // feed() で入力を足して run() を呼び直すと続きから走る (対話実行)。
 export class Machine {
-    constructor(program) {
-        this.mem = new Uint8Array(RAM_SIZE);    // 新規確保 = ゼロ初期化 (QEMU と同じ)
+    // opts.ramSize: RAM の大きさ (既定 128 MiB)。kernel19 の配置は
+    // 0xa000_0000 まで届くので 512 MiB を要る (docs/stage016-os.md 8.3)
+    constructor(program, opts = {}) {
+        this.ramSize = opts.ramSize || RAM_SIZE;
+        this.mem = new Uint8Array(this.ramSize);  // 新規確保 = ゼロ初期化 (QEMU と同じ)
         this.mem.set(program, 0);
         this.dv = new DataView(this.mem.buffer);
         this.x = new Int32Array(32);
@@ -72,6 +75,7 @@ export class Machine {
     //   'waiting' = UART 入力待ち。feed() 後に run() で再開する
     run(budget) {
         const { dv, x, csr, input } = this;
+        const ramSize = this.ramSize;
         const out = [];
         const ret = (status) => ({ status, output: Uint8Array.from(out) });
         if (this.done) return ret('exit');
@@ -79,7 +83,7 @@ export class Machine {
         let executed = 0;
 
         while (executed < budget) {
-            if (pc >>> 0 >= RAM_SIZE) { this.pc = pc; return ret('trap'); }
+            if (pc >>> 0 >= ramSize) { this.pc = pc; return ret('trap'); }
             const inst = dv.getUint32(pc, true);
             const opcode = inst & 0x7f;
             const rd = (inst >>> 7) & 0x1f;
@@ -136,7 +140,7 @@ export class Machine {
                 const addr = (x[rs1] + (inst >> 20)) >>> 0;
                 const off = (addr - RAM_BASE) >>> 0;
                 let v;
-                if (off < RAM_SIZE) {
+                if (off < ramSize) {
                     switch (f3) {
                     case 0: v = dv.getInt8(off); break;
                     case 1: v = dv.getInt16(off, true); break;
@@ -173,7 +177,7 @@ export class Machine {
                 const imm = ((inst >> 25) << 5) | ((inst >>> 7) & 0x1f);
                 const addr = (x[rs1] + imm) >>> 0;
                 const off = (addr - RAM_BASE) >>> 0;
-                if (off < RAM_SIZE) {
+                if (off < ramSize) {
                     switch (f3) {
                     case 0: dv.setUint8(off, x[rs2] & 0xff); break;
                     case 1: dv.setUint16(off, x[rs2] & 0xffff, true); break;

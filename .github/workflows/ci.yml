@@ -103,6 +103,14 @@ jobs:
           STONE_FORCE_TEST: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: bash tools/test.sh
 
+      # 展示層のエミュレータ (web/rv32.js) を，いま作った成果物で検証する。
+      # pages.yml も同じものを配信の前に走らせるが，そちらは main への
+      # push でしか動かない。**PR の時点で落としたい**ので ここでも走らせる
+      # (落ちたまま merge すると，気付くのは配信が止まったときになる)。
+      # 素材は tmp/build にあるものだけで，コンテナも QEMU も要らない
+      - name: Verify emulator against chain artifacts
+        run: node web/test-emu.mjs
+
       # 保存は取り出せなかったときだけ。actions/cache の post 段が
       # tmp/stone-env.tar を拾って次回へ持ち越す
       - name: Save container image
