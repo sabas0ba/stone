@@ -116,18 +116,54 @@ done
 report $? "build: ld12.bin / kernel.bin の SHA-256 が各 .md 記載値と一致"
 
 # 'F' 形式は stage008 の ld と同一の像を作る (前置部に触れていないことの証明)
+#
+# **同じ入力・同じ道具でも答が揺らぐことがある** (docs/dev-notes.md 1.6)。
+# 食い違ったら，まず同じ道具を 2 回走らせて自己一致を見る。自己一致しない
+# なら比較の前提 (実行が再現すること) が崩れているので，鎖の退行ではなく
+# 環境の問題である。やり直して通ったものは通ったと数えるが，warned で
+# summary の 1 行に必ず出す
 ok=0
 for o in pp.o cc10l.o ld.o; do
-    { cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld" > tmp/s12/f_old.bin
-    r1=$?
-    { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld12" > tmp/s12/f_new.bin
-    r2=$?
-    if ! cmp -s tmp/s12/f_old.bin tmp/s12/f_new.bin; then
-        # 落ちたときに何が起きたかを残す。無言だと CI で追えない
-        echo "   $o: ld rc=$r1 ($(wc -c < tmp/s12/f_old.bin) バイト) /" \
-             "ld12 rc=$r2 ($(wc -c < tmp/s12/f_new.bin) バイト)"
-        ok=1
-    fi
+    n=0
+    while :; do
+        { cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld" > tmp/s12/f_old.bin
+        r1=$?
+        { printf 'F'; cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld12" > tmp/s12/f_new.bin
+        r2=$?
+        cmp -s tmp/s12/f_old.bin tmp/s12/f_new.bin && break
+
+        # 同じ道具・同じ入力をもう一度。ここで違えば環境である
+        { cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld" > tmp/s12/f_chk.bin
+        if cmp -s tmp/s12/f_old.bin tmp/s12/f_chk.bin; then
+            self=一致
+        else
+            self=**不一致**
+        fi
+
+        n=$((n + 1))
+        if [ "$n" -ge 3 ]; then
+            # 落ちたときに何が起きたかを残す。無言だと CI で追えない。
+            # **入力の素性まで出す。** 同じ入力を 2 つのリンカへ流している
+            # はずなのに答が違うなら，違っているのは入力か道具か環境の
+            # どれかである
+            echo "   $o: ld rc=$r1 ($(wc -c < tmp/s12/f_old.bin) バイト) /" \
+                 "ld12 rc=$r2 ($(wc -c < tmp/s12/f_new.bin) バイト)" \
+                 "/ ld の自己再現 $self"
+            for _f in "tmp/build/$o" "$ld" "$ld12"; do
+                if [ -e "$_f" ]; then
+                    echo "     in  $_f $(wc -c < "$_f") $(sha256sum "$_f" | cut -c1-16)"
+                else
+                    echo "     in  $_f **無い**"
+                fi
+            done
+            for _f in tmp/s12/f_old.bin tmp/s12/f_new.bin tmp/s12/f_chk.bin; do
+                echo "     out $_f $(sha256sum "$_f" | cut -c1-16)"
+            done
+            ok=1
+            break
+        fi
+        warned "regress($o): $n 回目で食い違った (ld の自己再現 $self)。やり直す"
+    done
 done
 [ "$ok" -eq 0 ]
 report $? "regress: 'F' の出力が stage008 の ld とバイト一致 (pp / cc10l / ld)"

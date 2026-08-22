@@ -2,6 +2,18 @@
 
 pass=0
 fail=0
+warn=0
+
+# 「通ったが，通るまでにやり直した」ことを記録する。
+#
+# QEMU を通す比較の答が**同じ入力・同じ道具でも揺らぐ**ことがある
+# (docs/dev-notes.md 1.6)。1 回の取りこぼしで「鎖が壊れた」と報告するのは
+# 誤りだが，黙って通すのはもっと悪い。やり直して通ったものは通ったと
+# 数え，**summary の 1 行に必ず出す**。
+warned() {
+    echo "warn $1"
+    warn=$((warn + 1))
+}
 
 report() {
     if [ "$1" -eq 0 ]; then
@@ -36,7 +48,11 @@ section_close() {
 summary() {
     section_close
     echo
-    echo "passed: $pass, failed: $fail"
+    if [ "$warn" -gt 0 ]; then
+        echo "passed: $pass, failed: $fail, warned: $warn (やり直して通ったものがある)"
+    else
+        echo "passed: $pass, failed: $fail"
+    fi
     return "$fail"
 }
 

@@ -1,0 +1,21 @@
+conftest-build 0
+unknown
+0
+0
+no
+Binary directory    /usr/local/bin
+TinyCC directory    /usr/local/lib/tcc
+Library directory   /usr/local/lib
+Include directory   /usr/local/include
+Manual directory    /usr/local/share/man
+Info directory      /usr/local/share/info
+Doc directory       /usr/local/share/doc
+Source path         /
+Build OS            stone riscv32
+C compiler          cc (0.0)
+Target OS           stone
+CPU                 x86_64
+Creating config.mak and config.h
+configure-rc 0
+CC=cc
+CC_NAME=unknown

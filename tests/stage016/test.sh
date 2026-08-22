@@ -197,4 +197,214 @@ report $? "kernel18 の上限は 14 MiB 未満 (UBRKMAX - UBASE = 14 MB)"
 [ -n "$new_mb" ] && [ "$new_mb" -ge 250 ]
 report $? "kernel19 の上限は 250 MiB 以上 (got ${new_mb:-?} MiB)"
 
+section "kernel20 / libc17: 削除と realpath (docs/stage016-os.md 9.4)"
+
+# 検査用の木 (dirprobe と同じ形)
+rrt=$out/rroot
+mkdir -p "$rrt/src/a" "$rrt/inc"
+echo "TOP"     > "$rrt/top.txt"
+echo "SRC-ONE" > "$rrt/src/one.c"
+echo "A-TWO"   > "$rrt/src/a/two.c"
+echo "INC-ONE" > "$rrt/inc/one.c"
+
+# rmprobe を **libc17** とリンクする。libc16 とリンクしてはいけない ——
+# libc16 の unlink は何もせず 0 を返し，realpath は複写するだけなので，
+# open-after と rp-rel が黙って間違う (docs/stage016-os.md 9.4)
+sh tools/bundle.sh stage016/libc17/include/*.h \
+    "sys/stat.h=stage016/libc17/include/sys/stat.h" \
+    tests/stage016/user/rmprobe.c 2> /dev/null \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/rmprobe.i" 2> /dev/null \
+    && sh tools/env.sh qemu tmp/build/cc15p.bin < "$out/rmprobe.i" \
+        > "$out/rmprobe.o" 2> /dev/null \
+    && { printf 'E'; cat "$out/rmprobe.o" \
+         tmp/build/l17_src_string.o tmp/build/l17_src_stdlib.o \
+         tmp/build/l17_src_misc15.o tmp/build/l17_posix_sys.o \
+         tmp/build/l17_posix_morecore.o tmp/build/l17_posix_stdio.o \
+         tmp/build/l17_posix_assert.o tmp/build/l17_posix_dir.o \
+         tmp/build/rt64.o tmp/build/rtfp.o; \
+         printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "$rrt/rmprobe"
+report $? "build: rmprobe を libc17 とリンクできる"
+
+printf 'rmprobe\n' > "$rrt/boot"
+sh tools/sfs2.sh pack "$rrt" "$out/rfs.img" 4194304 128 > /dev/null \
+    && rm -f "$out/rram" \
+    && dd if=/dev/null of="$out/rram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/rfs.img" of="$out/rram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/rram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel20.bin < /dev/null \
+        > "$out/rmprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/rmprobe.txt "$out/rmprobe.out" \
+    > "$out/rmprobe.diff"
+report $? "run: kernel20 が消せて，libc17 の realpath が経路を畳める"
+[ -s "$out/rmprobe.diff" ] && sed -n '4,$p' "$out/rmprobe.diff"
+
+section "sh2: POSIX 部分集合のシェル (docs/stage016-os.md 10 章)"
+
+# **期待値は本物の POSIX シェルで作る。** 我々のシェルはそれに一致
+# しなければならない —— 我々が書いた期待値と突き合わせると，思い違いを
+# そのまま固定してしまう
+sh tests/stage016/user/shprobe.sh > "$out/shprobe.ref" 2>&1
+report $? "ref: 参照シェルで probe が通る"
+
+diff -q tests/stage016/expected/shprobe.txt "$out/shprobe.ref" > /dev/null
+report $? "ref: 記録した期待値が参照シェルの出力と一致する"
+
+# 各行は「名札 期待 実測」である。**expected/ との突き合わせだけでは，
+# 記録した期待値のほうが間違っている場合を捕まえられない**
+awk 'NF >= 3 && $2 != $3 { bad = 1 } END { exit bad }' \
+    tests/stage016/expected/shprobe.txt
+report $? "ref: 期待と実測が全行で一致している (記録の側の取り違え避け)"
+
+srt=$out/sroot
+mkdir -p "$srt"
+cp tests/stage016/user/shprobe.sh "$srt/probe.sh"
+cp tmp/build/sh2.bin "$srt/sh2"
+printf 'sh2 probe.sh\n' > "$srt/boot"
+sh tools/sfs2.sh pack "$srt" "$out/sfs.img" 4194304 64 > /dev/null \
+    && rm -f "$out/sram" \
+    && dd if=/dev/null of="$out/sram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/sfs.img" of="$out/sram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/sram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel21.bin < /dev/null \
+        > "$out/shprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/shprobe.txt "$out/shprobe.out" \
+    > "$out/shprobe.diff"
+report $? "run: sh2 が kernel21 の上で参照シェルと同じ結果を出す"
+[ -s "$out/shprobe.diff" ] && sed -n '4,$p' "$out/shprobe.diff"
+
+section "道具と空装置 (docs/stage016-os.md 11 章)"
+
+# 道具の側も同じやり方で見る。**期待値は本物の sh と本物の coreutils
+# で作る**ので，検査できるのは両者が一致する範囲だけである。一致
+# しない範囲は 11.4 に不足として並べてある
+sh tests/stage016/user/toolprobe.sh > "$out/toolprobe.ref" 2>&1
+report $? "ref: 参照シェルと本物の道具で probe が通る"
+
+diff -q tests/stage016/expected/toolprobe.txt "$out/toolprobe.ref" > /dev/null
+report $? "ref: 記録した期待値が参照シェルの出力と一致する"
+
+# 各行は「名札 期待 実測」である。期待と実測が食い違う行が 1 つでも
+# あれば駄目。**expected/ との突き合わせだけでは，記録した期待値の
+# ほうが間違っている場合を捕まえられない**
+awk 'NF >= 3 && $2 != $3 { bad = 1 } END { exit bad }' \
+    tests/stage016/expected/toolprobe.txt
+report $? "ref: 期待と実測が全行で一致している (記録の側の取り違え避け)"
+
+trt=$out/troot
+mkdir -p "$trt"
+cp tests/stage016/user/toolprobe.sh "$trt/probe.sh"
+cp tmp/build/sh2.bin "$trt/sh2"
+printf 'sh2 probe.sh\n' > "$trt/boot"
+# 道具は木を作って回るので，項目数を多めに取る
+sh tools/sfs2.sh pack "$trt" "$out/tsfs.img" 4194304 128 > /dev/null \
+    && rm -f "$out/tram" \
+    && dd if=/dev/null of="$out/tram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/tsfs.img" of="$out/tram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/tram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel22.bin < /dev/null \
+        > "$out/toolprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/toolprobe.txt "$out/toolprobe.out" \
+    > "$out/toolprobe.diff"
+report $? "run: 組込みの道具が kernel22 の上で本物と同じ結果を出す"
+[ -s "$out/toolprobe.diff" ] && sed -n '4,$p' "$out/toolprobe.diff"
+
+# uname だけは参照シェルで期待値を作れない。**我々の OS の素性を
+# 答えるものだからである。** 並び順が本物と同じであることは，本物の
+# uname が -m -s に sysname を先に返すのを見て決めた (11.3)
+urt=$out/uroot
+mkdir -p "$urt"
+cp tests/stage016/user/unameprobe.sh "$urt/probe.sh"
+cp tmp/build/sh2.bin "$urt/sh2"
+printf 'sh2 probe.sh\n' > "$urt/boot"
+sh tools/sfs2.sh pack "$urt" "$out/usfs.img" 1048576 32 > /dev/null \
+    && rm -f "$out/uram" \
+    && dd if=/dev/null of="$out/uram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/usfs.img" of="$out/uram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/uram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel22.bin < /dev/null \
+        > "$out/unameprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/unameprobe.txt \
+    "$out/unameprobe.out" > "$out/unameprobe.diff"
+report $? "run: uname が我々の素性を本物と同じ並び順で答える"
+[ -s "$out/unameprobe.diff" ] && sed -n '4,$p' "$out/unameprobe.diff"
+
+# 本物の uname が「書いた順ではなく決まった順」で並べることを，
+# その場で確かめる。**これが崩れると上の期待値ごと嘘になる**
+[ "$(uname -m -s)" = "$(uname -s) $(uname -m)" ]
+report $? "ref: 本物の uname も -m -s に sysname を先に並べる"
+
+section "configure を我々の OS の上で走らせる (docs/stage016-os.md 11.6)"
+
+# 第 4 部の完了条件。tcc の configure (768 行) を我々の OS で走らせ，
+# 本物の POSIX シェルの結果と突き合わせる。
+#
+# 参照実行には身代わりを 2 つ通す (tests/stage016/refbin)。
+#   sh2    -> 本物の sh。probe を 2 通り書き分けないため
+#   uname  -> 我々の OS の素性。**機種を答えるものなので，教えないと
+#             比べようがない**
+#
+# 唯一そろえられないのが「Source path」の行である。configure は
+# pwd をそこへ書く。我々の OS では / だが，参照実行は作業用の
+# ディレクトリになる。**その 1 行だけを揃えてから比べる**
+#
+# **素材が無ければ飛ばす。** 外部ソースは repo に取り込まない決まりで
+# (tools/fetch.sh の頭)，docs/external/ は git ignore である。したがって
+# **この節は CI では走らない。** Stage 14 の bzip2 / zlib と Stage 15 の
+# tcc の検査も同じ扱いである。
+#
+# 飛ばした回に「通った」と読めてはいけないので，飛ばしたことをはっきり
+# 出す。第 4 部の完了条件そのものなので，手元では必ず走らせること
+tccdir=docs/external/tcc
+if [ ! -f "$tccdir/configure" ]; then
+    echo "   skip: $tccdir が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   ** 第 4 部の完了条件はこの節である。手元では必ず走らせること **"
+    summary
+    exit
+fi
+
+cfg=$out/cfgref
+mkdir -p "$cfg"
+cp "$tccdir/configure" "$tccdir/VERSION" "$cfg/"
+( cd "$cfg" && PATH="$repo_root/tests/stage016/refbin:$PATH" \
+    sh "$repo_root/tests/stage016/user/cfgprobe.sh" ) > "$out/cfgprobe.raw" 2>&1
+r=$?
+# **絶対経路で置き換える。** configure が書くのは pwd の出力なので
+# 常に絶対経路であり，$cfg (repo からの相対) では末尾しか当たらない
+sed "s|$repo_root/$cfg|/|g" "$out/cfgprobe.raw" > "$out/cfgprobe.ref"
+[ "$r" -eq 0 ]
+report $? "ref: 参照シェルで configure が通る"
+
+diff -q tests/stage016/expected/cfgprobe.txt "$out/cfgprobe.ref" > /dev/null
+report $? "ref: 記録した期待値が参照シェルの出力と一致する"
+
+crt=$out/croot
+mkdir -p "$crt"
+cp tests/stage016/user/cfgprobe.sh "$crt/probe.sh"
+cp "$tccdir/configure" "$tccdir/VERSION" "$crt/"
+cp tmp/build/sh2.bin "$crt/sh2"
+printf 'sh2 probe.sh\n' > "$crt/boot"
+# configure は途中の産物をいくつも作る。項目数に余裕を持たせる
+sh tools/sfs2.sh pack "$crt" "$out/csfs.img" 8388608 192 > /dev/null \
+    && rm -f "$out/cram" \
+    && dd if=/dev/null of="$out/cram" bs=1 seek=536870912 2> /dev/null \
+    && dd if="$out/csfs.img" of="$out/cram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/cram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel22.bin < /dev/null \
+        > "$out/cfgprobe.out" 2>&1
+r=$?
+[ "$r" -eq 0 ] && diff -u tests/stage016/expected/cfgprobe.txt "$out/cfgprobe.out" \
+    > "$out/cfgprobe.diff"
+report $? "run: configure が kernel22 の上で参照シェルと同じ結果を出す"
+[ -s "$out/cfgprobe.diff" ] && sed -n '4,$p' "$out/cfgprobe.diff"
+
 summary

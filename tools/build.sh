@@ -27,6 +27,33 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 mkdir -p tmp/build
 
+# 生成物が「無い」「0 バイト」でないことを見る。0 なら 1 を返す。
+#
+# **これを入れたのは，落ちたビルドが緑として記録される事故が 3 度
+# 起きたからである** (docs/dev-notes.md 1.2)。仕組みはこうである ——
+# ccgen_run / kern_run / *_run はどれも末尾が `echo "built ..." >&2` で，
+# **関数の終了状態はその echo のもの**になる。途中の qemu が 1 つ残らず
+# 失敗しても，リダイレクトが 0 バイトのファイルを作り，関数は 0 を返し，
+# step がそれを正しい生成物として印を書く。次回は「できている」と
+# 誤認して先へ進む。
+#
+# 各 *_run に set -e を入れて回るより，**出来上がりを見る**ほうが確実で
+# ある。この鎖の生成物に 0 バイトが正しい場面は無い。
+#
+# **キャッシュの経路でも見る。** 印は「0 バイトの SHA-256」とも一致して
+# しまうので，一度 0 バイトの印が書かれると sha256sum -c は通ってしまう。
+# 作業環境が巻き戻って古い tmp/build が戻ったときに実際に起きた
+# (cc14e.bin が 0 バイトで残っていた)。作った直後だけ見ていては遅い。
+nonempty() {
+    for _f in "$@"; do
+        if [ ! -s "$_f" ]; then
+            echo "error: $_f が空か存在しない (ビルドは失敗している)" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
 # run_stage <stage> <生成物 (tmp/build/ 内の名前)...> -- <入力ファイル...>
 run_stage() {
     name=$1; shift
@@ -35,9 +62,11 @@ run_stage() {
     shift
     stamp=tmp/build/$name.stamp
     new=$(sha256sum "$@" | sha256sum | cut -d' ' -f1)
+    # shellcheck disable=SC2086
     if [ -z "${STONE_FORCE_BUILD:-}" ] && [ -f "$stamp" ] \
         && [ "$(head -n 1 "$stamp")" = "$new" ] \
-        && tail -n +2 "$stamp" | sha256sum -c --status - 2>/dev/null; then
+        && tail -n +2 "$stamp" | sha256sum -c --status - 2>/dev/null \
+        && nonempty $outs 2> /dev/null; then
         echo "cached $name (stamp: 入力と生成物が前回と一致)" >&2
         return 0
     fi
@@ -45,6 +74,12 @@ run_stage() {
     # 「できている」と誤認して先へ進み，原因から遠い所で落ちる
     if ! "build_$name"; then
         echo "error: build_$name が失敗した" >&2
+        rm -f "$stamp"
+        return 1
+    fi
+    # shellcheck disable=SC2086
+    if ! nonempty $outs; then
+        echo "error: build_$name の生成物が空だった" >&2
         rm -f "$stamp"
         return 1
     fi
@@ -74,13 +109,17 @@ step() {
     _stamp=tmp/build/step-$_name.stamp
     # shellcheck disable=SC2086
     _new=$(sha256sum $_ins 2> /dev/null | sha256sum | cut -d' ' -f1)
+    # shellcheck disable=SC2086
     if [ -z "${STONE_FORCE_BUILD:-}" ] && [ -f "$_stamp" ] \
         && [ "$(head -n 1 "$_stamp")" = "$_new" ] \
-        && tail -n +2 "$_stamp" | sha256sum -c --status - 2> /dev/null; then
+        && tail -n +2 "$_stamp" | sha256sum -c --status - 2> /dev/null \
+        && nonempty $_outs 2> /dev/null; then
         echo "cached $_name" >&2
         return 0
     fi
     "$@" || return 1
+    # shellcheck disable=SC2086
+    nonempty $_outs || return 1
     # shellcheck disable=SC2086
     { echo "$_new"; sha256sum $_outs; } > "$_stamp"
 }
@@ -128,9 +167,9 @@ for f in "$repo_root"/tools/build/stage*.sh; do
     . "$f"
 done
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015 stage016"
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015 stage016 stage017"
 target=${1:-all}
-[ "$target" = all ] && target=stage016
+[ "$target" = all ] && target=stage017
 case " $stages " in
 *" $target "*) ;;
 *)
@@ -151,7 +190,7 @@ done
 # 生成物とスタンプは互いに素なので，並列にしても出来るバイト列は変わらない。
 # 途中の Stage までの指定は従来どおり順に作る
 if [ "$target" != stage014 ] && [ "$target" != stage015 ] \
-    && [ "$target" != stage016 ]; then
+    && [ "$target" != stage016 ] && [ "$target" != stage017 ]; then
     for s in stage011 stage012 stage013; do
         "do_$s"
         [ "$s" = "$target" ] && break
@@ -161,8 +200,11 @@ fi
 ( do_stage011 && do_stage012 ) & lane1=$!
 do_stage013 & lane2=$!
 # stage015 は stage014 の成果物 (cc14g) を使うので同じ本の中で順に作る。
-# stage016 は stage015 の最前線 (cc15p / pp16 / ld16) を使うのでその後ろ
-if [ "$target" = stage016 ]; then
+# stage016 は stage015 の最前線 (cc15p / pp16 / ld16) を使うのでその後ろ。
+# stage017 は stage016 の libc18 を使うのでさらにその後ろ
+if [ "$target" = stage017 ]; then
+    ( do_stage014 && do_stage015 && do_stage016 && do_stage017 ) & lane3=$!
+elif [ "$target" = stage016 ]; then
     ( do_stage014 && do_stage015 && do_stage016 ) & lane3=$!
 elif [ "$target" = stage015 ]; then
     ( do_stage014 && do_stage015 ) & lane3=$!
