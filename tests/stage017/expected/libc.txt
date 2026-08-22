@@ -1,0 +1,20 @@
+cc src/string 0
+cc src/stdlib 0
+cc src/misc15 0
+cc posix/sys 0
+cc posix/morecore 0
+cc posix/stdio 0
+cc posix/assert 0
+cc posix/dir 0
+ar 0
+string.o
+stdlib.o
+misc15.o
+sys.o
+morecore.o
+stdio.o
+assert.o
+dir.o
+link 0
+linked against libc.a (6)
+run 0

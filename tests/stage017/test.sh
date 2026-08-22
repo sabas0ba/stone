@@ -44,16 +44,27 @@ mkroot() {
     cp tmp/build/sh2.bin "$_r/sh2"
 }
 
-# 根を像にして kernel22 で走らせる。出力は $2 へ
+# 根を像にして kernel23 で走らせる。出力は $2 へ。
+# 像の大きさは $3 (既定 16 MB) / 項目数は $4 (既定 256)
 runroot() {
-    sh tools/sfs2.sh pack "$1" "$out/img" 16777216 256 > /dev/null \
+    sh tools/sfs2.sh pack "$1" "$out/img" "${3:-16777216}" "${4:-256}" \
+            > /dev/null \
         && rm -f "$out/ram" \
         && dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null \
         && dd if="$out/img" of="$out/ram" bs=64K oflag=seek_bytes \
             seek=67108864 conv=notrunc 2> /dev/null \
         && STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
-            sh tools/env.sh qemu tmp/build/kernel22.bin < /dev/null \
+            sh tools/env.sh qemu tmp/build/kernel23.bin < /dev/null \
             > "$2" 2>&1
+}
+
+# 走ったあとの像を $out/ram から切り出して $2 へ展開する。
+# **走らせる前に詰めた $out/img は走ったあとの姿ではない。**
+# カーネルが書き換えるのは記憶の 67108864 から先である
+unpackback() {
+    dd if="$out/ram" of="$out/img.after" bs=64K \
+        iflag=skip_bytes,count_bytes skip=67108864 count="$1" 2> /dev/null \
+        && sh tools/sfs2.sh unpack "$out/img.after" "$2" > /dev/null 2>&1
 }
 
 section "cc: 駆動役が我々の OS の上で C を翻訳する (docs/stage017-cc.md)"
@@ -200,13 +211,7 @@ fi
 
 # **我々の OS が作った書庫を，本物の ar が読めるか** (7.3)。
 # 相互運用を見る。バイト一致は狙わない
-#
-# 走らせる前に詰めた $out/img は**走ったあとの姿ではない**。カーネルは
-# 記憶の 67108864 から先を書き換えるので，取り出すのは $out/ram の
-# その位置からである (runroot が入れたのと同じ場所・同じ大きさ)
-dd if="$out/ram" of="$out/img.after" bs=64K \
-    iflag=skip_bytes,count_bytes skip=67108864 count=16777216 2> /dev/null \
-    && sh tools/sfs2.sh unpack "$out/img.after" "$out/back" > /dev/null 2>&1
+unpackback 16777216 "$out/back"
 r2=$?
 if [ "$r2" -ne 0 ] || [ ! -f "$out/back/libx.a" ]; then
     report 1 "interop: OS が作った書庫を取り出せる"
@@ -228,5 +233,111 @@ else
     ! ar t "$out/back/libx.a" 2> /dev/null | grep -q '^/'
     report $? "spec: 符号の索引は書いていない (7.4 のとおり)"
 fi
+
+
+section "第 2 部: libc 自身を書庫にする (docs/stage017-cc.md 7.6)"
+
+# **7.6 の完了条件そのものである。** 我々の OS が
+#
+#   1. libc の第 18 世代の 8 本を自分のコンパイラで .o にし
+#   2. 自分の ar で 1 つの書庫にまとめ
+#   3. その書庫だけを頼りにプログラムをリンクして走らせる
+#
+# /lib に置くのは走り時の下働き (rt64 / rtfp) だけにする。libc の .o を
+# 置いたままだと，書庫の員と /lib の員が同じ符号を二重に定義して ld が
+# 落ちる。**書庫から本当に引けていることを見るための配置である**
+r=$out/lroot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/src" "$r/posix"
+cp tmp/build/pp16cmd "$r/bin/pp16"
+cp tmp/build/cc15pcmd "$r/bin/cc15p"
+cp tmp/build/ld16cmd "$r/bin/ld16"
+cp stage016/libc18/include/*.h "$r/include/"
+cp stage016/libc18/include/sys/*.h "$r/include/sys/"
+cp tmp/build/rt64.o tmp/build/rtfp.o "$r/lib/"
+cp stage016/libc18/src/*.c "$r/src/"
+cp stage016/libc18/posix/*.c "$r/posix/"
+cp tmp/build/cc18 "$r/cc18"
+cp tmp/build/ar17 "$r/ar"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tests/stage017/user/uselibc.c "$r/uselibc.c"
+cat > "$r/go.sh" <<'EOF'
+for f in src/string src/stdlib src/misc15 posix/sys posix/morecore posix/stdio posix/assert posix/dir
+do
+  cc18 -c $f.c -o $f.o
+  echo "cc $f $?"
+done
+ar rcs libc.a src/string.o src/stdlib.o src/misc15.o posix/sys.o posix/morecore.o posix/stdio.o posix/assert.o posix/dir.o
+echo "ar $?"
+ar t libc.a
+cc18 -o uselibc uselibc.c libc.a
+echo "link $?"
+uselibc
+echo "run $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot "$r" "$out/libc.out" 33554432 512
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/libc.txt "$out/libc.out" \
+    > "$out/libc.diff"
+report $? "run: libc の 8 本が書庫になり，それだけでリンクが通る"
+[ -s "$out/libc.diff" ] && sed -n '4,$p' "$out/libc.diff"
+
+# **員が 8 つ揃っていること**を書庫の側からも見る。kernel22 は 9 語目
+# から先を黙って捨てていたので，ここは 5 員で通ってしまっていた (8.2)
+if unpackback 33554432 "$out/lback" && [ -f "$out/lback/libc.a" ] \
+        && command -v ar > /dev/null 2>&1; then
+    ar t "$out/lback/libc.a" > "$out/libcar.t" 2>&1
+    printf 'string.o\nstdlib.o\nmisc15.o\nsys.o\nmorecore.o\nstdio.o\nassert.o\ndir.o\n' \
+        > "$out/libcar.want"
+    diff -q "$out/libcar.want" "$out/libcar.t" > /dev/null
+    report $? "interop: 本物の ar t が 8 員すべてを列挙する"
+else
+    echo "   skip: 書庫を取り出せない (host に ar が無いか展開に失敗)"
+fi
+
+section "引数の上限は黙って超えない (docs/stage017-cc.md 8.2)"
+
+# kernel23 の上限は 64 語である。**溢れたら E2BIG で落ちる**ことを見る。
+# 落ちずに成功が返るなら，捨てられた語がどこかで静かに効いている
+r=$out/aroot
+mkroot "$r"
+cat > "$r/args.c" <<'EOF'
+#include <stdio.h>
+int main(int argc, char **argv) {
+  printf("argc %d last %s\n", argc, argv[argc - 1]);
+  return 0;
+}
+EOF
+{
+    printf 'cc18 -o args args.c\n'
+    printf 'echo "build $?"\n'
+    # 32 語 (実行名 + 31)。kernel22 なら 8 で切られる
+    printf 'args'
+    i=1
+    while [ "$i" -le 31 ]; do printf ' a%d' "$i"; i=$((i + 1)); done
+    printf '\n'
+    printf 'echo "many $?"\n'
+    # 96 語。64 を超えるので E2BIG で落ちるはず
+    printf 'args'
+    i=1
+    while [ "$i" -le 95 ]; do printf ' b%d' "$i"; i=$((i + 1)); done
+    printf '\n'
+    printf 'echo "toomany $?"\n'
+} > "$r/go.sh"
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot "$r" "$out/args.out"
+rc=$?
+
+[ "$rc" -eq 0 ] && grep -q '^argc 32 last a31$' "$out/args.out"
+report $? "run: 32 語の引数が 1 語も欠けずに届く"
+
+# 溢れた側は「成功しない」ことを見る。sh2 が返す番号そのものは
+# 問わない (spawn の失敗をどう写すかは別の話) が，**0 であっては
+# ならない**。0 なら黙って捨てたということである
+[ "$rc" -eq 0 ] && ! grep -q '^toomany 0$' "$out/args.out"
+report $? "run: 64 語を超える呼び出しは成功を返さない"
+[ "$rc" -eq 0 ] && ! grep -q '^argc 96 ' "$out/args.out"
+report $? "run: 溢れた呼び出しはそもそも走っていない"
 
 summary
