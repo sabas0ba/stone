@@ -200,7 +200,13 @@ fi
 
 # **我々の OS が作った書庫を，本物の ar が読めるか** (7.3)。
 # 相互運用を見る。バイト一致は狙わない
-sh tools/sfs2.sh unpack "$out/img" "$out/back" > /dev/null 2>&1
+#
+# 走らせる前に詰めた $out/img は**走ったあとの姿ではない**。カーネルは
+# 記憶の 67108864 から先を書き換えるので，取り出すのは $out/ram の
+# その位置からである (runroot が入れたのと同じ場所・同じ大きさ)
+dd if="$out/ram" of="$out/img.after" bs=64K \
+    iflag=skip_bytes,count_bytes skip=67108864 count=16777216 2> /dev/null \
+    && sh tools/sfs2.sh unpack "$out/img.after" "$out/back" > /dev/null 2>&1
 r2=$?
 if [ "$r2" -ne 0 ] || [ ! -f "$out/back/libx.a" ]; then
     report 1 "interop: OS が作った書庫を取り出せる"

@@ -124,15 +124,21 @@ static void member(int fd, char *nm, char *from) {
 }
 
 /* dir の下のふつうのファイルを束ねへ入れる。pre が空でなければ
- * 名乗る名前の前に付ける (sys/ の階層のため) */
+ * 名乗る名前の前に付ける (sys/ の階層のため)。
+ *
+ * dir を **その場で控えを取る**。呼ぶ側が大域の path を渡すことが
+ * あり，そのまま使うと最初の 1 件で path を潰してしまい，2 件目から
+ * "/include/sys/stat.h/time.h" のような経路が建つ */
 static void adddir(int fd, char *dir, char *pre) {
   DIR *d;
   struct dirent *p;
-  d = opendir(dir);
+  char base[512];
+  strcpy(base, dir);
+  d = opendir(base);
   if (d == 0) return;
   while ((p = readdir(d)) != 0) {
     if (p->d_type == DT_DIR) continue;
-    strcpy(path, dir);
+    strcpy(path, base);
     strcat(path, "/");
     strcat(path, p->d_name);
     strcpy(name, pre);
@@ -145,10 +151,11 @@ static void adddir(int fd, char *dir, char *pre) {
 /* /include とその下の sys/，および -I で与えられた階層 */
 static void addheaders(int fd) {
   int i;
+  char sys[512];
   adddir(fd, INC, "");
-  strcpy(path, INC);
-  strcat(path, "/sys");
-  adddir(fd, path, "sys/");
+  strcpy(sys, INC);
+  strcat(sys, "/sys");
+  adddir(fd, sys, "sys/");
   for (i = 0; i < ninc; i = i + 1) adddir(fd, incs[i], "");
 }
 
