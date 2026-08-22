@@ -1,0 +1,12 @@
+compile-mathx 0
+compile-strx 0
+ar-rcs 0
+mathx.o
+strx.o
+link 0
+add 42
+mul 42
+len 10
+cat abcd
+ver 7
+run 0
