@@ -265,14 +265,6 @@ h3 {
 .sources button:hover { text-decoration: underline; }
 .sources .src-desc, .docs .doc-desc { color: var(--fg-dim); margin-left: 6px; }
 
-/* ---- 推移チャート ---- */
-.evolution svg { width: 100%; height: 130px; display: block; }
-.evo-bar { fill: var(--bg3); cursor: pointer; }
-.evo-bar:hover { fill: var(--line); }
-.evo-bar.active { fill: var(--accent); }
-.evo-label { fill: var(--fg-dim); font-size: 10px; font-family: var(--mono); }
-.evo-size { fill: var(--fg); font-size: 10px; font-family: var(--mono); }
-
 /* ---- プレイグラウンド ---- */
 .playground { margin: 2em 0 3em; }
 .pg-note { color: var(--fg-dim); font-size: 0.9em; }
@@ -442,39 +434,67 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 .term-samples li.current code { outline: 1px solid var(--accent); }
 .term-samples .ts-note { display: block; margin-left: 2px; }
 
-/* ---- 能力の推移 (track x stage) ---- */
-.tracks { margin: 1.6em 0 2em; }
+/* ---- 能力の推移 + 成果物の大きさ (世代セレクタの直下。縦は詰める) ---- */
+.tracks { padding-top: 14px; }
+.tk-bar {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-bottom: 5px;
+}
+.tk-h {
+    font-size: 0.82em;
+    color: var(--fg-dim);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.tk-legend { font-size: 0.74em; color: var(--fg-dim); }
+.tk-size-now { font-size: 0.74em; color: var(--fg-dim); margin-left: auto; font-family: var(--mono); }
+.tk-size-now b { color: var(--fg); font-weight: 400; }
+.tk-compiler { color: var(--accent); }
+.tk-runtime { color: var(--phase-b); }
+
 .tk-grid {
     --tk-cols: 16;
-    font-size: 0.72em;
+    font-size: 0.7em;
     overflow-x: auto;
     padding-bottom: 2px;
 }
 .tk-row {
     display: grid;
-    grid-template-columns: 132px repeat(var(--tk-cols), minmax(20px, 1fr));
+    grid-template-columns: 118px repeat(var(--tk-cols), minmax(18px, 1fr));
     gap: 2px;
-    align-items: stretch;
-    min-width: 560px;
+    min-width: 540px;
 }
 .tk-row + .tk-row { margin-top: 2px; }
+/* [hidden] は UA 規則なので，display を持つ規則に負ける。明示する */
+.tk-row[hidden] { display: none; }
 .tk-label {
     color: var(--fg-dim);
-    font-size: 0.92em;
+    font-size: 0.94em;
     text-align: right;
-    padding-right: 8px;
+    padding: 0 7px 0 0;
     align-self: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    background: none;
+    border: 0;
+    border-right: 2px solid transparent;
+    font-family: inherit;
 }
-.tk-label.tk-compiler { border-right: 2px solid var(--accent); }
-.tk-label.tk-runtime { border-right: 2px solid var(--phase-b); }
+button.tk-label { cursor: pointer; }
+button.tk-label:hover, button.tk-label.open { color: var(--fg); }
+.tk-label.tk-compiler { border-right-color: var(--accent); }
+.tk-label.tk-runtime { border-right-color: var(--phase-b); }
+.tk-caret { display: inline-block; width: 9px; opacity: 0.6; }
 .tk-col {
     text-align: center;
     color: var(--fg-dim);
     font-family: var(--mono);
     font-size: 0.9em;
+    line-height: 1.2;
 }
 .tk-col.now { color: var(--fg); font-weight: 700; }
 .tk-cell {
@@ -484,13 +504,13 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
     color: transparent;
     font-family: var(--mono);
     font-size: 0.95em;
-    line-height: 1.6;
+    line-height: 1;
     padding: 0;
+    height: 17px;
     cursor: pointer;
-    min-height: 20px;
 }
 .tk-cell:hover { border-color: var(--fg-dim); }
-.tk-cell.lv0 { opacity: 0.55; }
+.tk-cell.lv0 { opacity: 0.5; }
 .tk-cell.tk-compiler.lv1 { background: #6a5220; color: var(--fg); }
 .tk-cell.tk-compiler.lv2 { background: #8a6a24; color: #1a1622; }
 .tk-cell.tk-compiler.lv3 { background: #c1912e; color: #1a1622; }
@@ -500,38 +520,50 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 .tk-cell.tk-runtime.lv3 { background: #7a6cbb; color: #1a1622; }
 .tk-cell.tk-runtime.lv4 { background: var(--phase-b); color: #1a1622; }
 .tk-cell.now { outline: 1px solid var(--fg); outline-offset: 1px; }
-.tk-row.sel .tk-label { color: var(--fg); }
 
-.tk-detail { margin-top: 12px; }
-.tk-detail-head { font-size: 0.82em; color: var(--fg-dim); margin-bottom: 4px; }
-.tk-detail-head .tk-compiler { color: var(--accent); }
-.tk-detail-head .tk-runtime { color: var(--phase-b); }
-.tk-compiler { color: var(--accent); }
-.tk-runtime { color: var(--phase-b); }
+/* 成果物の大きさ (対数目盛の棒。横軸は上と同じ世代) */
+.tk-sizes { margin-bottom: 4px; }
+.tk-sizes .tk-label { color: var(--fg-dim); opacity: 0.75; }
+.tk-cell.tk-size {
+    height: 26px;
+    display: flex;
+    align-items: flex-end;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+}
+.tk-cell.tk-size i { display: block; width: 100%; background: var(--line); border-radius: 2px 2px 0 0; }
+.tk-cell.tk-size:hover i { background: var(--fg-dim); }
+.tk-cell.tk-size.now i { background: var(--accent); }
+.tk-cell.tk-size.now { outline: none; }
+
+.tk-subrow .tk-label {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    opacity: 0.8;
+    padding-right: 7px;
+}
+.tk-subrow .tk-cell { height: 14px; }
+
+.tk-detail {
+    margin-top: 7px;
+    font-size: 0.78em;
+    border-left: 2px solid var(--line);
+    padding-left: 10px;
+}
+.tk-detail-head { color: var(--fg-dim); }
+.tk-none { color: var(--fg-dim); margin-left: 8px; }
 .tk-list {
     list-style: none;
     padding: 0;
-    margin: 0;
+    margin: 2px 0 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 2px 18px;
-    font-size: 0.82em;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 0 18px;
+    color: var(--fg);
 }
-.tk-list li { color: var(--fg-dim); display: flex; gap: 8px; align-items: baseline; }
-.tk-list li.now { color: var(--fg); }
-.tk-jump {
-    background: var(--bg3);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    color: var(--fg-dim);
-    font-family: var(--mono);
-    font-size: 0.9em;
-    padding: 0 5px;
-    cursor: pointer;
-    flex: none;
-}
-.tk-list li.now .tk-jump { border-color: var(--accent); color: var(--accent); }
-.tk-jump:hover { color: var(--fg); }
+.tk-list em { color: var(--fg-dim); font-style: normal; font-family: var(--mono); }
 
 /* ---- プレイグラウンドの見本選択 (適合台帳) ---- */
 .pg-picker {

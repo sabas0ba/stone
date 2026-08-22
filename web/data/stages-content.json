@@ -1616,31 +1616,38 @@
    "features": [
     {
      "stage": 1,
-     "label": "hex pairs with comments"
+     "label": "hex pairs with comments",
+     "sub": "hex0"
     },
     {
      "stage": 1,
-     "label": "self-regeneration as a transcription check"
+     "label": "self-regeneration as a transcription check",
+     "sub": "hex0"
     },
     {
      "stage": 2,
-     "label": "labels and forward references"
+     "label": "labels and forward references",
+     "sub": "hex1"
     },
     {
      "stage": 2,
-     "label": "B/J offsets computed and range-checked"
+     "label": "B/J offsets computed and range-checked",
+     "sub": "hex1"
     },
     {
      "stage": 3,
-     "label": "all 48 RV32IM mnemonics"
+     "label": "all 48 RV32IM mnemonics",
+     "sub": "asm"
     },
     {
      "stage": 3,
-     "label": "pseudo-instructions (li / la / call / ret)"
+     "label": "pseudo-instructions (li / la / call / ret)",
+     "sub": "asm"
     },
     {
      "stage": 3,
-     "label": "word / byte data directives"
+     "label": "word / byte data directives",
+     "sub": "asm"
     }
    ]
   },
@@ -1651,91 +1658,113 @@
    "features": [
     {
      "stage": 4,
-     "label": "structured if / else and loops"
+     "label": "structured if / else and loops",
+     "sub": "sol"
     },
     {
      "stage": 4,
-     "label": "named functions, globals, string literals"
+     "label": "named functions, globals, string literals",
+     "sub": "sol"
     },
     {
      "stage": 5,
-     "label": "infix expressions with precedence"
+     "label": "infix expressions with precedence",
+     "sub": "sc"
     },
     {
      "stage": 5,
-     "label": "pointers, 1-D arrays, structs"
+     "label": "pointers, 1-D arrays, structs",
+     "sub": "sc"
     },
     {
      "stage": 5,
-     "label": "parameters, locals, return values"
+     "label": "parameters, locals, return values",
+     "sub": "sc"
     },
     {
      "stage": 10,
-     "label": "for / switch / goto / ?: / ++ / sizeof / casts"
+     "label": "for / switch / goto / ?: / ++ / sizeof / casts",
+     "sub": "cc10"
     },
     {
      "stage": 10,
-     "label": "typedef / enum / union / prototypes / extern"
+     "label": "typedef / enum / union / prototypes / extern",
+     "sub": "cc10"
     },
     {
      "stage": 10,
-     "label": "unsigned / short / long width and signedness"
+     "label": "unsigned / short / long width and signedness",
+     "sub": "cc10"
     },
     {
      "stage": 10,
-     "label": "function pointers and static linkage"
+     "label": "function pointers and static linkage",
+     "sub": "cc10"
     },
     {
      "stage": 10,
-     "label": "initializers, varargs, struct by value"
+     "label": "initializers, varargs, struct by value",
+     "sub": "cc10"
     },
     {
      "stage": 14,
-     "label": "multiple declarators (int a, b;)"
+     "label": "multiple declarators (int a, b;)",
+     "sub": "cc14a"
     },
     {
      "stage": 14,
-     "label": "string literal concatenation, U / L suffixes"
+     "label": "string literal concatenation, U / L suffixes",
+     "sub": "cc14a"
     },
     {
      "stage": 14,
-     "label": "nested initializers, function-scope static"
+     "label": "nested initializers, function-scope static",
+     "sub": "cc14b–e"
     },
     {
      "stage": 14,
-     "label": "forward-referenced tags, K&R definitions"
+     "label": "forward-referenced tags, K&R definitions",
+     "sub": "cc14b–e"
     },
     {
      "stage": 14,
-     "label": "bit-fields"
+     "label": "bit-fields",
+     "sub": "cc14f–g"
     },
     {
      "stage": 15,
-     "label": "64-bit integers (long long) end to end"
+     "label": "64-bit integers (long long) end to end",
+     "sub": "cc15a–e"
     },
     {
      "stage": 15,
-     "label": "float / double literals and arithmetic"
+     "label": "float / double literals and arithmetic",
+     "sub": "cc15f–i"
     },
     {
      "stage": 15,
-     "label": "floating point parameters and arguments"
+     "label": "floating point parameters and arguments",
+     "sub": "cc15j"
     },
     {
      "stage": 15,
-     "label": "two-word values in a variadic tail"
+     "label": "two-word values in a variadic tail",
+     "sub": "cc15k"
     },
     {
      "stage": 15,
-     "label": "octal literals, labelled statements"
+     "label": "octal literals, labelled statements",
+     "sub": "cc15m"
     },
     {
      "stage": 15,
-     "label": "C89 integer-constant typing"
+     "label": "C89 integer-constant typing",
+     "sub": "cc15n"
     },
     {
      "stage": 15,
-     "label": "C89 struct layout (bit-fields, 8-byte alignment)"
+     "label": "C89 struct layout (bit-fields, 8-byte alignment)",
+     "sub": "cc15p"
     }
    ]
   },
@@ -1746,31 +1775,38 @@
    "features": [
     {
      "stage": 9,
-     "label": "#include and the bundle input format"
+     "label": "#include and the bundle input format",
+     "sub": "pp"
     },
     {
      "stage": 9,
-     "label": "object / function / variadic macros, # and ##"
+     "label": "object / function / variadic macros, # and ##",
+     "sub": "pp"
     },
     {
      "stage": 9,
-     "label": "the #if family"
+     "label": "the #if family",
+     "sub": "pp"
     },
     {
      "stage": 9,
-     "label": "/* */ comments, line splicing, __FILE__"
+     "label": "/* */ comments, line splicing, __FILE__",
+     "sub": "pp"
     },
     {
      "stage": 14,
-     "label": "bundles of hundreds of KiB, long macro names"
+     "label": "bundles of hundreds of KiB, long macro names",
+     "sub": "pp14"
     },
     {
      "stage": 15,
-     "label": "larger macro tables and arenas (pp15)"
+     "label": "larger macro tables and arenas (pp15)",
+     "sub": "pp15"
     },
     {
      "stage": 15,
-     "label": "correct recursion guard (pp16)"
+     "label": "correct recursion guard (pp16)",
+     "sub": "pp16"
     }
    ]
   },
@@ -1781,31 +1817,38 @@
    "features": [
     {
      "stage": 7,
-     "label": "SSA-style IR replacing syntax templates"
+     "label": "SSA-style IR replacing syntax templates",
+     "sub": "occ"
     },
     {
      "stage": 7,
-     "label": "constant folding and dead code elimination"
+     "label": "constant folding and dead code elimination",
+     "sub": "occ"
     },
     {
      "stage": 7,
-     "label": "register allocation with spilling"
+     "label": "register allocation with spilling",
+     "sub": "occ"
     },
     {
      "stage": 7,
-     "label": "branches beyond the ±4 KiB limit"
+     "label": "branches beyond the ±4 KiB limit",
+     "sub": "occ"
     },
     {
      "stage": 8,
-     "label": "crt0 preamble with external getc / putc / exit"
+     "label": "crt0 preamble with external getc / putc / exit",
+     "sub": "cc8"
     },
     {
      "stage": 15,
-     "label": "64-bit values as register pairs"
+     "label": "64-bit values as register pairs",
+     "sub": "cc15a–e"
     },
     {
      "stage": 15,
-     "label": "software floating point calls (rtfp)"
+     "label": "software floating point calls (rtfp)",
+     "sub": "cc15f–i"
     }
    ]
   },
@@ -1816,35 +1859,43 @@
    "features": [
     {
      "stage": 8,
-     "label": "ELF relocatable objects"
+     "label": "ELF relocatable objects",
+     "sub": "ld"
     },
     {
      "stage": 8,
-     "label": "symbol resolution and 4 relocation types"
+     "label": "symbol resolution and 4 relocation types",
+     "sub": "ld"
     },
     {
      "stage": 8,
-     "label": "separate compilation"
+     "label": "separate compilation",
+     "sub": "ld"
     },
     {
      "stage": 12,
-     "label": "'K' kernel and 'E' executable output forms"
+     "label": "'K' kernel and 'E' executable output forms",
+     "sub": "ld12"
     },
     {
      "stage": 13,
-     "label": "generic sys_ecall stub in the 'E' prologue"
+     "label": "generic sys_ecall stub in the 'E' prologue",
+     "sub": "ld13"
     },
     {
      "stage": 14,
-     "label": "symbol names beyond 15 bytes"
+     "label": "symbol names beyond 15 bytes",
+     "sub": "ld14"
     },
     {
      "stage": 15,
-     "label": "thousands of symbols (ld15)"
+     "label": "thousands of symbols (ld15)",
+     "sub": "ld15"
     },
     {
      "stage": 15,
-     "label": "mstatus.FS — U-mode may use the FPU (ld16)"
+     "label": "mstatus.FS — U-mode may use the FPU (ld16)",
+     "sub": "ld16"
     }
    ]
   },
@@ -1855,47 +1906,58 @@
    "features": [
     {
      "stage": 11,
-     "label": "string.h and ctype.h"
+     "label": "string.h and ctype.h",
+     "sub": "libc11"
     },
     {
      "stage": 11,
-     "label": "malloc / free / calloc / realloc"
+     "label": "malloc / free / calloc / realloc",
+     "sub": "libc11"
     },
     {
      "stage": 11,
-     "label": "qsort / bsearch / strtol / atoi / div"
+     "label": "qsort / bsearch / strtol / atoi / div",
+     "sub": "libc11"
     },
     {
      "stage": 12,
-     "label": "errno and the POSIX wrappers"
+     "label": "errno and the POSIX wrappers",
+     "sub": "libc12"
     },
     {
      "stage": 12,
-     "label": "stdio: fopen / printf / fgets / ungetc"
+     "label": "stdio: fopen / printf / fgets / ungetc",
+     "sub": "libc12"
     },
     {
      "stage": 14,
-     "label": "assert.h, sprintf family, printf extensions"
+     "label": "assert.h, sprintf family, printf extensions",
+     "sub": "libc14"
     },
     {
      "stage": 15,
-     "label": "%llu and %f, snprintf"
+     "label": "%llu and %f, snprintf",
+     "sub": "libc15"
     },
     {
      "stage": 15,
-     "label": "strtod, sscanf"
+     "label": "strtod, sscanf",
+     "sub": "libc15"
     },
     {
      "stage": 15,
-     "label": "setjmp / longjmp, lseek"
+     "label": "setjmp / longjmp, lseek",
+     "sub": "libc15"
     },
     {
      "stage": 16,
-     "label": "dirent.h: opendir / readdir / closedir"
+     "label": "dirent.h: opendir / readdir / closedir",
+     "sub": "libc16"
     },
     {
      "stage": 16,
-     "label": "sys/stat.h and a truthful getcwd"
+     "label": "sys/stat.h and a truthful getcwd",
+     "sub": "libc16"
     }
    ]
   },
@@ -1906,51 +1968,63 @@
    "features": [
     {
      "stage": 12,
-     "label": "M-mode kernel, U-mode user processes"
+     "label": "M-mode kernel, U-mode user processes",
+     "sub": "kernel12"
     },
     {
      "stage": 12,
-     "label": "ELF executable loading"
+     "label": "ELF executable loading",
+     "sub": "kernel12"
     },
     {
      "stage": 12,
-     "label": "open / read / write / close / exit"
+     "label": "open / read / write / close / exit",
+     "sub": "kernel12"
     },
     {
      "stage": 12,
-     "label": "Linux-compatible syscall ABI"
+     "label": "Linux-compatible syscall ABI",
+     "sub": "kernel12"
     },
     {
      "stage": 13,
-     "label": "spawn (500): sequential child, parent image saved"
+     "label": "spawn (500): sequential child, parent image saved",
+     "sub": "kernel13"
     },
     {
      "stage": 13,
-     "label": "fd 0 / fd 1 rewiring, blocking reads"
+     "label": "fd 0 / fd 1 rewiring, blocking reads",
+     "sub": "kernel13"
     },
     {
      "stage": 15,
-     "label": "lseek (kernel15)"
+     "label": "lseek (kernel15)",
+     "sub": "kernel15"
     },
     {
      "stage": 15,
-     "label": "every PT_LOAD segment loaded (kernel16)"
+     "label": "every PT_LOAD segment loaded (kernel16)",
+     "sub": "kernel16"
     },
     {
      "stage": 16,
-     "label": "path resolution through a directory tree (kernel17)"
+     "label": "path resolution through a directory tree (kernel17)",
+     "sub": "kernel17"
     },
     {
      "stage": 16,
-     "label": "getdents64 / mkdirat / chdir / getcwd (kernel18)"
+     "label": "getdents64 / mkdirat / chdir / getcwd (kernel18)",
+     "sub": "kernel18"
     },
     {
      "stage": 16,
-     "label": "working directory, inherited across spawn"
+     "label": "working directory, inherited across spawn",
+     "sub": "kernel18"
     },
     {
      "stage": 16,
-     "label": "EISDIR for read / write on a directory fd"
+     "label": "EISDIR for read / write on a directory fd",
+     "sub": "kernel18"
     }
    ]
   },
@@ -1961,31 +2035,38 @@
    "features": [
     {
      "stage": 12,
-     "label": "sfs: flat table + data, injected as a RAM image"
+     "label": "sfs: flat table + data, injected as a RAM image",
+     "sub": "sfs"
     },
     {
      "stage": 12,
-     "label": "file exchange with the host"
+     "label": "file exchange with the host",
+     "sub": "sfs"
     },
     {
      "stage": 14,
-     "label": "safe overwrite: rewrites never clobber neighbours"
+     "label": "safe overwrite: rewrites never clobber neighbours",
+     "sub": "kernel14"
     },
     {
      "stage": 16,
-     "label": "sfs2: entries carry a kind and a parent"
+     "label": "sfs2: entries carry a kind and a parent",
+     "sub": "sfs2"
     },
     {
      "stage": 16,
-     "label": "directories as real objects; root is entry 0"
+     "label": "directories as real objects; root is entry 0",
+     "sub": "sfs2"
     },
     {
      "stage": 16,
-     "label": ". and .., absolute and relative paths"
+     "label": ". and .., absolute and relative paths",
+     "sub": "sfs2"
     },
     {
      "stage": 16,
-     "label": "same name in different directories"
+     "label": "same name in different directories",
+     "sub": "sfs2"
     }
    ]
   },
@@ -1996,23 +2077,28 @@
    "features": [
     {
      "stage": 11,
-     "label": "heap in .bss, 1 MiB, K&R free list"
+     "label": "heap in .bss, 1 MiB, K&R free list",
+     "sub": "libc11"
     },
     {
      "stage": 12,
-     "label": "brk / sbrk — the 1 MiB cap lifted"
+     "label": "brk / sbrk — the 1 MiB cap lifted",
+     "sub": "kernel12"
     },
     {
      "stage": 12,
-     "label": "3 MB of user heap"
+     "label": "3 MB of user heap",
+     "sub": "kernel12"
     },
     {
      "stage": 16,
-     "label": "14 MB → 256 MB of user heap (255 MiB measured)"
+     "label": "14 MB → 256 MB of user heap (255 MiB measured)",
+     "sub": "kernel19"
     },
     {
      "stage": 16,
-     "label": "512 MB layout with nothing below 0x8600_0000 moved"
+     "label": "512 MB layout with nothing below 0x8600_0000 moved",
+     "sub": "kernel19"
     }
    ]
   },
@@ -2023,43 +2109,53 @@
    "features": [
     {
      "stage": 1,
-     "label": "the chain regenerates its own seed"
+     "label": "the chain regenerates its own seed",
+     "sub": "hex0"
     },
     {
      "stage": 6,
-     "label": "self-hosting: sc written in sc"
+     "label": "self-hosting: sc written in sc",
+     "sub": "scc"
     },
     {
      "stage": 6,
-     "label": "fixed-point verification (B2 == B3)"
+     "label": "fixed-point verification (B2 == B3)",
+     "sub": "scc"
     },
     {
      "stage": 13,
-     "label": "shell, line editor, mk (make), in-guest rebuild"
+     "label": "shell, line editor, mk (make), in-guest rebuild",
+     "sub": "sh / ed / mk"
     },
     {
      "stage": 13,
-     "label": "cc / pp / ld as OS commands"
+     "label": "cc / pp / ld as OS commands",
+     "sub": "sh / ed / mk"
     },
     {
      "stage": 13,
-     "label": "fixed point holds on the OS itself"
+     "label": "fixed point holds on the OS itself",
+     "sub": "sh / ed / mk"
     },
     {
      "stage": 14,
-     "label": "conformance ledger: ok / gap / bad"
+     "label": "conformance ledger: ok / gap / bad",
+     "sub": "ledger"
     },
     {
      "stage": 14,
-     "label": "unmodified bzip2 and zlib build and run"
+     "label": "unmodified bzip2 and zlib build and run",
+     "sub": "bzip2 / zlib"
     },
     {
      "stage": 15,
-     "label": "a RV32 backend written for tcc"
+     "label": "a RV32 backend written for tcc",
+     "sub": "tcc"
     },
     {
      "stage": 15,
-     "label": "T2 == T3 == tccH — tcc self-hosts on our OS"
+     "label": "T2 == T3 == tccH — tcc self-hosts on our OS",
+     "sub": "tcc"
     }
    ]
   }

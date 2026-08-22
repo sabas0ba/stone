@@ -172,39 +172,34 @@ function stopAuto() {
     $('tl-play').textContent = '▶ auto';
 }
 
-// ---- 推移チャート (主成果物のサイズ，対数目盛) ----
-function buildChart() {
-    const stages = DATA.stages;
-    // 各世代の最大の成果物 (その世代の規模の代表として)
-    const mains = stages.map((s) => s.artifacts.reduce(
-        (a, b) => ((b.size || 0) > (a.size || 0) ? b : a), s.artifacts[0] || {}));
-    const sizes = mains.map((a) => a.size || 1);
-    const maxLog = Math.max(...sizes.map((v) => Math.log10(v)));
-    const W = 1040, H = 130, bw = W / stages.length;
-    let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Artifact size over generations">`;
-    stages.forEach((st, i) => {
-        const h = Math.max(4, (Math.log10(sizes[i]) / maxLog) * 84);
-        const x = i * bw + 4, y = 104 - h;
-        svg += `<rect class="evo-bar" data-num="${st.num}" x="${x}" y="${y}"`
-            + ` width="${bw - 8}" height="${h}" rx="3"><title>${mains[i].file || st.name}: ${fmtSize(sizes[i])}</title></rect>`;
-        svg += `<text class="evo-size" x="${x + (bw - 8) / 2}" y="${y - 5}" text-anchor="middle">${fmtSize(sizes[i])}</text>`;
-        svg += `<text class="evo-label" x="${x + (bw - 8) / 2}" y="${H - 8}" text-anchor="middle">${st.num}</text>`;
-    });
-    svg += '</svg>';
-    $('evo-chart').innerHTML = svg;
-    $('evo-chart').querySelectorAll('.evo-bar').forEach((r) => {
-        r.addEventListener('click', () => { stopAuto(); select(Number(r.dataset.num)); });
-    });
-}
-
-// ---- 能力の推移 (track x stage) ----
-// data/stages.json の tracks を「10 の系統 x 世代」の格子にする。
-// 世代ごとの新機能はチップで読めるが，**積み上がっている**ことは
-// 1 世代だけを見ても分からないので，横断の図をここに置く。
-let trackSel = null;
-let trackPinned = null;         // 利用者が押したセルの世代 (その間だけ選択を固定)
+// ---- 能力の推移 + 成果物の大きさ (横軸が世代のものを 1 枚にまとめる) ----
+// data/stages.json の tracks を「系統 x 世代」の格子にする。世代ごとの
+// 新機能はチップで読めるが，**積み上がっている**ことは 1 世代だけを見ても
+// 分からない。成果物の大きさも横軸が同じなので同じ格子の 1 行に置く。
+// 系統の行は世代 (kernel17 / cc15p など) へ開ける。
+const openTracks = new Set();
+let detailKey = null;           // 明細を出している "track|sub|stage"
+let mainArtifacts = [];         // 世代ごとの最大の成果物 (大きさの行と読み取りが使う)
 
 const trackCount = (t, num) => t.features.filter((f) => f.stage === num).length;
+
+// その系統に現れる世代を，初出の順に
+function subsOf(t) {
+    const out = [];
+    for (const f of t.features) if (f.sub && !out.includes(f.sub)) out.push(f.sub);
+    return out;
+}
+
+function cells(feats, n, kind, key) {
+    let html = '';
+    for (let i = 1; i <= n; i++) {
+        const c = feats.filter((f) => f.stage === i).length;
+        html += `<button class="tk-cell tk-${kind} lv${Math.min(4, c)}"`
+            + ` data-stage="${i}" data-key="${escapeHtml(key)}"`
+            + ` title="Stage ${i}: ${c || 'nothing'} new">${c || ''}</button>`;
+    }
+    return html;
+}
 
 function buildTracks() {
     const tracks = DATA.tracks || [];
@@ -212,69 +207,102 @@ function buildTracks() {
     const n = DATA.stages.length;
     const el = $('tk-grid');
     el.style.setProperty('--tk-cols', String(n));
+
     let html = '<div class="tk-row tk-head"><span class="tk-label"></span>';
     for (let i = 1; i <= n; i++) {
         html += `<span class="tk-col" data-stage="${i}">${i}</span>`;
     }
     html += '</div>';
+
+    // 成果物の大きさ (その世代の最大の成果物。対数目盛)
+    mainArtifacts = DATA.stages.map((st) => st.artifacts.reduce(
+        (a, b) => ((b.size || 0) > (a.size || 0) ? b : a), st.artifacts[0] || {}));
+    const mains = mainArtifacts;
+    const sizes = mains.map((a) => a.size || 1);
+    const maxLog = Math.max(...sizes.map((v) => Math.log10(v)));
+    html += '<div class="tk-row tk-sizes"><span class="tk-label">artifact size</span>';
+    DATA.stages.forEach((st, i) => {
+        const h = Math.max(8, (Math.log10(sizes[i]) / maxLog) * 100);
+        const title = `${mains[i].file || st.name}: ${fmtSize(sizes[i])}`;
+        html += `<button class="tk-cell tk-size" data-stage="${st.num}"`
+            + ` title="${escapeHtml(title)}"><i style="height:${h}%"></i></button>`;
+    });
+    html += '</div>';
+
     for (const t of tracks) {
-        const counts = new Array(n + 1).fill(0);
-        for (const f of t.features) counts[f.stage]++;
+        const subs = subsOf(t);
         html += `<div class="tk-row" data-track="${t.id}">`
-            + `<span class="tk-label tk-${t.kind}">${escapeHtml(t.label)}</span>`;
-        for (let i = 1; i <= n; i++) {
-            const c = counts[i];
-            const title = `${t.label} — Stage ${i}: `
-                + (c ? `${c} new ${c === 1 ? 'capability' : 'capabilities'}`
-                    : 'nothing new (everything earlier still holds)');
-            html += `<button class="tk-cell tk-${t.kind} lv${Math.min(4, c)}"`
-                + ` data-stage="${i}" data-track="${t.id}"`
-                + ` title="${escapeHtml(title)}">${c || ''}</button>`;
+            + `<button class="tk-label tk-${t.kind}" data-toggle="${t.id}"`
+            + ` title="${escapeHtml(`${t.label} — split into ${subs.length} generations`)}">`
+            + `<span class="tk-caret">▸</span>${escapeHtml(t.label)}</button>`
+            + cells(t.features, n, t.kind, t.id) + '</div>';
+        for (const sub of subs) {
+            const feats = t.features.filter((f) => f.sub === sub);
+            html += `<div class="tk-row tk-subrow" data-parent="${t.id}" hidden>`
+                + `<span class="tk-label tk-${t.kind}">${escapeHtml(sub)}</span>`
+                + cells(feats, n, t.kind, `${t.id}|${sub}`) + '</div>';
         }
-        html += '</div>';
     }
     el.innerHTML = html;
+
+    for (const b of el.querySelectorAll('.tk-label[data-toggle]')) {
+        b.onclick = () => toggleTrack(b.dataset.toggle);
+    }
     for (const b of el.querySelectorAll('.tk-cell')) {
         b.onclick = () => {
             stopAuto();
-            trackSel = b.dataset.track;
-            trackPinned = Number(b.dataset.stage);
-            select(trackPinned);
+            const stage = Number(b.dataset.stage);
+            if (b.dataset.key) showDetail(b.dataset.key, stage);
+            select(stage);
         };
     }
 }
 
+function toggleTrack(id) {
+    if (openTracks.has(id)) openTracks.delete(id);
+    else openTracks.add(id);
+    const open = openTracks.has(id);
+    for (const r of $('tk-grid').querySelectorAll(`.tk-subrow[data-parent="${id}"]`)) {
+        r.hidden = !open;
+    }
+    const lab = $('tk-grid').querySelector(`.tk-label[data-toggle="${id}"]`);
+    lab.classList.toggle('open', open);
+    lab.querySelector('.tk-caret').textContent = open ? '▾' : '▸';
+}
+
+// 押した升 (系統 x 世代) の中身だけを出す。もう一度押すと畳む
+function showDetail(key, stage) {
+    const box = $('tk-detail');
+    if (detailKey === `${key}|${stage}`) {
+        detailKey = null;
+        box.hidden = true;
+        return;
+    }
+    const [id, sub] = key.split('|');
+    const t = (DATA.tracks || []).find((x) => x.id === id);
+    if (!t) return;
+    const feats = t.features.filter((f) => f.stage === stage
+        && (sub === undefined || f.sub === sub));
+    detailKey = `${key}|${stage}`;
+    box.hidden = false;
+    const name = sub === undefined ? t.label : `${t.label} · ${sub}`;
+    box.innerHTML = `<span class="tk-detail-head tk-${t.kind}">`
+        + `${escapeHtml(name)} — Stage ${stage}</span>`
+        + (feats.length
+            ? `<ul class="tk-list">${feats.map((f) => `<li>${inlineMd(f.label)}`
+                + `${sub === undefined && f.sub ? ` <em>${escapeHtml(f.sub)}</em>` : ''}`
+                + '</li>').join('')}</ul>`
+            : '<span class="tk-none">nothing new — everything earlier still holds</span>');
+}
+
+// 世代が変わったら列の強調だけを動かす (明細は押したときにだけ出す)
 function renderTracks(num) {
-    const tracks = DATA.tracks || [];
-    if (!tracks.length) return;
     for (const c of $('tk-grid').querySelectorAll('.tk-cell, .tk-col')) {
         c.classList.toggle('now', Number(c.dataset.stage) === num);
     }
-    // 既定はこの世代でいちばん多く足した系統。セルを押したときだけ
-    // その選択を優先する (押した世代を離れたら既定へ戻る)
-    let t = trackPinned === num ? tracks.find((x) => x.id === trackSel) : null;
-    if (!t) {
-        t = tracks.reduce((a, b) => (trackCount(b, num) > trackCount(a, num) ? b : a));
-        if (!trackCount(t, num)) t = tracks.find((x) => x.id === trackSel) || tracks[0];
-    }
-    trackSel = t.id;
-    for (const r of $('tk-grid').querySelectorAll('.tk-row')) {
-        r.classList.toggle('sel', r.dataset.track === t.id);
-    }
-    const arrived = t.features.filter((f) => f.stage === num).length;
-    const rows = t.features.map((f) => `<li class="${f.stage === num ? 'now' : ''}">`
-        + `<button class="tk-jump" data-stage="${f.stage}">`
-        + `${String(f.stage).padStart(2, '0')}</button>`
-        + `<span>${inlineMd(f.label)}</span></li>`).join('');
-    $('tk-detail').innerHTML = '<div class="tk-detail-head">'
-        + `<b class="tk-${t.kind}">${escapeHtml(t.label)}</b> across the chain — `
-        + `${t.features.length} capabilities, none ever removed`
-        + (arrived ? ` · <b>${arrived} of them arrived in Stage ${num}</b>` : '')
-        + '</div>'
-        + `<ul class="tk-list">${rows}</ul>`;
-    for (const b of $('tk-detail').querySelectorAll('.tk-jump')) {
-        b.onclick = () => { stopAuto(); select(Number(b.dataset.stage)); };
-    }
+    const a = mainArtifacts[num - 1];
+    $('tk-size-now').innerHTML = a && a.size != null
+        ? `${escapeHtml(a.file || '')} <b>${fmtSize(a.size)}</b>` : '';
 }
 
 // ---- Stage パネル ----
@@ -285,9 +313,6 @@ function select(num, push = true) {
     $('tl-range').value = String(num);
     document.querySelectorAll('.tl-node').forEach((n) => n.classList.remove('active'));
     $(`node-${num}`).classList.add('active');
-    document.querySelectorAll('.evo-bar').forEach((r) => {
-        r.classList.toggle('active', Number(r.dataset.num) === num);
-    });
 
     $('st-num').textContent = String(num).padStart(2, '0');
     $('st-title').textContent = st.title;
@@ -777,7 +802,6 @@ async function main() {
         $('build-info').textContent = `artifacts built from chain @ ${DATA.commit.slice(0, 9)}`;
     }
     buildTimeline();
-    buildChart();
     buildTracks();
     const m = location.hash.match(/^#stage(\d{3})$/);
     select(m ? Number(m[1]) : 1, false);

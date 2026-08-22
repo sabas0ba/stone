@@ -41,6 +41,18 @@
   </div>
 </nav>
 
+<section class="tracks wrap" id="tracks" aria-label="Capability growth">
+  <div class="tk-bar">
+    <span class="tk-h">Capability growth</span>
+    <span class="tk-legend"><b class="tk-compiler">compiler</b> ·
+      <b class="tk-runtime">runtime &amp; OS</b> — a lit block is what that generation added;
+      click one for its list, or a row name to split it by generation.</span>
+    <span class="tk-size-now" id="tk-size-now"></span>
+  </div>
+  <div class="tk-grid" id="tk-grid"></div>
+  <div class="tk-detail" id="tk-detail" hidden></div>
+</section>
+
 <main class="wrap" id="main">
   <section class="stage-head">
     <div class="stage-num" id="st-num"></div>
@@ -53,18 +65,6 @@
 
   <div class="md lede-md" id="st-lede"></div>
   <div class="cap-chips" id="st-caps"></div>
-
-  <section class="tracks" id="tracks">
-    <h3>Capability growth — where this generation sits</h3>
-    <p class="pg-note">Ten tracks, sixteen generations. A lit block is where capabilities landed,
-      and the number in it is how many; the brighter it is, the more arrived at once.
-      <b class="tk-compiler">Amber</b> is the compiler side, <b class="tk-runtime">violet</b> the
-      runtime and OS side — and the last two generations show why the bottleneck moved from one to
-      the other. The current generation's column is outlined; click any block to open that track
-      and jump to that generation.</p>
-    <div class="tk-grid" id="tk-grid"></div>
-    <div class="tk-detail" id="tk-detail"></div>
-  </section>
 
   <section class="playground" id="playground">
     <h3>Playground</h3>
@@ -156,11 +156,6 @@
       <summary>Field notes — how it actually went</summary>
       <p class="trivia" id="st-trivia"></p>
     </details>
-  </section>
-
-  <section class="evolution">
-    <h3>Artifact size over generations</h3>
-    <div id="evo-chart"></div>
   </section>
 </main>
 
