@@ -384,8 +384,11 @@ static void addlist(char *s) {
 static void parselines(char *buf, char *path) {
   char *p;
   char line[8192];
-  int cur;                      /* 直前の規則 (命令行の行き先)。-1 = 無し */
-  cur = -1;
+  /* 直前の目標行が立てた規則。**命令行はその全部に付く** ——
+   * `m1 m2:` と書いた行の命令は m1 にも m2 にも効く */
+  int curr[64];
+  int ncurr;
+  ncurr = 0;
   p = buf;
   while (*p) {
     char *e;
@@ -403,12 +406,13 @@ static void parselines(char *buf, char *path) {
       line[len] = 0;
       p = (*e == 0) ? e : e + 1;
       if (len > 0 && line[len - 1] == '\\') {
-        /* 継続。\ を空白 1 つに置き換え，次の行の頭の空白は畳む */
-        line[len - 1] = ' ';
+        /* 継続。**前後の空白ごと空白 1 つに畳む** (GNU make と同じ)。
+         * 畳まないと `a \` + `   b` が "a  b" になる */
         len = len - 1;
-        line[len] = 0;
-        strcat(line, " ");
+        while (len > 0 && isblank_(line[len - 1])) len = len - 1;
+        line[len] = ' ';
         len = len + 1;
+        line[len] = 0;
         p = skipb(p);
         continue;
       }
@@ -490,14 +494,18 @@ static void parselines(char *buf, char *path) {
 
     /* ---- 命令行 ---- */
     if (istab) {
-      if (cur < 0) die("recipe line without a rule", line);
-      if (rcmdn[cur] == 0) rcmd0[cur] = nlist;
+      int k;
+      if (ncurr == 0) die("recipe line without a rule", line);
+      /* 実体は 1 つだけ積み，どの規則からも同じ位置を指す */
+      for (k = 0; k < ncurr; k = k + 1) {
+        if (rcmdn[curr[k]] == 0) rcmd0[curr[k]] = nlist;
+        rcmdn[curr[k]] = rcmdn[curr[k]] + 1;
+      }
       addlist(line + 1);        /* 頭の TAB を落とす */
-      rcmdn[cur] = rcmdn[cur] + 1;
       continue;
     }
 
-    if (skipb(line)[0] == 0) { cur = -1; continue; }
+    if (skipb(line)[0] == 0) { ncurr = 0; continue; }
 
     /* ---- include ---- */
     {
@@ -525,7 +533,7 @@ static void parselines(char *buf, char *path) {
           q = skipb(q);
           if (k) parse(one, req);
         }
-        cur = -1;
+        ncurr = 0;
         continue;
       }
     }
@@ -598,7 +606,7 @@ static void parselines(char *buf, char *path) {
         } else {
           vset(lhs, v, V_LAZY);
         }
-        cur = -1;
+        ncurr = 0;
         continue;
       }
 
@@ -606,14 +614,13 @@ static void parselines(char *buf, char *path) {
         char tg[NEXP];
         char dp[NEXP];
         char *q2;
-        int first;
         *colon = 0;
+        ncurr = 0;
         expand(skipb(line), tg, (int)sizeof tg);
         expand(skipb(colon + 1), dp, (int)sizeof dp);
         rstrip(tg);
         rstrip(dp);
         /* 目標が複数並ぶことがある。それぞれに同じ規則を立てる */
-        first = -1;
         q2 = skipb(tg);
         while (*q2) {
           char one[512];
@@ -649,11 +656,11 @@ static void parselines(char *buf, char *path) {
                 nphony = nphony + 1;
               }
             }
-            first = -1;
+            ncurr = 0;
             break;
           }
           ri = addrule(one);
-          if (first < 0) first = ri;
+          if (ncurr < 64) { curr[ncurr] = ri; ncurr = ncurr + 1; }
           {
             char *d;
             d = skipb(dp);
@@ -676,7 +683,6 @@ static void parselines(char *buf, char *path) {
             }
           }
         }
-        cur = first;
         continue;
       }
     }
@@ -684,14 +690,22 @@ static void parselines(char *buf, char *path) {
   }
 }
 
-/* 1 つの記述を読んで表に足す。required が 0 なら無くてもよい */
+/* 1 つの記述を読んで表に足す。required が 0 なら無くてもよい。
+ *
+ * **器は呼ぶたびに取る。** 静的な 1 つを使い回すと，include が
+ * 外側の parselines が読んでいる最中の器を上書きしてしまう
+ * (cc18 の adddir と同じ型の誤り。docs/stage017-cc.md 8.1) */
 static void parse(char *path, int required) {
-  static char buf[NTXT];
-  if (slurp(path, buf, (int)sizeof buf) < 0) {
+  char *buf;
+  buf = malloc(NTXT);
+  if (buf == 0) die("out of memory reading", path);
+  if (slurp(path, buf, NTXT) < 0) {
+    free(buf);
     if (required) die("cannot open", path);
     return;
   }
   parselines(buf, path);
+  free(buf);
 }
 
 /* ---- 作る ---- */
@@ -778,6 +792,9 @@ static void runcmd(char *raw) {
     fputs("\n", stdout);
   }
   if (dryrun) return;
+  /* 我々の stdio は緩衝しないので何もしないが，ホストで一巡させる
+   * ときは順序が狂う。**同じ道を通す**ために置く */
+  fflush(stdout);
 
   fd = open(TMP, O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (fd < 0) die("cannot create", TMP);
@@ -789,16 +806,19 @@ static void runcmd(char *raw) {
   av[1] = TMP;
   av[2] = 0;
   st = spawn2("/bin/sh2", av, 0, 0, 0);
-  if (st != 0 && !ignore) {
+  if (st == 0) return;
+  {
     char n[32];
     sprintf(n, "%d", st);
-    fputs("mk: *** [", stderr);
+    /* **無視するときも黙らない。** 「失敗したが続けた」を黙って
+     * 呑むのは，我々が台帳で bad と呼んでいるものそのものである */
+    fputs(ignore ? "mk: [" : "mk: *** [", stderr);
     fputs(a_tgt ? a_tgt : "?", stderr);
     fputs("] error ", stderr);
     fputs(n, stderr);
-    fputs("\n", stderr);
-    exit(2);
+    fputs(ignore ? " (ignored)\n" : "\n", stderr);
   }
+  if (!ignore) exit(2);
 }
 
 /* 規則 ri を目標 t (語幹 stem) として実行する */
