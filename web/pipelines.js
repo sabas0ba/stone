@@ -352,7 +352,7 @@ export const TERMINALS = {
         scenarios: [
             {
                 id: 'path',
-                label: 'kernel17 — paths through a tree',
+                label: 'kernel17 · paths',
                 kernel: 'assets/bin/kernel17.bin',
                 imgSize: 4 << 20,
                 maxEntries: 128,
@@ -376,7 +376,7 @@ export const TERMINALS = {
             },
             {
                 id: 'dir',
-                label: 'kernel18 — a working directory',
+                label: 'kernel18 · dirs',
                 kernel: 'assets/bin/kernel18.bin',
                 imgSize: 4 << 20,
                 maxEntries: 128,
@@ -406,7 +406,7 @@ export const TERMINALS = {
             },
             {
                 id: 'mem',
-                label: 'kernel19 — 256 MB of heap',
+                label: 'kernel19 · 256 MB',
                 kernel: 'assets/bin/kernel19.bin',
                 imgSize: 4 << 20,
                 maxEntries: 32,
@@ -428,7 +428,7 @@ export const TERMINALS = {
             },
             {
                 id: 'mem18',
-                label: 'kernel18 — the old ceiling, for comparison',
+                label: 'kernel18 · 13 MiB',
                 kernel: 'assets/bin/kernel18.bin',
                 imgSize: 4 << 20,
                 maxEntries: 32,

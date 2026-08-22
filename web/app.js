@@ -321,7 +321,8 @@ function select(num, push = true) {
         ['reads', st.lang_in],
         ['written in', st.lang_impl],
         ['built by', st.built_by],
-    ].map(([k, v]) => `<span>${k}: <b>${escapeHtml(v)}</b></span>`).join('');
+    ].map(([k, v]) => `<span title="${escapeHtml(`${k}: ${v}`)}">`
+        + `${k}: <b>${escapeHtml(v)}</b></span>`).join('');
 
     // 冒頭段落だけを見せ，全文はアコーディオンへ (プレイグラウンドを主役にする)
     const lines = st.summary_md.split('\n');
@@ -334,6 +335,8 @@ function select(num, push = true) {
 
     $('st-caps').innerHTML = st.new_capabilities
         .map((c) => `<span class="cap-chip">${inlineMd(c)}</span>`).join('');
+    $('acc-caps-sum').textContent =
+        `New in this generation (${st.new_capabilities.length})`;
     $('acc-trivia').hidden = !st.trivia;
     if (st.trivia) $('st-trivia').innerHTML = inlineMd(st.trivia);
 

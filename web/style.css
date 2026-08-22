@@ -35,34 +35,34 @@ a:hover { text-decoration: underline; }
 
 h1, h2, h3 { line-height: 1.3; }
 h3 {
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     color: var(--fg-dim);
     border-bottom: 1px solid var(--line);
-    padding-bottom: 4px;
-    margin-top: 1.8em;
+    padding-bottom: 3px;
+    margin-top: 1.1em;
 }
 
 /* ---- ヘッダ ---- */
 .site-head {
     background: linear-gradient(180deg, #1a1622, var(--bg));
     border-bottom: 1px solid var(--line);
-    padding: 40px 0 20px;
+    padding: 14px 0 10px;
 }
 .site-head h1 {
     margin: 0;
-    font-size: 2.4rem;
+    font-size: 1.8rem;
     letter-spacing: 0.06em;
     font-family: var(--mono);
 }
-.site-head h1::after { content: " 石"; color: var(--accent); font-size: 1.4rem; }
-.lede { max-width: 46em; color: var(--fg); margin: 8px 0 0; }
+.site-head h1::after { content: " 石"; color: var(--accent); font-size: 1.1rem; }
+.lede { max-width: 68em; color: var(--fg); margin: 6px 0 0; font-size: 0.92em; }
 .lede.sub { color: var(--fg-dim); font-size: 0.92em; }
 .lede strong { color: var(--accent); }
-.site-links { margin-top: 14px; font-size: 0.9em; color: var(--fg-dim); }
+.site-links { margin-top: 8px; font-size: 0.82em; color: var(--fg-dim); }
 .site-links a { margin-right: 16px; }
 
 /* ---- タイムライン ---- */
-.timeline { padding-top: 22px; user-select: none; }
+.timeline { padding-top: 12px; user-select: none; }
 .tl-phases { display: flex; gap: 2px; font-size: 0.72em; }
 .tl-phases span {
     text-align: center;
@@ -76,6 +76,7 @@ h3 {
 .tl-nodes { display: flex; gap: 2px; margin-top: 6px; }
 .tl-node {
     flex: 1;
+    min-width: 0;
     background: var(--bg2);
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -87,7 +88,13 @@ h3 {
     color: var(--fg-dim);
     transition: background 0.15s, color 0.15s;
 }
-.tl-node small { display: block; font-size: 0.85em; opacity: 0.7; }
+.tl-node small {
+    display: block;
+    font-size: 0.85em;
+    opacity: 0.7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .tl-node:hover { background: var(--bg3); color: var(--fg); }
 .tl-node.active {
     background: var(--bg3);
@@ -95,7 +102,7 @@ h3 {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
 }
-.tl-slider { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; }
+.tl-slider { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; }
 .tl-slider input[type="range"] { flex: 1; accent-color: var(--accent); }
 .tl-slider button {
     background: var(--bg3);
@@ -136,33 +143,40 @@ h3 {
 /* ---- Stage 見出し ---- */
 .stage-head {
     display: flex;
-    gap: 20px;
-    align-items: flex-start;
-    margin-top: 26px;
+    gap: 14px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    margin-top: 16px;
 }
+.stage-title { flex: 1 1 24em; min-width: 0; }
 .stage-num {
     font-family: var(--mono);
-    font-size: 2.6rem;
+    font-size: 1.7rem;
     color: var(--accent);
     line-height: 1;
-    min-width: 2.2em;
     text-align: right;
 }
-.stage-head h2 { margin: 0; font-size: 1.5rem; }
-.tagline { color: var(--fg-dim); margin: 4px 0 8px; }
-.meta-chips { display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.78em; }
+.stage-head h2 { margin: 0; font-size: 1.25rem; display: inline; }
+.tagline { color: var(--fg-dim); margin: 2px 0 0; font-size: 0.86em; }
+.meta-chips { display: flex; flex-wrap: wrap; gap: 5px; font-size: 0.72em; }
 .meta-chips span {
     background: var(--bg2);
     border: 1px solid var(--line);
     border-radius: 20px;
     padding: 1px 10px;
     color: var(--fg-dim);
+    max-width: 26em;
+    min-width: 0;           /* flex 項目の既定 (min-content) だと nowrap の全長になる */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .meta-chips b { color: var(--fg); font-weight: 600; }
 
 /* ---- 冒頭要約と要点チップ ---- */
-.lede-md { margin-top: 14px; max-width: 60em; }
-.cap-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.lede-md { margin-top: 10px; max-width: 68em; font-size: 0.95em; }
+.lede-md p { margin: 0.4em 0; }
+.cap-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
 .cap-chip {
     font-size: 0.78em;
     border: 1px solid #3d5c3d;
@@ -172,6 +186,8 @@ h3 {
     padding: 1px 12px;
 }
 .cap-chip code { background: none; padding: 0; color: inherit; }
+
+.acc-caps { margin-top: 8px; }
 
 /* ---- アコーディオン (詳細は畳んでおく) ---- */
 .accordions { margin: 1.6em 0; }
@@ -266,8 +282,8 @@ h3 {
 .sources .src-desc, .docs .doc-desc { color: var(--fg-dim); margin-left: 6px; }
 
 /* ---- プレイグラウンド ---- */
-.playground { margin: 2em 0 3em; }
-.pg-note { color: var(--fg-dim); font-size: 0.9em; }
+.playground { margin: 1.1em 0 2.4em; }
+.pg-note { color: var(--fg-dim); font-size: 0.85em; margin: 0.3em 0; }
 .pg-label { display: block; font-size: 0.8em; color: var(--fg-dim); margin-bottom: 4px; }
 #pg-input, #pg-stdin {
     width: 100%;
@@ -283,7 +299,13 @@ h3 {
 }
 #pg-input:focus, #pg-stdin:focus { outline: 1px solid var(--accent); }
 #pg-stdin-box { margin-top: 8px; font-size: 0.85em; color: var(--fg-dim); }
-.pg-run-row { display: flex; align-items: center; gap: 14px; margin: 12px 0; }
+.pg-run-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin: 8px 0 6px;
+}
 #pg-run {
     background: var(--accent);
     color: #1a1622;
@@ -356,10 +378,18 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 }
 
 /* ---- ターミナル ---- */
-.terminal { margin: 2em 0 3em; }
+.terminal { margin: 1.1em 0 2.4em; }
 .term-cols { display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
 @media (max-width: 800px) { .term-cols { grid-template-columns: 1fr; } }
-.term-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.term-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 14px;
+    margin: 6px 0 4px;
+}
+.term-bar { display: flex; align-items: center; gap: 12px; }
 #term-boot {
     background: var(--accent);
     color: #1a1622;
@@ -435,7 +465,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 .term-samples .ts-note { display: block; margin-left: 2px; }
 
 /* ---- 能力の推移 + 成果物の大きさ (世代セレクタの直下。縦は詰める) ---- */
-.tracks { padding-top: 14px; }
+.tracks { padding-top: 10px; }
 .tk-bar {
     display: flex;
     align-items: baseline;
@@ -506,7 +536,7 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
     font-size: 0.95em;
     line-height: 1;
     padding: 0;
-    height: 17px;
+    height: 15px;
     cursor: pointer;
 }
 .tk-cell:hover { border-color: var(--fg-dim); }
@@ -525,7 +555,7 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
 .tk-sizes { margin-bottom: 4px; }
 .tk-sizes .tk-label { color: var(--fg-dim); opacity: 0.75; }
 .tk-cell.tk-size {
-    height: 26px;
+    height: 22px;
     display: flex;
     align-items: flex-end;
     background: none;
@@ -544,7 +574,7 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
     opacity: 0.8;
     padding-right: 7px;
 }
-.tk-subrow .tk-cell { height: 14px; }
+.tk-subrow .tk-cell { height: 13px; }
 
 .tk-detail {
     margin-top: 7px;
@@ -567,11 +597,9 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
 
 /* ---- プレイグラウンドの見本選択 (適合台帳) ---- */
 .pg-picker {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 10px 0 12px;
+    gap: 6px;
     font-size: 0.82em;
     color: var(--fg-dim);
 }
@@ -585,11 +613,23 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
     font-size: 1em;
 }
 .pg-picker select:focus { outline: 1px solid var(--accent); }
-.pg-ledger { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; }
-.pg-ledger-note { color: var(--fg-dim); }
+.pg-ledger {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 3px 8px;
+    font-size: 0.8em;
+    min-height: 1.2em;
+    margin-bottom: 4px;
+}
+.pg-ledger-note {
+    color: var(--fg-dim);
+    min-width: 0;
+    overflow-wrap: anywhere;    /* 期待値は切れ目の無い長い列である */
+}
 
 /* ---- ターミナルの筋書き選択 ---- */
-.term-scenarios { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.term-scenarios { display: flex; flex-wrap: wrap; gap: 6px; }
 .term-scen {
     background: var(--bg2);
     color: var(--fg-dim);
@@ -606,7 +646,7 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
 }
-#term-blurb { margin: 0 0 10px; }
+#term-blurb { margin: 0 0 6px; }
 .term-files .tf-dir { color: var(--accent); }
 
 .site-foot {

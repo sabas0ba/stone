@@ -14,14 +14,11 @@
 <header class="site-head">
   <div class="wrap">
     <h1>stone</h1>
-    <p class="lede">From a hand-encoded <strong>256-byte</strong> seed to an assembler,
-      a C compiler, a libc and a homemade OS — one generation at a time.
-      Each stage is built <strong>only from the artifacts of the previous stage</strong>,
-      and the whole process is bit-reproducible.</p>
-    <p class="lede sub">Sixteen generations in, the chain compiles <strong>tcc</strong>, which
-      rebuilds itself on our own OS and comes out <strong>byte-identical</strong> to the tcc
-      that GCC builds. Every artifact on this page is a genuine chain product, and runs right
-      here in your browser on a RV32 emulator.</p>
+    <p class="lede">From a hand-encoded <strong>256-byte</strong> seed to an assembler, a C
+      compiler, a libc and a homemade OS — each generation built <strong>only from the artifacts
+      of the one before</strong>. Sixteen generations in, the chain's <strong>tcc</strong> rebuilds
+      itself on our own OS, <strong>byte-identical</strong> to the tcc GCC builds. Every artifact
+      here runs in your browser on a RV32 emulator.</p>
     <nav class="site-links">
       <a id="repo-link" href="#" rel="noopener">Repository</a>
       <span id="build-info"></span>
@@ -45,8 +42,8 @@
   <div class="tk-bar">
     <span class="tk-h">Capability growth</span>
     <span class="tk-legend"><b class="tk-compiler">compiler</b> ·
-      <b class="tk-runtime">runtime &amp; OS</b> — a lit block is what that generation added;
-      click one for its list, or a row name to split it by generation.</span>
+      <b class="tk-runtime">runtime &amp; OS</b> — click a block for its list, a row name to
+      split it by generation.</span>
     <span class="tk-size-now" id="tk-size-now"></span>
   </div>
   <div class="tk-grid" id="tk-grid"></div>
@@ -56,35 +53,38 @@
 <main class="wrap" id="main">
   <section class="stage-head">
     <div class="stage-num" id="st-num"></div>
-    <div>
+    <div class="stage-title">
       <h2 id="st-title"></h2>
       <p class="tagline" id="st-tagline"></p>
-      <div class="meta-chips" id="st-meta"></div>
     </div>
+    <div class="meta-chips" id="st-meta"></div>
   </section>
 
   <div class="md lede-md" id="st-lede"></div>
-  <div class="cap-chips" id="st-caps"></div>
+  <details class="acc acc-caps" id="acc-caps">
+    <summary id="acc-caps-sum">New in this generation</summary>
+    <div class="cap-chips" id="st-caps"></div>
+  </details>
 
   <section class="playground" id="playground">
     <h3>Playground</h3>
-    <p class="pg-note" id="pg-note"></p>
     <div id="pg-body">
-      <div class="pg-picker" id="pg-picker" hidden>
-        <label for="pg-sample">Conformance probe</label>
-        <select id="pg-sample"></select>
-        <span class="pg-ledger" id="pg-ledger"></span>
+      <div class="pg-run-row">
+        <button id="pg-run">Run</button>
+        <span class="pg-picker" id="pg-picker" hidden>
+          <label for="pg-sample">probe</label>
+          <select id="pg-sample"></select>
+        </span>
+        <span class="pg-steps" id="pg-steps"></span>
       </div>
+      <p class="pg-note" id="pg-note"></p>
+      <div class="pg-ledger" id="pg-ledger"></div>
       <label class="pg-label" id="pg-input-label" for="pg-input"></label>
-      <textarea id="pg-input" spellcheck="false" rows="14"></textarea>
+      <textarea id="pg-input" spellcheck="false" rows="12"></textarea>
       <details id="pg-stdin-box">
         <summary>Runtime input (stdin for the produced program)</summary>
         <textarea id="pg-stdin" spellcheck="false" rows="2"></textarea>
       </details>
-      <div class="pg-run-row">
-        <button id="pg-run">Run</button>
-        <span class="pg-steps" id="pg-steps"></span>
-      </div>
       <div id="pg-result" hidden>
         <div class="pg-out-head" id="pg-out-head"></div>
         <pre class="pg-out" id="pg-out"></pre>
@@ -99,15 +99,17 @@
 
   <section class="terminal" id="terminal" hidden>
     <h3>Terminal — a live session on the OS</h3>
-    <p class="pg-note" id="term-note"></p>
     <div class="term-cols">
       <div class="term-main">
-        <div class="term-scenarios" id="term-scenarios" hidden></div>
-        <p class="pg-note" id="term-blurb" hidden></p>
-        <div class="term-bar">
-          <button id="term-boot">Boot</button>
-          <span class="term-status" id="term-status">not booted</span>
+        <div class="term-top">
+          <div class="term-scenarios" id="term-scenarios" hidden></div>
+          <div class="term-bar">
+            <button id="term-boot">Boot</button>
+            <span class="term-status" id="term-status">not booted</span>
+          </div>
         </div>
+        <p class="pg-note" id="term-note"></p>
+        <p class="pg-note" id="term-blurb" hidden></p>
         <pre class="term-out" id="term-out" aria-live="polite"></pre>
         <div class="term-in-row">
           <span class="term-prompt">›</span>
