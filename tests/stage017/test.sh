@@ -39,6 +39,8 @@ mkroot() {
         cp "tmp/build/$_o.o" "$_r/lib/"
     done
     cp tmp/build/cc17 "$_r/cc"
+    cp tmp/build/cc18 "$_r/cc18"
+    cp tmp/build/ar17 "$_r/ar"
     cp tmp/build/sh2.bin "$_r/sh2"
 }
 
@@ -59,11 +61,11 @@ section "cc: 駆動役が我々の OS の上で C を翻訳する (docs/stage017
 # 平らな像を OS の実行形式へ組み直したものが ELF であること。
 # **ここを取り違えると spawn が ENOEXEC で落ちる**
 ok=0
-for f in pp16cmd cc15pcmd ld16cmd cc17; do
+for f in pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17; do
     [ "$(od -An -c -N 4 "tmp/build/$f" | tr -d ' ')" = '177ELF' ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: pp16cmd / cc15pcmd / ld16cmd / cc17 が ELF である"
+report $? "build: pp16cmd / cc15pcmd / ld16cmd / cc17 / cc18 / ar17 が ELF である"
 
 r=$out/root
 mkroot "$r"
@@ -140,6 +142,85 @@ EOF
     # conftest を実際に組んで走らせ，その答えを読んだということである
     grep -q '^CC_NAME=unknown$' "$out/cfg.out"
     report $? "run: CC_NAME が unknown (conftest を実際に走らせた証拠)"
+fi
+
+section "第 2 部: 複数の翻訳単位と書庫 (docs/stage017-cc.md 7 章)"
+
+# **我々の OS が，複数のファイルからなるプログラムを書庫経由でビルドする** (7.6)。
+#
+#   cc18 -c で 2 つの .c を .o にし
+#   ar rcs で書庫にまとめ
+#   cc18 が main.c + 書庫 をリンクする
+#
+# 書庫の員 (addx / mulx / lenx / catx) と /lib の員 (printf / strcat) の
+# **両方が引けること**を見る。-I は /include に無いヘッダを拾わせ，
+# -D は VERSION を外から与える (定義が無ければ翻訳が落ちるので，
+# -D が効いていることが結果に出る)
+r=$out/mroot
+mkroot "$r"
+mkdir -p "$r/inc"
+cp tests/stage017/user/multi.c tests/stage017/user/mathx.c \
+   tests/stage017/user/strx.c "$r/"
+cp tests/stage017/user/inc/*.h "$r/inc/"
+cat > "$r/go.sh" <<'EOF'
+cc18 -c -I inc mathx.c -o mathx.o
+echo "compile-mathx $?"
+cc18 -c -I inc strx.c -o strx.o
+echo "compile-strx $?"
+ar rcs libx.a mathx.o strx.o
+echo "ar-rcs $?"
+ar t libx.a
+cc18 -I inc -DVERSION=7 -o multi multi.c libx.a
+echo "link $?"
+multi
+echo "run $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot "$r" "$out/multi.out"
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/multi.txt "$out/multi.out" \
+    > "$out/multi.diff"
+report $? "run: cc18 と ar が複数の翻訳単位を書庫経由でビルドする"
+[ -s "$out/multi.diff" ] && sed -n '4,$p' "$out/multi.diff"
+
+# **期待値の中の「プログラムの出力」はホストの cc でも同じはずである。**
+# 出さないなら，我々の処理系か期待値のどちらかが間違っている
+if command -v gcc > /dev/null 2>&1; then
+    ( cd "$r" && gcc -w -I inc -DVERSION=7 -o "$OLDPWD/$out/multi.host" \
+        multi.c mathx.c strx.c ) 2> /dev/null \
+        && "$out/multi.host" > "$out/multi.host.out"
+    r2=$?
+    sed -n '/^link 0$/,/^run 0$/p' tests/stage017/expected/multi.txt \
+        | sed '1d;$d' > "$out/multi.want"
+    [ "$r2" -eq 0 ] && diff -q "$out/multi.want" "$out/multi.host.out" > /dev/null
+    report $? "ref: multi.c の期待値がホストの cc の出力と一致する"
+else
+    echo "   skip: ホストに gcc が無い (期待値の裏取りができない)"
+fi
+
+# **我々の OS が作った書庫を，本物の ar が読めるか** (7.3)。
+# 相互運用を見る。バイト一致は狙わない
+sh tools/sfs2.sh unpack "$out/img" "$out/back" > /dev/null 2>&1
+r2=$?
+if [ "$r2" -ne 0 ] || [ ! -f "$out/back/libx.a" ]; then
+    report 1 "interop: OS が作った書庫を取り出せる"
+elif ! command -v ar > /dev/null 2>&1; then
+    echo "   skip: host に ar が無い (相互運用を確かめられない)"
+else
+    ar t "$out/back/libx.a" > "$out/hostar.t" 2>&1
+    printf 'mathx.o\nstrx.o\n' > "$out/hostar.want"
+    diff -q "$out/hostar.want" "$out/hostar.t" > /dev/null
+    report $? "interop: 本物の ar t が我々の書庫の並びを列挙する"
+
+    mkdir -p "$out/xx" && (cd "$out/xx" && rm -f ./*.o && ar x "../back/libx.a")
+    cmp -s "$out/xx/mathx.o" "$out/back/mathx.o" \
+        && cmp -s "$out/xx/strx.o" "$out/back/strx.o"
+    report $? "interop: 本物の ar x が取り出した員が元とバイト一致する"
+
+    # **索引を書いていないことを確かめる** (7.4)。書いたことにして
+    # いないか，こちらから見にいく
+    ! ar t "$out/back/libx.a" 2> /dev/null | grep -q '^/'
+    report $? "spec: 符号の索引は書いていない (7.4 のとおり)"
 fi
 
 summary
