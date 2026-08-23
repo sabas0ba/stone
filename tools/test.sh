@@ -150,10 +150,27 @@ for t in tests/stage*/test.sh; do
     run_list+=("$s")
 done
 
+# **Stage 1 つあたりの上限** (docs/dev-notes.md 1.8)。QEMU の側にも
+# 上限を置いてあるが (tools/run-qemu.sh)，podman ごと固まる形もあるので
+# 外側からも掛ける。0 で外せる
+stage_to=${STONE_TEST_TIMEOUT:-1800}
+runstage() {
+    if [ "$stage_to" = 0 ] || ! command -v timeout > /dev/null 2>&1; then
+        bash "tests/$1/test.sh"
+        return $?
+    fi
+    timeout -k 10 "$stage_to" bash "tests/$1/test.sh"
+    _r=$?
+    if [ "$_r" -eq 124 ]; then
+        echo "FAIL timeout: tests/$1 が ${stage_to} 秒を超えた (STONE_TEST_TIMEOUT)"
+    fi
+    return $_r
+}
+
 if [ -n "${STONE_TEST_SERIAL:-}" ]; then
     for s in "${run_list[@]}"; do
         echo "== tests/$s =="
-        bash "tests/$s/test.sh"
+        runstage "$s"
         rc=$?
         overall_fail=$((overall_fail + rc))
         [ "$rc" -eq 0 ] && teststamp_key "$s" > "tmp/test/$s.stamp"
@@ -171,7 +188,7 @@ else
         j=0
         while [ "$j" -lt "$maxjobs" ] && [ "$i" -lt "$n" ]; do
             s=${run_list[$i]}
-            bash "tests/$s/test.sh" > "tmp/test-$s.log" 2>&1 &
+            runstage "$s" > "tmp/test-$s.log" 2>&1 &
             batch_names+=("$s")
             batch_pids+=("$!")
             i=$((i + 1))
