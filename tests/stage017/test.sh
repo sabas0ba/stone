@@ -418,4 +418,136 @@ if [ -x "$out/mkhost" ]; then
     report $? "spec: 未実装の関数は空に展開せず落ちる (9.5)"
 fi
 
+section "第 4 部の 1: sfs3 が時刻を持つ (docs/stage017-cc.md 11 章)"
+
+# ファイルの mtime を "上位語 下位語" の形で出す。**期待値は手で書かず
+# ここで作る** —— 手で書いた値は，ホストと OS の両方が間違っていても
+# 気づけないうえ，実際に 1 度書き間違えた
+hilo() {
+    _v=$(stat -c '%.9Y' "$1")
+    _s=${_v%.*}; _f=${_v#*.}
+    _f=$(printf '%s' "$_f" | sed 's/^0*//')
+    [ -n "$_f" ] || _f=0
+    _ns=$((_s * 1000000000 + _f))
+    printf '%s %s' $((_ns / 4294967296)) $((_ns % 4294967296))
+}
+
+# 根を sfs3 で詰めて kernel24 で走らせる。$1=根 $2=出力 $3=大きさ $4=件数
+runroot3() {
+    sh tools/sfs3.sh pack "$1" "$out/i3" "${3:-4194304}" "${4:-128}" \
+            > /dev/null \
+        && rm -f "$out/r3" \
+        && dd if=/dev/null of="$out/r3" bs=1 seek=268435456 2> /dev/null \
+        && dd if="$out/i3" of="$out/r3" bs=64K oflag=seek_bytes \
+            seek=67108864 conv=notrunc 2> /dev/null \
+        && STONE_QEMU_RAMFILE="$out/r3" STONE_QEMU_RAM=256M \
+            sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+            > "$2" 2>&1
+}
+
+# **第 4 部の 1 の完了条件である。**
+#
+# ホストが既知の mtime を与えたファイルを sfs3 で詰め，kernel24 の上で
+# stamp に読ませて，**ホストが与えた値とナノ秒まで一致すること**を見る。
+#
+# 時刻はわざと「ありえない過去」に置く。**今の時刻をそのまま使うと，
+# カーネルが表から読んだのか，カーネルが立て直したのか区別が付かない**
+r=$out/troot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/d"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tmp/build/stamp "$r/stamp"
+printf 'hello\n'   > "$r/a.txt"        # 6 バイト
+printf 'worldly\n' > "$r/d/b.txt"      # 8 バイト
+: > "$r/zero"                          # 0 バイト
+touch -d '@1700000000.123456789' "$r/a.txt"
+touch -d '@1600000123.000000001' "$r/d/b.txt"
+touch -d '@1500000000.999999999' "$r/zero"
+touch -d '@1400000000.500000000' "$r/d"
+cat > "$r/go.sh" <<'EOF'
+stamp a.txt d/b.txt zero d
+echo "stamp $?"
+stamp nosuch
+echo "missing $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+
+{
+    printf 'f 6 %s a.txt\n' "$(hilo "$r/a.txt")"
+    printf 'f 8 %s d/b.txt\n' "$(hilo "$r/d/b.txt")"
+    printf 'f 0 %s zero\n' "$(hilo "$r/zero")"
+    printf 'd 0 %s d\n' "$(hilo "$r/d")"
+    printf 'stamp 0\n'
+    printf '? nosuch\n'
+    printf 'missing 1\n'
+} > "$out/stamp.want"
+
+runroot3 "$r" "$out/stamp.out"
+rc=$?
+[ "$rc" -eq 0 ] && diff -u "$out/stamp.want" "$out/stamp.out" > "$out/stamp.diff"
+report $? "run: ホストが詰めた時刻を OS が読み，ナノ秒まで一致する"
+[ -s "$out/stamp.diff" ] && sed -n '4,$p' "$out/stamp.diff"
+
+# **OS が書いたファイルには今の時刻が立つこと。** 読めるだけでは
+# 足りない —— 立てる側が働いていなければ差分ビルドはできない
+r=$out/wroot
+rm -rf "$r"
+mkdir -p "$r/bin"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tmp/build/stamp "$r/stamp"
+printf 'old\n' > "$r/old.txt"
+touch -d '@1500000000.000000000' "$r/old.txt"
+cat > "$r/go.sh" <<'EOF'
+echo made > new.txt
+stamp old.txt new.txt
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+oldwant="f 4 $(hilo "$r/old.txt") old.txt"
+before=$(date +%s)
+runroot3 "$r" "$out/wstamp.out"
+rc=$?
+after=$(date +%s)
+
+[ "$rc" -eq 0 ] && grep -qxF "$oldwant" "$out/wstamp.out"
+report $? "run: 触っていないファイルの時刻は変わらない"
+[ "$rc" -eq 0 ] && grep -qxF "$oldwant" "$out/wstamp.out" \
+    || { echo "   want: $oldwant"; sed -n '1,4p' "$out/wstamp.out"; }
+
+# 新しいほうは**この実行の間の時刻**であること。秒へ直して
+# before <= t <= after を見る (前後 2 秒の余裕を取る)
+newline=$(grep ' new.txt$' "$out/wstamp.out" 2> /dev/null || true)
+if [ -n "$newline" ]; then
+    hi=$(echo "$newline" | cut -d' ' -f3); lo=$(echo "$newline" | cut -d' ' -f4)
+    sec=$(( (hi * 4294967296 + lo) / 1000000000 ))
+    [ "$sec" -ge $((before - 2)) ] && [ "$sec" -le $((after + 2)) ]
+    report $? "run: OS が書いたファイルに今の時刻が立つ"
+    [ "$sec" -ge $((before - 2)) ] && [ "$sec" -le $((after + 2)) ] \
+        || echo "   before=$before sec=$sec after=$after"
+else
+    report 1 "run: OS が書いたファイルに今の時刻が立つ"
+fi
+
+# ホスト側の詰め直し。**中身だけ見ていると 11 章で踏んだ誤りを見落とす**
+s3=$out/s3rt
+rm -rf "$s3" "$s3.back"
+mkdir -p "$s3/sub"
+printf 'x\n' > "$s3/f1"; printf 'yy\n' > "$s3/sub/f2"
+touch -d '@1234567890.111111111' "$s3/f1"
+touch -d '@1111111111.222222222' "$s3/sub/f2"
+touch -d '@1000000000.333333333' "$s3/sub"
+sh tools/sfs3.sh pack "$s3" "$out/rt.img" 262144 32 > /dev/null 2>&1 \
+    && sh tools/sfs3.sh unpack "$out/rt.img" "$s3.back" > /dev/null 2>&1
+r2=$?
+[ "$r2" -eq 0 ] && diff -r "$s3" "$s3.back" > /dev/null 2>&1
+report $? "roundtrip: sfs3 に詰めて展開すると中身が元と一致する"
+ok=0
+for f in f1 sub/f2 sub; do
+    [ "$(stat -c '%.9Y' "$s3/$f" 2> /dev/null)" \
+      = "$(stat -c '%.9Y' "$s3.back/$f" 2> /dev/null)" ] || ok=1
+done
+[ "$r2" -eq 0 ] && [ "$ok" -eq 0 ]
+report $? "roundtrip: 時刻もナノ秒まで一致する (ディレクトリを含む)"
+
 summary
