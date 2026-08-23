@@ -556,4 +556,89 @@ done
 [ "$r2" -eq 0 ] && [ "$ok" -eq 0 ]
 report $? "roundtrip: 時刻もナノ秒まで一致する (ディレクトリを含む)"
 
+section "第 4 部の 2: mk が差分ビルドする (docs/stage017-cc.md 11.6)"
+
+# **第 4 部の 2 の完了条件である。**
+#
+# 我々の OS の上で mk を 2 度走らせ，2 度目が何も作らないこと。そのあと
+# 依存を 1 つだけ触って 3 度目を走らせ，**触ったものに繋がる分だけ**が
+# 作り直されること。
+#
+# 触るのに使うのは sh2 の `>` である (OS の中で時刻を立て直す)。
+# ホストで触ってから詰め直すと，**カーネルが時刻を立てているのか
+# ホストが立てた時刻を読んでいるだけなのか区別が付かない**
+r=$out/iroot
+rm -rf "$r"
+mkdir -p "$r/bin"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tmp/build/mk18 "$r/mk"
+printf 'A\n' > "$r/a.src"
+printf 'B\n' > "$r/b.src"
+touch -d '@1500000000.000000000' "$r/a.src" "$r/b.src"
+cat > "$r/Makefile" <<'MK'
+all: prog
+
+%.cp: %.src
+	cat $< > $@
+
+prog: a.cp b.cp
+	cat $^ > $@
+MK
+cat > "$r/go.sh" <<'EOF'
+echo "--1--"
+mk
+echo "--2--"
+mk
+echo "--3--"
+echo C > b.src
+mk
+echo "--4--"
+mk -B
+echo "--end--"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/inc.out"
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/inc.txt "$out/inc.out" \
+    > "$out/inc.diff"
+report $? "run: 2 度目は作らず，触った依存に繋がる分だけ作り直す"
+[ -s "$out/inc.diff" ] && sed -n '4,$p' "$out/inc.diff"
+
+# **同じ筋道を本物の make でも辿ること。** 我々の判定だけが正しく
+# 見えていても意味が無い
+if command -v make > /dev/null 2>&1 && command -v gcc > /dev/null 2>&1; then
+    gcc -w -o "$out/mk18host" tests/stage017/host/mk18host.c 2> /dev/null
+    r2=$?
+    d=$out/incdry
+    for who in ref got; do
+        rm -rf "$d"
+        mkdir -p "$d"
+        cp "$r/Makefile" "$d/Makefile"
+        printf 'A\n' > "$d/a.src"; printf 'B\n' > "$d/b.src"
+        {
+            if [ "$who" = ref ]; then
+                ( cd "$d" && make --no-print-directory )
+                echo "--2--"
+                ( cd "$d" && make --no-print-directory )
+                echo "--3--"
+                sleep 1; printf 'C\n' > "$d/b.src"
+                ( cd "$d" && make --no-print-directory )
+            else
+                ( cd "$d" && "$OLDPWD/$out/mk18host" )
+                echo "--2--"
+                ( cd "$d" && "$OLDPWD/$out/mk18host" )
+                echo "--3--"
+                sleep 1; printf 'C\n' > "$d/b.src"
+                ( cd "$d" && "$OLDPWD/$out/mk18host" )
+            fi
+        } 2>&1 | grep -v "^make: \|^mk: " > "$out/inc.$who"
+    done
+    [ "$r2" -eq 0 ] && diff -q "$out/inc.ref" "$out/inc.got" > /dev/null
+    report $? "ref: 本物の make と，走る命令の並びが 3 回とも一致する"
+    [ "$r2" -eq 0 ] && diff -u "$out/inc.ref" "$out/inc.got" | sed -n '4,$p'
+else
+    echo "   skip: host に make か gcc が無い (裏取りができない)"
+fi
+
 summary
