@@ -41,17 +41,19 @@ F_USED=1
 F_DIR=2
 
 # ファイルの mtime をナノ秒で取る。**%.9Y は GNU stat の拡張**なので，
-# 無ければ秒だけ取って 1e9 倍する (その旨を黙らない)
+# 無ければ秒だけ取って 1e9 倍する
+#
+# 小数部の頭の 0 は自分で落とす。`10#` は bash の拡張で，このスクリプトを
+# 読む sh (dash) では算術の誤りになる
 mtime_ns() {
     _v=$(stat -c '%.9Y' "$1" 2> /dev/null || true)
     case "$_v" in
     *.*)
         _s=${_v%.*}; _f=${_v#*.}
-        # 小数部を 9 桁へ揃える
         while [ ${#_f} -lt 9 ]; do _f="${_f}0"; done
-        _f=$(printf '%s' "$_f" | cut -c1-9)
-        # 先頭の 0 を落として 10 進と読ませる
-        echo $(( _s * 1000000000 + 10#$_f ))
+        _f=$(printf '%s' "$_f" | cut -c1-9 | sed 's/^0*//')
+        [ -n "$_f" ] || _f=0
+        echo $(( _s * 1000000000 + _f ))
         ;;
     *)
         _s=$(stat -c '%Y' "$1") || die "cannot stat: $1"
@@ -208,12 +210,18 @@ unpack() {
             touch -d "$(stamp "$ns")" "$dir/$path"
         fi
     done
-    # 深い順に当てると親を触らずに済む
+    # 深い順に当てると親を触らずに済む。
+    #
+    # **深さを数えるのに $1 を書き換えてはいけない。** gsub は対象を
+    # その場で書き換え，awk は $1 を触ると $0 を OFS (既定は空白) で
+    # 組み立て直す。区切りの TAB が空白に化けて，経路と時刻が 1 つの
+    # 語になり，"sub 1787501759947168325" という名前のファイルができた
     if [ -s "$dirs" ]; then
-        awk -F'\t' '{print gsub(/\//, "/", $1) "\t" $0}' "$dirs" \
+        awk -F'\t' '{ n = $1; d = gsub(/\//, "/", n); print d "\t" $0 }' "$dirs" \
             | LC_ALL=C sort -rn | cut -f2- \
             | while IFS="$(printf '\t')" read -r path ns; do
-                  touch -d "$(stamp "$ns")" "$dir/$path"
+                  touch -d "$(stamp "$ns")" "$dir/$path" \
+                      || die "cannot set time on: $path"
               done
     fi
     rm -f "$dirs"
