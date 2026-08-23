@@ -433,14 +433,20 @@ hilo() {
 }
 
 # 根を sfs3 で詰めて kernel24 で走らせる。$1=根 $2=出力 $3=大きさ $4=件数
+#
+# **記憶は 512M でなければならない。** kernel19 以降はユーザの
+# フレームスタックの上端を USP = 0x9700_0000 に置いており，256M
+# (0x8000_0000〜0x9000_0000) では届かない。届かないと最初の spawn が
+# 積む引数の書込みでストアアクセス例外 (mcause 7) になり，
+# **何も出さずに落ちる** (docs/stage016-os.md 8 章)
 runroot3() {
     sh tools/sfs3.sh pack "$1" "$out/i3" "${3:-4194304}" "${4:-128}" \
             > /dev/null \
         && rm -f "$out/r3" \
-        && dd if=/dev/null of="$out/r3" bs=1 seek=268435456 2> /dev/null \
+        && dd if=/dev/null of="$out/r3" bs=1 seek=536870912 2> /dev/null \
         && dd if="$out/i3" of="$out/r3" bs=64K oflag=seek_bytes \
             seek=67108864 conv=notrunc 2> /dev/null \
-        && STONE_QEMU_RAMFILE="$out/r3" STONE_QEMU_RAM=256M \
+        && STONE_QEMU_RAMFILE="$out/r3" STONE_QEMU_RAM=512M \
             sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
             > "$2" 2>&1
 }
