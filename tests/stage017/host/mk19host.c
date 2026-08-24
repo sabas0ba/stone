@@ -72,15 +72,18 @@ static int spawn2(char *path, char **argv, char *in, char *out, char *err);
 #undef stat
 #undef newer
 
+/* **out を無視してはいけない。** $(shell ...) は出力をファイルへ
+ * 受けるので，捨てると読む側が空を掴む (mk18 の殻は捨てていたが，
+ * mk18 は $(shell) を持たなかったので表に出なかった) */
 static int spawn2(char *path, char **argv, char *in, char *out, char *err) {
   char cmd[1024];
   int r;
   (void)path;
-  (void)in;
-  (void)out;
   (void)err;
   strcpy(cmd, "sh ");
   strcat(cmd, argv[1]);
+  if (in) { strcat(cmd, " < "); strcat(cmd, in); }
+  if (out) { strcat(cmd, " > "); strcat(cmd, out); }
   r = system(cmd);
   if (r == -1) return 127;
   return (r >> 8) & 0xff;
