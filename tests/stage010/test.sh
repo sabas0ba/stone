@@ -35,6 +35,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s10
+stable_dir=tmp/s10/stable
 
 cc=tmp/build/cc.bin        # 最新世代 (= cc10l.bin)
 cck=tmp/build/cc10k.bin    # 補遺
@@ -62,13 +63,20 @@ link() {
     { cat "$@"; printf '\0'; } | sh tools/env.sh qemu "$ld" > "$out"
 }
 
-# ある世代が自分自身を再生成することを見る (B2 == B3)
+# ある世代が自分自身を再生成することを見る (B2 == B3)。
+#
+# **落ちたときに「中身が違う」のか「実行が再現していない」のかを
+# 分ける** (docs/dev-notes.md 1.6)。この検査は CI で実際に揺らいだ
 fixpoint() {
     gen=$1
     bin=$2
     srcfile=$3
-    { cat "$srcfile"; printf '\004'; } | sh tools/env.sh qemu "$bin" > "tmp/s10/$gen.o" \
-        && link "tmp/s10/$gen.bin" "tmp/s10/$gen.o" && cmp -s "tmp/s10/$gen.bin" "$bin"
+    fpgen() {
+        { cat "$srcfile"; printf '\004'; } \
+            | sh tools/env.sh qemu "$bin" > "tmp/s10/$gen.o" \
+            && link "$1" "tmp/s10/$gen.o"
+    }
+    stable_cmp "fixpoint($gen)" fpgen "$bin"
     report $? "fixpoint: $gen が自分自身を再生成する"
 }
 

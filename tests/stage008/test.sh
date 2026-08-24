@@ -14,6 +14,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s8
+stable_dir=tmp/s8/stable
 
 cc=tmp/build/cc8.bin
 ld=tmp/build/ld.bin
@@ -45,12 +46,19 @@ done
 report $? "build: cc8.bin / ld.bin の SHA-256 が各 .md 記載値と一致"
 
 # 2. 固定点
-compile stage008/cc.sc tmp/s8/cc2.o && link tmp/s8/cc2.bin tmp/s8/cc2.o \
-    && cmp -s tmp/s8/cc2.bin "$cc"
+#
+# **落ちたときに「中身が違う」のか「実行が再現していない」のかを
+# 分ける** (docs/dev-notes.md 1.6)。この検査は CI で実際に揺らいだ
+gencc2() {
+    compile stage008/cc.sc tmp/s8/cc2.o && link "$1" tmp/s8/cc2.o
+}
+stable_cmp "fixpoint(cc8)" gencc2 "$cc"
 report $? "fixpoint: cc8 が自分自身を再生成する"
 
-compile stage008/ld.sc tmp/s8/ld2.o && link tmp/s8/ld2.bin tmp/s8/ld2.o \
-    && cmp -s tmp/s8/ld2.bin "$ld"
+genld2() {
+    compile stage008/ld.sc tmp/s8/ld2.o && link "$1" tmp/s8/ld2.o
+}
+stable_cmp "fixpoint(ld)" genld2 "$ld"
 report $? "fixpoint: ld が自分自身を再生成する"
 
 # 3. 分割コンパイル (split-a が split-b の関数を，split-b が文字列と putc を使う)

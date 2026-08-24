@@ -63,6 +63,95 @@ summary() {
 # 個別にこれを呼ぶと，通し実行ではブートストラップ鎖を Stage の数だけ
 # 作り直すことになる (実測で CI の 2 割ほどがこの重複だった)。
 # 単体で走らせたときは従来どおりその Stage までをビルドする。
+# ---- 一致の検査: 「中身が違う」と「実行が再現していない」を分ける ----
+#
+# **同じ入力・同じ道具でも答が揺らぐ環境がある** (docs/dev-notes.md 1.6)。
+# ビット一致の検査が落ちたとき，落ちたのが
+#
+#   * 中身が違う (退行)          -> 直すべきもの。すぐ出す
+#   * 実行が再現していない (環境) -> 比較の前提そのものが崩れている
+#
+# のどちらなのかを**区別して出す**。緑に見せるための再試行ではない ——
+# 区別が付かないまま赤にすると，本物の退行を見落とす。逆に，区別が
+# 付かないまま黙って通すのはもっと悪い。
+#
+#   stable_cmp <名前> <生成する関数> <期待するファイル>
+#
+# <生成する関数> は出力先を 1 つ引数に取り，そこへ作る。**同じものを
+# 2 度作らせて自己再現を見る**のが要点である。自己再現するなら
+# やり直しても同じなので，その場で退行として出す (やり直しに QEMU を
+# 3 回使うのは無駄である。1.6 の元の書き方はここで回していた)。
+#
+# 作業場は stable_dir に置く。**Stage ごとに分ける** —— 検査は
+# 並列に走るので，共有するとお互いの中間結果を踏む
+stable_dir=${stable_dir:-tmp/stable}
+
+stable_cmp() {
+    _sname=$1
+    _sgen=$2
+    _swant=$3
+    mkdir -p "$stable_dir"
+    _sn=0
+    while :; do
+        rm -f "$stable_dir/a"
+        "$_sgen" "$stable_dir/a"
+        _src1=$?
+        if [ "$_src1" -eq 0 ] && cmp -s "$stable_dir/a" "$_swant"; then
+            return 0
+        fi
+
+        # **同じ道具・同じ入力でもう一度。** ここで揃えば環境ではない
+        rm -f "$stable_dir/b"
+        "$_sgen" "$stable_dir/b" > /dev/null 2>&1
+        _src2=$?
+
+        # 3 通りある。**混ぜてはいけない**
+        #   生成が落ちた       -> 作れていない。中身の比較以前である
+        #   作れたが中身が違う -> 退行
+        #   2 度の答が違う     -> 実行が再現していない (環境)
+        if [ "$_src1" -ne 0 ]; then
+            if [ "$_src2" -ne 0 ]; then _skind=died; else _skind=flaky; fi
+        elif cmp -s "$stable_dir/a" "$stable_dir/b"; then
+            _skind=differ
+        else
+            _skind=flaky
+        fi
+
+        _sn=$((_sn + 1))
+        if [ "$_skind" != flaky ] || [ "$_sn" -ge 3 ]; then
+            echo "   $_sname: 生成 rc=$_src1" \
+                 "$(stable_id "$stable_dir/a") / 期待 $(stable_id "$_swant")"
+            case $_skind in
+            died)
+                echo "     2 度とも落ちた (rc=$_src1 / rc=$_src2)。" \
+                     "**そもそも作れていない**。中身の食い違いではない"
+                ;;
+            differ)
+                echo "     2 度作らせても同じものが出た。**実行は再現している**。"
+                echo "     したがってこれは環境ではなく，中身が違う (退行である)"
+                ;;
+            *)
+                echo "     2 度作らせると違うものが出た" \
+                     "(rc=$_src2 $(stable_id "$stable_dir/b"))。"
+                echo "     **実行が再現していない。比較の前提が崩れている**"
+                echo "     (docs/dev-notes.md 1.6)。中身の食い違いとは別の問題である"
+                ;;
+            esac
+            return 1
+        fi
+        warned "$_sname: $_sn 回目で食い違った (実行が再現していない)。やり直す"
+    done
+}
+
+# 素性を 1 行で。無いなら無いと言う (黙って空を返さない)
+stable_id() {
+    if [ -e "$1" ]; then
+        echo "($(wc -c < "$1") バイト $(sha256sum "$1" | cut -c1-16))"
+    else
+        echo "(**無い**)"
+    fi
+}
+
 ensure_build() {
     [ -n "${STONE_PREBUILT:-}" ] && return 0
     sh tools/build.sh "$1" > /dev/null 2>&1

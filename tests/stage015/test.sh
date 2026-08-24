@@ -9,6 +9,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s15
+stable_dir=tmp/s15/stable
 
 cc=tmp/build/cc15p.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
@@ -157,27 +158,30 @@ rm -rf tmp/s15/root
 mkdir -p tmp/s15/root
 cp tmp/s15/lib15 tmp/s15/root/lib15
 printf 'lib15\n' > tmp/s15/root/boot
-sh tools/sfs.sh pack tmp/s15/root tmp/s15/fs.img 4194304 128 > /dev/null \
-    && rm -f tmp/s15/ram \
-    && dd if=/dev/null of=tmp/s15/ram bs=1 seek=134217728 2> /dev/null \
-    && dd if=tmp/s15/fs.img of=tmp/s15/ram bs=64K oflag=seek_bytes \
-        seek=67108864 conv=notrunc 2> /dev/null \
-    && STONE_QEMU_RAMFILE=tmp/s15/ram sh tools/env.sh qemu \
-        tmp/build/kernel15.bin < /dev/null > tmp/s15/lib15.out 2>&1
-r=$?
-[ "$r" -eq 0 ] && diff -q tmp/s15/lib15.out tests/stage015/expected/lib15.txt > /dev/null
+sh tools/sfs.sh pack tmp/s15/root tmp/s15/fs.img 4194304 128 > /dev/null
+packrc=$?
+
+# **落ちたときに「出力が違う」のか「実行が再現していない」のかを
+# 分ける** (docs/dev-notes.md 1.6)。この 2 件は CI で実際に揺らいだ。
+# 像は毎回作り直す —— 走らせた側が共有領域を書き換えるので，
+# 使い回すと 2 度目の入力が 1 度目と違ってしまう
+runlib15() {
+    _rk=$1; _ro=$2
+    rm -f "tmp/s15/ram-$_rk"
+    dd if=/dev/null of="tmp/s15/ram-$_rk" bs=1 seek=134217728 2> /dev/null \
+        && dd if=tmp/s15/fs.img of="tmp/s15/ram-$_rk" bs=64K oflag=seek_bytes \
+            seek=67108864 conv=notrunc 2> /dev/null \
+        && STONE_QEMU_RAMFILE="tmp/s15/ram-$_rk" sh tools/env.sh qemu \
+            "tmp/build/$_rk.bin" < /dev/null > "$_ro" 2>&1
+}
+genk15() { [ "$packrc" -eq 0 ] && runlib15 kernel15 "$1"; }
+stable_cmp "lib15(kernel15)" genk15 tests/stage015/expected/lib15.txt
 report $? "run: printf %llu / snprintf / strto / sscanf / setjmp / lseek が kernel15 で通る"
 
 # kernel16 (PT_LOAD を全部載せる。第 6 部) が従来の 'E' 形式をこれまで
 # どおり読めることを見る。像は上と同じものを使う
-rm -f tmp/s15/ram16
-dd if=/dev/null of=tmp/s15/ram16 bs=1 seek=134217728 2> /dev/null \
-    && dd if=tmp/s15/fs.img of=tmp/s15/ram16 bs=64K oflag=seek_bytes \
-        seek=67108864 conv=notrunc 2> /dev/null \
-    && STONE_QEMU_RAMFILE=tmp/s15/ram16 sh tools/env.sh qemu \
-        tmp/build/kernel16.bin < /dev/null > tmp/s15/lib15-k16.out 2>&1
-r=$?
-[ "$r" -eq 0 ] && diff -q tmp/s15/lib15-k16.out tests/stage015/expected/lib15.txt > /dev/null
+genk16() { [ "$packrc" -eq 0 ] && runlib15 kernel16 "$1"; }
+stable_cmp "lib15(kernel16)" genk16 tests/stage015/expected/lib15.txt
 report $? "run: 同じ像が kernel16 でも同じ出力になる ('E' 形式の後方互換)"
 
 # U モードの浮動小数点 (ld16 の 'K' 前置部が mstatus.FS を立てる)。
