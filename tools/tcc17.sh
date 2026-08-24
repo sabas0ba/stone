@@ -5,6 +5,7 @@
 #   tcc17.sh unit <名前>   翻訳単位を 1 本訳し，.o を tmp/s17/obj へ出す
 #   tcc17.sh all           11 本すべて (既にできているものは飛ばす)
 #   tcc17.sh link          libtcc.a にまとめ tcc に繋ぐ (これも OS の上で)
+#   tcc17.sh check         出来た tcc に実際に翻訳させる
 #   tcc17.sh clean         tmp/s17 を消す
 #
 # ---- なぜ 1 本ずつ別の起動にするか ----
@@ -64,6 +65,10 @@ do_root() {
         [ -f "$f" ] && cp "$f" "$root/t/"
     done
     cp tmp/tcc/build/tccdefs_.h "$root/t/"
+    # **tcc 自身の組み込みヘッダ。** 出来た tcc が翻訳するときに
+    # CONFIG_TCCDIR/include から読む (config-stone.h は "/" なので
+    # /include)。無いと "include file 'tccdefs.h' not found" で止まる
+    cp "$src/include/tccdefs.h" "$root/include/"
     cp stage015/tcc/config-stone.h "$root/t/config.h"
     echo "root: $(find "$root" -type f | wc -l) ファイル / $(du -sb "$root" | cut -f1) バイト" >&2
 }
@@ -170,9 +175,43 @@ do_link() {
     fi
 }
 
+# 出来た tcc に実際に翻訳させる。**-v が通っただけでは動くと言えない。**
+do_check() {
+    [ -s "$out/tcc" ] || { echo "error: $out/tcc が無い (先に link)" >&2; exit 1; }
+    do_root
+    cp "$out/tcc" "$root/tcc"
+    printf 'int main(void) { return 7; }\n' > "$root/hello.c"
+    {
+        printf 'tcc -v\necho "v $?"\n'
+        printf 'tcc -c hello.c -o hello.o -B/ -I/include\necho "compile $?"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-1800} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/check.log" 2>&1 || true
+    cat "$out/check.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if [ -s "$out/back/hello.o" ]; then
+        cp "$out/back/hello.o" "$out/hello.o"
+        echo "我々の OS の上で組んだ tcc が hello.o を出した ($(wc -c < "$out/hello.o") バイト)" >&2
+    else
+        echo "FAIL: hello.o ができていない ($out/check.log)" >&2
+        return 1
+    fi
+}
+
 case ${1:-all} in
 root) do_root ;;
 link) do_link ;;
+check) do_check ;;
 unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
 clean) rm -rf "$out" ;;
 all)
@@ -182,5 +221,5 @@ all)
     echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
     [ "$fail" -eq 0 ]
     ;;
-*) echo "usage: tcc17.sh [root|unit <名前>|all|link|clean]" >&2; exit 2 ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|clean]" >&2; exit 2 ;;
 esac
