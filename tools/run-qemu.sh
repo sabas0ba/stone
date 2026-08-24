@@ -94,8 +94,11 @@ if [ -n "${STONE_QEMU_GDB:-}" ] || [ "$_to" = 0 ] \
         || ! command -v timeout > /dev/null 2>&1; then
     exec qemu-system-riscv32 "$@"
 fi
-timeout -k 5 "$_to" qemu-system-riscv32 "$@"
-_rc=$?
+# **`|| _rc=$?` の形で受ける。** このスクリプトは set -e なので，
+# `timeout ...` をそのまま書くと 124 で返った時点で下の案内へ来ない。
+# 打ち切ったことを言わずに終わると，ただの失敗と見分けが付かない
+_rc=0
+timeout -k 5 "$_to" qemu-system-riscv32 "$@" || _rc=$?
 if [ "$_rc" -eq 124 ]; then
     echo "run-qemu.sh: ${_to} 秒を超えたので打ち切った (STONE_QEMU_TIMEOUT)" >&2
 fi
