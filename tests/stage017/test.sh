@@ -641,4 +641,76 @@ else
     echo "   skip: host に make か gcc が無い (裏取りができない)"
 fi
 
+section "第 3 部の 2: make の関数 (docs/stage017-cc.md 9.1)"
+
+# **第 3 部の 2 の完了条件である。**
+#
+# 第 3 部の 1 では目的ファイルを 8 個手で並べていた。ここでは
+# **元のファイルの並びから $(patsubst) で導く** —— 同じことを言うのに
+# 手で並べ直さなくてよくなるのが，関数を持った意味である。
+r=$out/froot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/src" "$r/posix"
+cp tmp/build/pp16cmd "$r/bin/pp16"
+cp tmp/build/cc15pcmd "$r/bin/cc15p"
+cp tmp/build/ld16cmd "$r/bin/ld16"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp stage016/libc18/include/*.h "$r/include/"
+cp stage016/libc18/include/sys/*.h "$r/include/sys/"
+cp tmp/build/rt64.o tmp/build/rtfp.o "$r/lib/"
+cp stage016/libc18/src/*.c "$r/src/"
+cp stage016/libc18/posix/*.c "$r/posix/"
+cp tmp/build/cc18 "$r/cc18"
+cp tmp/build/ar17 "$r/ar"
+cp tmp/build/mk19 "$r/mk"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tests/stage017/user/uselibc.c "$r/uselibc.c"
+cp tests/stage017/mk/fn.mk "$r/Makefile"
+cat > "$r/go.sh" <<'EOF'
+mk show
+mk
+echo "mk $?"
+uselibc
+echo "run $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/fn.out" 33554432 512
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/fn.txt "$out/fn.out" \
+    > "$out/fn.diff"
+report $? "run: 関数で導いた並びから libc が組め，繋いだものが走る"
+[ -s "$out/fn.diff" ] && sed -n '4,$p' "$out/fn.diff"
+
+# **同じ記述を本物の make に食わせて突き合わせる。** 関数は結果が
+# 静かに空になる形の誤りが出やすいので，並びそのものを見る
+if command -v make > /dev/null 2>&1 && command -v gcc > /dev/null 2>&1; then
+    gcc -w -o "$out/mk19host" tests/stage017/host/mk19host.c 2> /dev/null
+    r2=$?
+    d=$out/fndry
+    rm -rf "$d"
+    mkdir -p "$d/src" "$d/posix"
+    cp tests/stage017/mk/fn.mk "$d/Makefile"
+    touch "$d/uselibc.c"
+    for f in src/string src/stdlib src/misc15 posix/sys posix/morecore \
+             posix/stdio posix/assert posix/dir; do
+        touch "$d/$f.c"
+    done
+    ( cd "$d" && make -n --no-print-directory; make -s show ) \
+        > "$out/fndry.ref" 2>&1
+    [ "$r2" -eq 0 ] && ( cd "$d" && "$OLDPWD/$out/mk19host" -n; \
+        "$OLDPWD/$out/mk19host" -s show ) > "$out/fndry.got" 2>&1
+    [ "$r2" -eq 0 ] && diff -q "$out/fndry.ref" "$out/fndry.got" > /dev/null
+    report $? "ref: 本物の make と，関数の展開と命令の並びが一致する"
+    [ "$r2" -eq 0 ] && diff -u "$out/fndry.ref" "$out/fndry.got" | sed -n '4,$p'
+
+    # **知らない関数は空に展開せず落ちること** (9.5 からの決まり)
+    rm -rf "$out/fnbad" && mkdir -p "$out/fnbad"
+    printf 'all:\n\t@echo $(notdir a/b.c)\n' > "$out/fnbad/Makefile"
+    ( cd "$out/fnbad" && "$OLDPWD/$out/mk19host" ) > "$out/fnbad.out" 2>&1
+    [ $? -ne 0 ] && grep -q 'unknown function' "$out/fnbad.out"
+    report $? "spec: 知らない関数は空に展開せず落ちる"
+else
+    echo "   skip: host に make か gcc が無い (裏取りができない)"
+fi
+
 summary
