@@ -1121,6 +1121,7 @@ static void parselines(char *buf, char *path) {
         char tg[NEXP];
         char dp[NEXP];
         char *q2;
+        char *inlcmd;
         *colon = 0;
         ncurr = 0;
         /* **目標特有の変数** (第 3 部の 3 の 1)。
@@ -1159,6 +1160,25 @@ static void parselines(char *buf, char *path) {
               tvval[ntvar] = keeps(skipb(aft + (op == '=' ? 1 : 2)));
               ntvar = ntvar + 1;
               continue;
+            }
+          }
+        }
+        /* **`t: 依存 ; 命令` の形** (tcc の Makefile の cross-% 他)。
+         * 深さ 0 の最初の ';' から後ろは命令である。中身が空でも
+         * 「命令を持つ規則」になる —— そこが要点で，型規則より
+         * こちらが選ばれて「何もしない」が実現する */
+        inlcmd = 0;
+        {
+          char *z;
+          int dep2;
+          dep2 = 0;
+          for (z = colon + 1; *z; z = z + 1) {
+            if (*z == '(' || *z == '{') dep2 = dep2 + 1;
+            else if (*z == ')' || *z == '}') dep2 = dep2 - 1;
+            else if (*z == ';' && dep2 == 0) {
+              *z = 0;
+              inlcmd = z + 1;
+              break;
             }
           }
         }
@@ -1228,6 +1248,15 @@ static void parselines(char *buf, char *path) {
               }
             }
           }
+        }
+        if (inlcmd) {
+          int z;
+          for (z = 0; z < ncurr; z = z + 1) {
+            if (rcmdn[curr[z]] == 0) rcmd0[curr[z]] = nlist;
+            rcmdn[curr[z]] = rcmdn[curr[z]] + 1;
+          }
+          if (ncurr) addlist(skipb(inlcmd));
+          ncurr = 0;             /* 続く TAB 行はこの規則に付けない */
         }
         continue;
       }
@@ -1346,10 +1375,15 @@ static void runcmd(char *raw) {
   char *c;
   int quiet;
   int ignore;
+  int recur;
   int fd;
   int st;
   char *av[3];
 
+  /* **$(MAKE) を含む行は -n でも走らせる。** 本物の make と同じで，
+   * 走らせないと下の階層の命令が 1 つも見えない。下へは -n を継ぐので
+   * (MAKE の値に入れてある)，実際に作られはしない */
+  recur = (strstr(raw, "$(MAKE)") != 0 || strstr(raw, "${MAKE}") != 0);
   expand(raw, e, (int)sizeof e);
   c = skipb(e);
   quiet = 0;
@@ -1369,7 +1403,7 @@ static void runcmd(char *raw) {
     fputs(c, stdout);
     fputs("\n", stdout);
   }
-  if (dryrun) return;
+  if (dryrun && !recur) return;
   /* 我々の stdio は緩衝しないので何もしないが，ホストで一巡させる
    * ときは順序が狂う。**同じ道を通す**ために置く */
   fflush(stdout);
@@ -1418,12 +1452,23 @@ static int tvpush(char *t, int *idx, char *save[], int max) {
     idx[nv] = i;
     save[nv] = (k >= 0) ? keeps(vval[k]) : 0;
     if (tvop[i] == '+' && k >= 0) {
-      expand(tvval[i], v, (int)sizeof v);
-      if ((int)strlen(vval[k]) + (int)strlen(v) + 2 >= NEXP)
+      /* **元の種別を保つ。** 遅延の変数へ即時として継ぐと，元の側に
+       * 入っていた $(EXTRA-DEFS) のような参照が凍って，そのまま
+       * 命令行に出る (実際に出た) */
+      if ((int)strlen(vval[k]) + (int)strlen(tvval[i]) + 2 >= NEXP)
         die("value too long", tvname[i]);
       { char b[NEXP];
-        strcpy(b, vval[k]); strcat(b, " "); strcat(b, v);
-        vset(tvname[i], b, V_SIMP); }
+        strcpy(b, vval[k]);
+        strcat(b, " ");
+        if (vkind[k] == V_SIMP) {
+          expand(tvval[i], v, (int)sizeof v);
+          strcat(b, v);
+          vset(tvname[i], b, V_SIMP);
+        } else {
+          strcat(b, tvval[i]);
+          vset(tvname[i], b, V_LAZY);
+        }
+      }
     } else if (tvop[i] == ':' || tvop[i] == '+') {
       expand(tvval[i], v, (int)sizeof v);
       vset(tvname[i], v, V_SIMP);
@@ -1502,6 +1547,25 @@ static void fire(int *srcs, int nsrc, int rrec, char *t, char *stem) {
   a_stem = saves;
 }
 
+/* 型規則 ri の依存が (語幹 stem で) 揃えられるか。
+ * 在るか，作る規則があればよい。**そこまでしか見ない** —— 再帰で
+ * 全部辿ると輪に入りうるし，1 段で足りることが実測で判っている */
+static int depsok(int ri, char *stem) {
+  int i;
+  int k;
+  char dep[512];
+  for (i = 0; i < rdepn[ri]; i = i + 1) {
+    patsub(list[rdep0[ri] + i], stem, dep, (int)sizeof dep);
+    if (exists(dep)) continue;
+    if (isphony(dep)) continue;
+    for (k = 0; k < nrule; k = k + 1)
+      if (strchr(rtgt[k], '%') == 0 && strcmp(rtgt[k], dep) == 0) break;
+    if (k < nrule) continue;
+    return 0;
+  }
+  return 1;
+}
+
 static void make(char *t) {
   int i;
   int srcs[NRULE];
@@ -1531,18 +1595,39 @@ static void make(char *t) {
   }
 
   /* 命令を持つ明示の規則が無ければ型規則から取る。
-   * **明示の依存は捨てない** —— 型規則を足すだけである */
+   * **明示の依存は捨てない** —— 型規則を足すだけである。
+   *
+   * **依存が作れるものを選ぶ。** mk17 以来「合った最初のもの」で
+   * 済ませていたが，tcc の lib/ には %.o : %.c と %.o : %.S が並んで
+   * いて，atomic.o は .S のほうである。先に合ったほうを使うと
+   * 「atomic.c が無い」で止まる */
   if (rrec < 0) {
-    for (i = 0; i < nrule; i = i + 1) {
-      if (strchr(rtgt[i], '%') == 0) continue;
-      if (rcmdn[i] == 0) continue;
-      if (patmatch(rtgt[i], t, stem, (int)sizeof stem)) {
+    int pass;
+    for (pass = 0; pass < 2 && rrec < 0; pass = pass + 1) {
+      for (i = 0; i < nrule; i = i + 1) {
+        if (strchr(rtgt[i], '%') == 0) continue;
+        if (rcmdn[i] == 0) continue;
+        if (!patmatch(rtgt[i], t, stem, (int)sizeof stem)) continue;
+        if (pass == 0 && !depsok(i, stem)) continue;
         srcs[nsrc] = i;
         nsrc = nsrc + 1;
         rrec = i;
         break;
       }
     }
+  }
+
+  /* **命令を持つ規則の依存を先頭に置く。** $< は「最初の依存」なので，
+   * 追加の依存行が先に来ると別のものを指す。実際 tcc.o の $< が
+   * tcc.c ではなく tcctools.c になった */
+  if (rrec >= 0 && nsrc > 1 && srcs[0] != rrec) {
+    int k;
+    for (k = 0; k < nsrc; k = k + 1)
+      if (srcs[k] == rrec) {
+        while (k > 0) { srcs[k] = srcs[k - 1]; k = k - 1; }
+        srcs[0] = rrec;
+        break;
+      }
   }
 
   if (nsrc == 0) {
@@ -1560,7 +1645,8 @@ static void make(char *t) {
 }
 
 static void usage(void) {
-  fputs("usage: mk [-f makefile] [-n] [-s] [-B] [target...]\n", stderr);
+  fputs("usage: mk [-f makefile] [-C dir] [-n] [-s] [-B] [target...]\n",
+        stderr);
   fputs("  -B  古さを見ずに必ず作る\n", stderr);
   fputs("  依存より古い目標だけを作り直す (sfs3 の時刻を見る。"
         "docs/stage017-cc.md 11 章)\n", stderr);
@@ -1582,6 +1668,14 @@ int main(int argc, char **argv) {
     if (strcmp(a, "-n") == 0) { dryrun = 1; continue; }
     if (strcmp(a, "-s") == 0) { silent = 1; continue; }
     if (strcmp(a, "-B") == 0) { always = 1; continue; }
+    if (strcmp(a, "-C") == 0) {
+      i = i + 1;
+      if (i >= argc) { usage(); return 2; }
+      if (chdir(argv[i]) < 0) die("cannot chdir", argv[i]);
+      continue;
+    }
+    /* 本物が付ける案内。受けて捨てる */
+    if (strcmp(a, "--no-print-directory") == 0) continue;
     if (strcmp(a, "-h") == 0) { usage(); return 0; }
     if (a[0] == '-' && a[1] != 0) { usage(); return 2; }
     if (ngoal < NGOAL) { goals[ngoal] = a; ngoal = ngoal + 1; }
@@ -1591,6 +1685,16 @@ int main(int argc, char **argv) {
   a_first = "";
   a_all = "";
   a_stem = "";
+  /* **$(MAKE) は自分自身である。** -n のときは下の階層へも継ぐ ——
+   * 継がないと，下が本当に作ってしまう */
+  {
+    char mv[512];
+    if ((int)strlen(argv[0]) + 8 >= (int)sizeof mv)
+      die("program name too long", argv[0]);
+    strcpy(mv, argv[0]);
+    if (dryrun) strcat(mv, " -n");
+    vset("MAKE", mv, V_SIMP);
+  }
   parse(mf, 1);
   if (ncond != 0) die("missing endif in", mf);
   if (nrule == 0) die("no rules in", mf);
