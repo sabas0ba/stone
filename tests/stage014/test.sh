@@ -16,6 +16,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s14
+stable_dir=tmp/s14/stable
 
 cc=tmp/build/cc14g.bin    # 台帳は最前線の世代で測る (docs/stage014-external.md 5.3)
 pp=tmp/build/pp.bin
@@ -70,12 +71,18 @@ done
 [ "$ok" -eq 0 ]
 report $? "build: cc14a..cc14g と ld14 / pp14 の SHA-256 が各 .md 記載値と一致"
 
-# 世代を触ったら必ず固定点を見る (docs/dev-notes.md 3.1)
-{ cat stage014/cc14g.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc14g.bin > tmp/s14/b3.o \
-    && { cat tmp/s14/b3.o; printf '\0'; } \
-        | sh tools/env.sh qemu "$ld" > tmp/s14/b3.bin \
-    && cmp -s tmp/s14/b3.bin tmp/build/cc14g.bin
+# 世代を触ったら必ず固定点を見る (docs/dev-notes.md 3.1)。
+#
+# **落ちたときに「中身が違う」のか「実行が再現していない」のかを
+# 分ける** (1.6)。この検査は CI で実際に揺らいだ —— 成果物の SHA-256
+# 照合は通るのに固定点だけが落ちる，という 1.6 の型そのものだった
+fp14gen() {
+    { cat stage014/cc14g.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc14g.bin > tmp/s14/b3.o \
+        && { cat tmp/s14/b3.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc14g)" fp14gen tmp/build/cc14g.bin
 report $? "fixpoint: cc14g が自分自身を再生成する (B2 == B3)"
 
 # コード生成を触ったのは 2048 バイト以上のフレームの経路だけで，

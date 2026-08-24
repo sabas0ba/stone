@@ -67,11 +67,15 @@ done
 [ "$ok" -eq 0 ]
 report $? "build: cc15a..cc15p と pp15 / pp16 / ld16 の SHA-256 が各 .md 記載値と一致"
 
-{ cat stage015/cc15p.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc15p.bin > tmp/s15/b3.o \
-    && { cat tmp/s15/b3.o; printf '\0'; } \
-        | sh tools/env.sh qemu "$ld" > tmp/s15/b3.bin \
-    && cmp -s tmp/s15/b3.bin tmp/build/cc15p.bin
+# **落ちたときに「中身が違う」のか「実行が再現していない」のかを
+# 分ける** (1.6)。この検査は CI で実際に揺らいだ
+fp15gen() {
+    { cat stage015/cc15p.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15p.bin > tmp/s15/b3.o \
+        && { cat tmp/s15/b3.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15p)" fp15gen tmp/build/cc15p.bin
 report $? "fixpoint: cc15p が自分自身を再生成する (B2 == B3)"
 
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
