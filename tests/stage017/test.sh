@@ -766,7 +766,7 @@ runroot3 "$r" "$out/tccish.out"
 rc=$?
 [ "$rc" -eq 0 ] && diff -u tests/stage017/expected/tccish.txt "$out/tccish.out" \
     > "$out/tccish.diff"
-report $? "run: 6 つの形が我々の OS の上で順に効く ($(MAKE) の再帰を含む)"
+report $? "run: 6 つの形が我々の OS の上で順に効く (再帰する MAKE を含む)"
 [ -s "$out/tccish.diff" ] && sed -n '4,$p' "$out/tccish.diff"
 
 # **本物の make と突き合わせる。** 我々の -n の出力だけを見ていても，
