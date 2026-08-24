@@ -79,4 +79,27 @@ if [ -n "${STONE_QEMU_GDB:-}" ]; then
     set -- "$@" -S -gdb "tcp::${STONE_QEMU_GDB}"
 fi
 
-exec qemu-system-riscv32 "$@"
+# **1 回の実行に上限を設ける** (docs/dev-notes.md 1.8)。
+#
+# 2026-08-23 の CI で，1 つの実行が固まったまま 115 分走り続け，
+# ジョブが 120 分の上限で cancelled になった。cancelled ではキャッシュが
+# 保存されないので，次の回もコールドビルドから始まる。**固まりが 1 つ
+# あるだけで CI が前に進まなくなる。**
+#
+# 上限は「まっとうな実行が収まる長さ」ではなく「固まったと判る長さ」で
+# 決める。鎖のいちばん重い 1 回 (kernel の翻訳) でも 1 分に届かないので，
+# 15 分は十分に上である。gdb で止めるときは待つのが仕事なので外す
+_to=${STONE_QEMU_TIMEOUT:-900}
+if [ -n "${STONE_QEMU_GDB:-}" ] || [ "$_to" = 0 ] \
+        || ! command -v timeout > /dev/null 2>&1; then
+    exec qemu-system-riscv32 "$@"
+fi
+# **`|| _rc=$?` の形で受ける。** このスクリプトは set -e なので，
+# `timeout ...` をそのまま書くと 124 で返った時点で下の案内へ来ない。
+# 打ち切ったことを言わずに終わると，ただの失敗と見分けが付かない
+_rc=0
+timeout -k 5 "$_to" qemu-system-riscv32 "$@" || _rc=$?
+if [ "$_rc" -eq 124 ]; then
+    echo "run-qemu.sh: ${_to} 秒を超えたので打ち切った (STONE_QEMU_TIMEOUT)" >&2
+fi
+exit "$_rc"

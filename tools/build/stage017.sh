@@ -57,10 +57,80 @@ build_stage017() {
 
     # カーネルの第 23 世代。kernel22 との差は引数の数と長さだけ
     # (docs/stage017-cc.md 8 章)。前置部は 'K' である
+    # libc の第 19 世代 (第 4 部の 1)。libc18 との差は stat だけ。
+    # 翻訳は libc18 と同じ cc15k で行う (器の都合。stage016.sh と揃える)
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir; do
+        n=$(echo "$f" | tr / _)
+        step "l19_$n" "l19_$n.o" \
+            -- "stage017/libc19/$f.c" tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- libc19_run "$f" "$n"
+    done
+
+    # make の第 18 世代 (第 4 部の 2)。**libc19 と繋ぐ** (stat が要る)
+    step mk18 mk18 \
+        -- stage017/mk18.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
+        -- osprog19_run mk18 stage017/mk18.c
+
+    # 時刻を読む検査用のプログラム (第 4 部の 1)。**libc19 と繋ぐ**
+    step stamp stamp \
+        -- tests/stage017/user/stamp.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
+        -- osprog19_run stamp tests/stage017/user/stamp.c
+
     step kernel23 kernel23.bin \
         -- stage017/kernel23.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
         -- kernel23_run
+
+    # カーネルの第 24 世代。kernel23 との差は sfs3 と時刻だけ
+    # (docs/stage017-cc.md 11 章)
+    step kernel24 kernel24.bin \
+        -- stage017/kernel24.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin \
+        -- kern17 kernel24 stage017/kernel24.c
+}
+
+# カーネルを 1 つ作る (前置部は 'K')。stage016.sh の kern と同じ手だが，
+# **この階層のことはこの階層で書く** (読む順に依らせない)
+kern17() {
+    sh tools/bundle.sh "$2" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
+    sh tools/env.sh qemu tmp/build/cc15p.bin < "tmp/build/${1}.i" \
+        > "tmp/build/${1}.o"
+    { printf 'K'; cat "tmp/build/${1}.o"; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "tmp/build/${1}.bin"
+    echo "built tmp/build/${1}.bin" >&2
+}
+
+libc19_run() {
+    sh tools/bundle.sh stage017/libc19/include/*.h \
+        "sys/time.h=stage017/libc19/include/sys/time.h" \
+        "sys/stat.h=stage017/libc19/include/sys/stat.h" \
+        "stage017/libc19/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l19_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l19_$2.i" \
+        > "tmp/build/l19_$2.o"
+    echo "built tmp/build/l19_$2.o" >&2
+}
+
+# OS の上で動く実行形式を 1 つ作る。**libc19 と繋ぐ** 版
+osprog19_run() {
+    sh tools/bundle.sh stage017/libc19/include/*.h \
+        "sys/stat.h=stage017/libc19/include/sys/stat.h" \
+        "$2" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
+    sh tools/env.sh qemu tmp/build/cc15p.bin < "tmp/build/${1}.i" \
+        > "tmp/build/${1}.o"
+    { printf 'E'; cat "tmp/build/${1}.o" \
+        tmp/build/l19_src_string.o tmp/build/l19_src_stdlib.o \
+        tmp/build/l19_src_misc15.o tmp/build/l19_posix_sys.o \
+        tmp/build/l19_posix_morecore.o tmp/build/l19_posix_stdio.o \
+        tmp/build/l19_posix_assert.o tmp/build/l19_posix_dir.o \
+        tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "tmp/build/$1"
+    echo "built tmp/build/$1" >&2
 }
 
 kernel23_run() {
@@ -115,10 +185,18 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17 \
-        kernel23.bin \
+    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17 mk18 stamp \
+        kernel23.bin kernel24.bin \
+        l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
+        l19_src_morecore.o l19_src_misc15.o \
+        l19_posix_sys.o l19_posix_morecore.o l19_posix_stdio.o \
+        l19_posix_assert.o l19_posix_dir.o \
         -- stage017/cc17.c stage017/cc18.c stage017/ar17.c \
-           stage017/mk17.c stage017/kernel23.c \
+           stage017/mk17.c stage017/mk18.c \
+           stage017/kernel23.c stage017/kernel24.c \
+           tests/stage017/user/stamp.c \
+           stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
+           stage017/libc19/src/*.c stage017/libc19/posix/*.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh

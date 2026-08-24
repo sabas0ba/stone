@@ -1,0 +1,14 @@
+--1--
+cat a.src > a.cp
+cat b.src > b.cp
+cat a.cp b.cp > prog
+--2--
+mk: nothing to be done for 'all'.
+--3--
+cat b.src > b.cp
+cat a.cp b.cp > prog
+--4--
+cat a.src > a.cp
+cat b.src > b.cp
+cat a.cp b.cp > prog
+--end--

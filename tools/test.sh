@@ -121,6 +121,14 @@ teststamp_key() {
     { find "tests/$1" -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
         | xargs -0 sha256sum 2> /dev/null
       sha256sum tests/lib.sh 2> /dev/null
+      # **検査を走らせる仕掛けそのものも印に入れる。**
+      #
+      # 入れていなかったせいで，tools/run-qemu.sh に上限を足した回の CI が
+      # 全 Stage を「cached」で飛ばし，1 秒で result: all passed と出した。
+      # 走らせ方を変えたのに，走らせずに緑になる。仕掛けが壊れていても
+      # 同じことが起きるので，これは黙って通る型である
+      find tools -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
+          | xargs -0 sha256sum 2> /dev/null
       # 空のときに find を呼ぶと引数なし = カレントディレクトリ全体に
       # なってしまう (stage000 には対応するソースの階層が無い)
       if [ "${#_dirs[@]}" -gt 0 ]; then
@@ -150,10 +158,27 @@ for t in tests/stage*/test.sh; do
     run_list+=("$s")
 done
 
+# **Stage 1 つあたりの上限** (docs/dev-notes.md 1.8)。QEMU の側にも
+# 上限を置いてあるが (tools/run-qemu.sh)，podman ごと固まる形もあるので
+# 外側からも掛ける。0 で外せる
+stage_to=${STONE_TEST_TIMEOUT:-1800}
+runstage() {
+    if [ "$stage_to" = 0 ] || ! command -v timeout > /dev/null 2>&1; then
+        bash "tests/$1/test.sh"
+        return $?
+    fi
+    timeout -k 10 "$stage_to" bash "tests/$1/test.sh"
+    _r=$?
+    if [ "$_r" -eq 124 ]; then
+        echo "FAIL timeout: tests/$1 が ${stage_to} 秒を超えた (STONE_TEST_TIMEOUT)"
+    fi
+    return $_r
+}
+
 if [ -n "${STONE_TEST_SERIAL:-}" ]; then
     for s in "${run_list[@]}"; do
         echo "== tests/$s =="
-        bash "tests/$s/test.sh"
+        runstage "$s"
         rc=$?
         overall_fail=$((overall_fail + rc))
         [ "$rc" -eq 0 ] && teststamp_key "$s" > "tmp/test/$s.stamp"
@@ -171,7 +196,7 @@ else
         j=0
         while [ "$j" -lt "$maxjobs" ] && [ "$i" -lt "$n" ]; do
             s=${run_list[$i]}
-            bash "tests/$s/test.sh" > "tmp/test-$s.log" 2>&1 &
+            runstage "$s" > "tmp/test-$s.log" 2>&1 &
             batch_names+=("$s")
             batch_pids+=("$!")
             i=$((i + 1))
