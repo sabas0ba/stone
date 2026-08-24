@@ -279,6 +279,13 @@ static int looksfn(char *s) {
 /* ---- 関数 (第 3 部の 2) ---- */
 
 #define NARG 12                 /* 関数の引数の上限 ($(call) の分を含む) */
+#define NFND 8                  /* 関数の入れ子の上限 */
+
+/* 関数の作業領域。**局所に置くと cc15p のフレームの上限
+ * (およそ 32 KB。docs/stage017-cc.md 10.2) を超えて 0 バイトの .o が
+ * 出る。** 実際に出た。入れ子で潰れないよう深さで分ける */
+char fnpool[NFND][4][NEXP];
+int fndepth;
 
 /* 深さ 0 の ',' で切って argv[] へ。返り値は個数。
  * **入れ子の $(...) の中の ',' では切らない** —— 切ると
@@ -339,12 +346,10 @@ static int wmatch(char *p, char *w, char *stem, int cap) {
 
 /* 関数を 1 つ呼ぶ。name は展開済み，body は未展開の引数列。
  * 合えば out へ書いて 1 を返す。知らない名前なら 0 */
-static int callfn(char *name, char *body, char *out, int cap) {
+static int callfn1(char *name, char *body, char *out, int cap,
+                   char *a0, char *a1, char *a2, char *a3) {
   char *av[NARG];
   int na;
-  char a0[NEXP];
-  char a1[NEXP];
-  char a2[NEXP];
   char w[512];
   char stem[512];
   char *p;
@@ -359,7 +364,7 @@ static int callfn(char *name, char *body, char *out, int cap) {
   if (strcmp(name, "if") == 0) {
     na = splitargs(body, av, NARG);
     if (na < 2) die("if needs 2 or 3 arguments", body);
-    expand(av[0], a0, (int)sizeof a0);
+    expand(av[0], a0, NEXP);
     rstrip(a0);
     if (skipb(a0)[0] != 0) expand(av[1], out, cap);
     else if (na >= 3) expand(av[2], out, cap);
@@ -368,7 +373,7 @@ static int callfn(char *name, char *body, char *out, int cap) {
   if (strcmp(name, "or") == 0) {
     na = splitargs(body, av, NARG);
     for (i = 0; i < na; i = i + 1) {
-      expand(av[i], a0, (int)sizeof a0);
+      expand(av[i], a0, NEXP);
       if (a0[0] != 0) {
         if ((int)strlen(a0) >= cap) die("expansion too long", name);
         strcpy(out, a0);
@@ -378,20 +383,20 @@ static int callfn(char *name, char *body, char *out, int cap) {
     return 1;
   }
   if (strcmp(name, "foreach") == 0) {
-    char save[NEXP];
+    char *save;
     int had;
+    save = a3;
     na = splitargs(body, av, NARG);
     if (na < 3) die("foreach needs 3 arguments", body);
-    expand(av[0], a0, (int)sizeof a0);
+    expand(av[0], a0, NEXP);
     rstrip(a0);
     p = skipb(a0);
-    expand(av[1], a1, (int)sizeof a1);
+    expand(av[1], a1, NEXP);
     /* 同じ名前の変数があれば退避して戻す */
     i = vfind(p);
     had = (i >= 0);
     if (had) {
-      if ((int)strlen(vval[i]) >= (int)sizeof save)
-        die("value too long", p);
+      if ((int)strlen(vval[i]) >= NEXP) die("value too long", p);
       strcpy(save, vval[i]);
     }
     { char *q; q = a1;
@@ -399,7 +404,7 @@ static int callfn(char *name, char *body, char *out, int cap) {
         q = nextword(q, w, (int)sizeof w);
         if (q == 0) break;
         vset(p, w, V_SIMP);
-        expand(av[2], a2, (int)sizeof a2);
+        expand(av[2], a2, NEXP);
         if (a2[0]) addword(out, &n, a2, cap);
       }
     }
@@ -412,7 +417,7 @@ static int callfn(char *name, char *body, char *out, int cap) {
     char save[NARG][256];
     char nmb[16];
     na = splitargs(body, av, NARG);
-    expand(av[0], a0, (int)sizeof a0);
+    expand(av[0], a0, NEXP);
     rstrip(a0);
     p = skipb(a0);
     /* $(1)..$(9) を立てる。**元の値は戻す** (入れ子の call のため) */
@@ -425,7 +430,7 @@ static int callfn(char *name, char *body, char *out, int cap) {
         if ((int)strlen(vval[k]) < (int)sizeof save[i])
           strcpy(save[i], vval[k]);
       }
-      expand(av[i], a1, (int)sizeof a1);
+      expand(av[i], a1, NEXP);
       vset(nmb, a1, V_SIMP);
     }
     vget(p, out, cap);
@@ -441,9 +446,9 @@ static int callfn(char *name, char *body, char *out, int cap) {
   na = splitargs(body, av, NARG);
   for (i = 0; i < na; i = i + 1) {
     /* av[i] の指す先は後で書き換わらないので，順に展開して控える */
-    if (i == 0) expand(av[0], a0, (int)sizeof a0);
-    else if (i == 1) expand(av[1], a1, (int)sizeof a1);
-    else if (i == 2) expand(av[2], a2, (int)sizeof a2);
+    if (i == 0) expand(av[0], a0, NEXP);
+    else if (i == 1) expand(av[1], a1, NEXP);
+    else if (i == 2) expand(av[2], a2, NEXP);
   }
 
   if (strcmp(name, "subst") == 0) {
@@ -602,6 +607,19 @@ static int callfn(char *name, char *body, char *out, int cap) {
     return 1;
   }
   return 0;
+}
+
+/* 深さぶんの作業領域を割り当てて callfn1 を呼ぶ。
+ * **戻り道が多いので，深さの上げ下げはここ 1 箇所に集める** */
+static int callfn(char *name, char *body, char *out, int cap) {
+  int r;
+  if (fndepth >= NFND) die("functions nested too deep", name);
+  fndepth = fndepth + 1;
+  r = callfn1(name, body, out, cap,
+              fnpool[fndepth - 1][0], fnpool[fndepth - 1][1],
+              fnpool[fndepth - 1][2], fnpool[fndepth - 1][3]);
+  fndepth = fndepth - 1;
+  return r;
 }
 
 /* 自動変数か。1 文字を見て，該当すれば値を out へ入れて 1 を返す */
