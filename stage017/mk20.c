@@ -394,6 +394,12 @@ static int globmatch(char *p, char *t) {
 /* 型 pat に合う名前を out へ足す。階層は最後の '/' で切る。
  * **並べ替えはしない** (読み出した順)。合うものが無ければ何も足さない
  * —— 本物の make と同じで，型そのものを残したりはしない */
+/* **並びを揃えるための置き場。** readdir の順は作った順であって
+ * 名前の順ではない。本物の make は glob(3) を通すので名前の順に
+ * 並ぶ —— 揃えないと同じ記述から違う命令列が出る (実際に出た) */
+#define NGLOB 512
+static char globnm[NGLOB][256];
+
 static void globinto(char *pat, char *out, int *n, int cap) {
   DIR *d;
   struct dirent *e;
@@ -401,6 +407,9 @@ static void globinto(char *pat, char *out, int *n, int cap) {
   char base[512];
   char full[1024];
   char *slash;
+  int ng;
+  int i;
+  int j;
   slash = strrchr(pat, '/');
   if (slash) {
     int k;
@@ -416,19 +425,30 @@ static void globinto(char *pat, char *out, int *n, int cap) {
   }
   d = opendir(dir);
   if (d == 0) return;
+  ng = 0;
   while ((e = readdir(d)) != 0) {
     if (e->d_name[0] == '.' && base[0] != '.') continue;
     if (!globmatch(base, e->d_name)) continue;
+    if ((int)strlen(e->d_name) >= (int)sizeof globnm[0])
+      die("name too long", e->d_name);
+    if (ng >= NGLOB) die("too many matches", pat);
+    /* 挿入で名前の順に入れる。数は高々数十なのでこれで足りる */
+    for (i = ng; i > 0 && strcmp(globnm[i - 1], e->d_name) > 0; i = i - 1)
+      strcpy(globnm[i], globnm[i - 1]);
+    strcpy(globnm[i], e->d_name);
+    ng = ng + 1;
+  }
+  closedir(d);
+  for (j = 0; j < ng; j = j + 1) {
     if (slash) {
       strcpy(full, dir);
       strcat(full, "/");
-      strcat(full, e->d_name);
+      strcat(full, globnm[j]);
     } else {
-      strcpy(full, e->d_name);
+      strcpy(full, globnm[j]);
     }
     addword(out, n, full, cap);
   }
-  closedir(d);
 }
 
 /* 関数を 1 つ呼ぶ。name は展開済み，body は未展開の引数列。
