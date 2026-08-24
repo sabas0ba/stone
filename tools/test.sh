@@ -121,6 +121,14 @@ teststamp_key() {
     { find "tests/$1" -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
         | xargs -0 sha256sum 2> /dev/null
       sha256sum tests/lib.sh 2> /dev/null
+      # **検査を走らせる仕掛けそのものも印に入れる。**
+      #
+      # 入れていなかったせいで，tools/run-qemu.sh に上限を足した回の CI が
+      # 全 Stage を「cached」で飛ばし，1 秒で result: all passed と出した。
+      # 走らせ方を変えたのに，走らせずに緑になる。仕掛けが壊れていても
+      # 同じことが起きるので，これは黙って通る型である
+      find tools -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
+          | xargs -0 sha256sum 2> /dev/null
       # 空のときに find を呼ぶと引数なし = カレントディレクトリ全体に
       # なってしまう (stage000 には対応するソースの階層が無い)
       if [ "${#_dirs[@]}" -gt 0 ]; then
