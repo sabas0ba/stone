@@ -4,6 +4,7 @@
 #   tcc17.sh root          作業用の像の元 (tmp/s17/root) を組む
 #   tcc17.sh unit <名前>   翻訳単位を 1 本訳し，.o を tmp/s17/obj へ出す
 #   tcc17.sh all           11 本すべて (既にできているものは飛ばす)
+#   tcc17.sh link          libtcc.a にまとめ tcc に繋ぐ (これも OS の上で)
 #   tcc17.sh clean         tmp/s17 を消す
 #
 # ---- なぜ 1 本ずつ別の起動にするか ----
@@ -49,6 +50,15 @@ do_root() {
     cp tmp/build/cc19     "$root/cc19"
     cp stage017/libc19/include/*.h     "$root/include/"
     cp stage017/libc19/include/sys/*.h "$root/include/sys/"
+    # **/lib は 1 揃いだけ。** cc19 は /lib/*.o を全部並べるので，
+    # 鎖が繋ぐ 8 本 + rt64 + rtfp と同じにする。ctype と morecore を
+    # 足すと多重定義になる (tools/build/stage017.sh の osprog19_run と
+    # 同じ並びであること)
+    cp tmp/build/l19_src_string.o tmp/build/l19_src_stdlib.o \
+       tmp/build/l19_src_misc15.o tmp/build/l19_posix_sys.o \
+       tmp/build/l19_posix_morecore.o tmp/build/l19_posix_stdio.o \
+       tmp/build/l19_posix_assert.o tmp/build/l19_posix_dir.o \
+       tmp/build/rt64.o tmp/build/rtfp.o "$root/lib/"
     # **木のうち .c と .h だけを載せる。** configure や .texi は要らない
     for f in "$src"/*.c "$src"/*.h "$src"/*.def; do
         [ -f "$f" ] && cp "$f" "$root/t/"
@@ -105,8 +115,64 @@ do_unit() {
     return 1
 }
 
+# 34 行の残り 2 手 (16.1)。
+#
+#   ar rcs libtcc.a libtcc.o tccpp.o ... riscv64-asm.o
+#   cc -o tcc tcc.o libtcc.a ...
+#
+# **これも OS の上でやる。** ホストの ar / ld を使ったら，我々の OS の
+# 上で組めたことにならない。
+LIBOBJS="libtcc tccpp tccgen tccdbg tccelf tccasm tccrun riscv64-gen riscv64-link riscv64-asm"
+
+do_link() {
+    # **毎回組み直す。** 「在れば使う」にしていたら，root の作り方を
+    # 直したのに古い root が使われ，lib/ が空のままリンクが落ちた。
+    # 組み直しは写すだけで数秒である
+    do_root
+    for u in $UNITS; do
+        [ -s "$out/obj/$u.o" ] || { echo "error: $out/obj/$u.o が無い (先に all)" >&2; exit 1; }
+    done
+    need tmp/build/ar17 "sh tools/build.sh stage017"
+    rm -rf "$root/t"/*.o
+    for u in $UNITS; do cp "$out/obj/$u.o" "$root/t/$u.o"; done
+    cp tmp/build/ar17 "$root/ar"
+    _mem=""
+    for u in $LIBOBJS; do _mem="$_mem t/$u.o"; done
+    {
+        printf 'ar rcs t/libtcc.a%s\n' "$_mem"
+        printf 'echo "ar $?"\n'
+        printf 'cc19 -o tcc t/tcc.o t/libtcc.a\n'
+        printf 'echo "link $?"\n'
+        printf 'tcc -v\n'
+        printf 'echo "run $?"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/link.log" 2>&1 || true
+    cat "$out/link.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if [ -s "$out/back/tcc" ]; then
+        cp "$out/back/tcc" "$out/tcc"
+        [ -s "$out/back/t/libtcc.a" ] && cp "$out/back/t/libtcc.a" "$out/libtcc.a"
+        echo "built $out/tcc ($(wc -c < "$out/tcc") バイト)" >&2
+    else
+        echo "FAIL: tcc ができていない ($out/link.log)" >&2
+        return 1
+    fi
+}
+
 case ${1:-all} in
 root) do_root ;;
+link) do_link ;;
 unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
 clean) rm -rf "$out" ;;
 all)
@@ -116,5 +182,5 @@ all)
     echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
     [ "$fail" -eq 0 ]
     ;;
-*) echo "usage: tcc17.sh [root|unit <名前>|all|clean]" >&2; exit 2 ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|clean]" >&2; exit 2 ;;
 esac
