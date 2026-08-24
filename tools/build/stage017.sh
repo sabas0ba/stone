@@ -79,6 +79,12 @@ build_stage017() {
            tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
         -- osprog19_run mk19 stage017/mk19.c
 
+    # make の第 20 世代 (第 3 部の 3 の 1)。tcc の Makefile を読む
+    step mk20 mk20 \
+        -- stage017/mk20.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
+        -- osprog19_run mk20 stage017/mk20.c
+
     # 時刻を読む検査用のプログラム (第 4 部の 1)。**libc19 と繋ぐ**
     step stamp stamp \
         -- tests/stage017/user/stamp.c tmp/build/cc15p.bin tmp/build/pp16.bin \
@@ -191,7 +197,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17 mk18 mk19 stamp \
+    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -199,6 +205,7 @@ do_stage017() {
         l19_posix_assert.o l19_posix_dir.o \
         -- stage017/cc17.c stage017/cc18.c stage017/ar17.c \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
+           stage017/mk20.c \
            stage017/kernel23.c stage017/kernel24.c \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \

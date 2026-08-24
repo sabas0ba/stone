@@ -713,4 +713,87 @@ else
     echo "   skip: host に make か gcc が無い (裏取りができない)"
 fi
 
+section "第 3 部の 3 の 1: tcc の Makefile の形 (docs/stage017-cc.md 15.1)"
+
+# **第 3 部の 3 の 1 の完了条件である。**
+#
+# 完了条件は「tcc の Makefile が読めること」ではない —— **そこから出る
+# 命令の並びが本物の make と一致すること**である。読めることと正しく
+# 読めることは違う。実際，読めてはいたが $< が別のファイルを指し，
+# 目標特有の += が変数を凍らせていた (15.3)。
+#
+# 本物の tcc の Makefile での突き合わせは下の 15.2 に置いた手順で行う。
+# 素材 (docs/external/tcc) は repo に入れない決まりなので CI では走らない。
+# ここでは tcc の Makefile が使う 6 つの形を自前で並べた記述を使う
+r=$out/kroot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/src" "$r/lib"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tmp/build/mk20 "$r/mk"
+cp tmp/build/mk20 "$r/bin/mk"
+cp tests/stage017/mk/tccish-os.mk "$r/Makefile"
+cp tests/stage017/mk/tccish-oslib.mk "$r/lib/Makefile"
+printf 'BASE\n'  > "$r/base.txt"
+printf 'EXTRA\n' > "$r/extra.txt"
+printf 'M\n'     > "$r/src/main.src"
+printf 'U\n'     > "$r/src/util.src"
+printf 'H\n'     > "$r/config.h"
+printf 'A\n'     > "$r/asm.asm"
+printf 'a\n'     > "$r/lib/a.src"
+printf 'b\n'     > "$r/lib/b.src"
+touch -d '@1500000000.000000000' "$r/base.txt" "$r/extra.txt" \
+    "$r/src/main.src" "$r/src/util.src" "$r/config.h" "$r/asm.asm" \
+    "$r/lib/a.src" "$r/lib/b.src"
+cat > "$r/go.sh" <<'EOF'
+echo "--dry--"
+mk -n
+echo "--build--"
+mk
+echo "--again--"
+mk
+echo "--touch--"
+echo U2 > src/util.src
+mk
+echo "--prog--"
+cat prog
+echo "--libx--"
+cat lib/libx
+echo "--end--"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/tccish.out"
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/tccish.txt "$out/tccish.out" \
+    > "$out/tccish.diff"
+report $? "run: 6 つの形が我々の OS の上で順に効く ($(MAKE) の再帰を含む)"
+[ -s "$out/tccish.diff" ] && sed -n '4,$p' "$out/tccish.diff"
+
+# **本物の make と突き合わせる。** 我々の -n の出力だけを見ていても，
+# それが正しいかどうかは判らない。ホストに素材があるときはここで見る
+if command -v make > /dev/null 2>&1 && command -v gcc > /dev/null 2>&1; then
+    gcc -w -o "$out/mk20host" tests/stage017/host/mk20host.c 2> /dev/null
+    r2=$?
+    d=$out/tidry
+    rm -rf "$d"
+    mkdir -p "$d/src" "$d/lib"
+    cp tests/stage017/mk/tccish.mk "$d/Makefile"
+    cp tests/stage017/mk/tccish-lib.mk "$d/lib/Makefile"
+    # zmain は **並びを見るため**に置く。readdir の順は作った順なので，
+    # 名前の順に直していなければここで食い違う (15.3)
+    touch "$d/src/zmain.c" "$d/src/util.c" "$d/src/main.c" \
+          "$d/config.h" "$d/asm.S" "$d/lib/a.c" "$d/lib/b.c"
+    ( cd "$d" && make -n --no-print-directory all lib ) > "$out/ti.ref" 2>&1
+    if [ "$r2" -eq 0 ]; then
+        ( cd "$d" && "$OLDPWD/$out/mk20host" -n all lib ) > "$out/ti.raw" 2>&1
+        # $(MAKE) は自分自身なので綴りが違う。そこだけ揃える
+        sed "s#$OLDPWD/$out/mk20host -n#make#g" "$out/ti.raw" > "$out/ti.got"
+    fi
+    [ "$r2" -eq 0 ] && diff -q "$out/ti.ref" "$out/ti.got" > /dev/null
+    report $? "ref: 本物の make と，出る命令の並びが一致する"
+    [ "$r2" -eq 0 ] && diff -u "$out/ti.ref" "$out/ti.got" | sed -n '4,$p'
+else
+    echo "   skip: host に make か gcc が無い (裏取りができない)"
+fi
+
 summary

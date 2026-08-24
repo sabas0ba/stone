@@ -1,0 +1,41 @@
+--dry--
+cat base.txt extra.txt src/main.src > src/main.cp
+cat base.txt src/util.src > src/util.cp
+cat asm.asm > asm.cp
+cat src/main.cp src/util.cp asm.cp > prog
+mk -n -C lib
+cat a.src > a.cp
+cat b.src > b.cp
+cat a.cp b.cp > libx
+echo "done src/main.cp"
+--build--
+cat base.txt extra.txt src/main.src > src/main.cp
+cat base.txt src/util.src > src/util.cp
+cat asm.asm > asm.cp
+cat src/main.cp src/util.cp asm.cp > prog
+mk -C lib
+cat a.src > a.cp
+cat b.src > b.cp
+cat a.cp b.cp > libx
+done src/main.cp
+--again--
+mk -C lib
+mk: nothing to be done for 'all'.
+done src/main.cp
+--touch--
+cat base.txt src/util.src > src/util.cp
+cat src/main.cp src/util.cp asm.cp > prog
+mk -C lib
+mk: nothing to be done for 'all'.
+done src/main.cp
+--prog--
+BASE
+EXTRA
+M
+BASE
+U2
+A
+--libx--
+a
+b
+--end--
