@@ -881,4 +881,41 @@ report $? "spec: 結合しても入力のヘッダとソースが 1 バイトも
 [ "$rc" -eq 0 ] && [ -s "$out/piback/_t0.o" ]
 report $? "spec: 中間の .o が _t0.o として在る (19.3)"
 
+section "第 3 部の 3 の 2 の完了条件: tcc の Makefile を回す (21 章)"
+
+# **これが第 3 部の 3 の 2 の完了条件である。**
+#
+# 上の節までは「同じ形が同じに読める」「-I が探す道として効く」を
+# 見ているだけで，**本物の tcc の Makefile を回してはいない**。
+# 素材 (docs/external/tcc) は repo に入れない決まりなので CI では
+# 取得できず，ここは走らない。手元では必ず走らせること。
+#
+#   sh tools/fetch.sh tcc      素材を取る
+#   sh tools/tcc.sh src        patch を当てる
+#   sh tools/tcc17.sh all      11 本を訳す (1 本ずつ。中断しても続きから)
+#   sh tools/tcc17.sh mk       **Makefile を mk20 に読ませて回す**
+#   sh tools/tcc17.sh check    出来た tcc に実際に翻訳させる
+#
+# 21.2 の突き合わせ 2 つ (Makefile から出た tcc == 手で回した tcc /
+# 我々の c2str が作った tccdefs_.h == ホストのもの) までを見ること。
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   **第 3 部の 3 の 2 の完了条件はこの節である。CI では走らない**"
+    echo "   手元では sh tools/tcc17.sh all && sh tools/tcc17.sh mk を走らせること"
+elif [ ! -s tmp/s17/tcc-mk ]; then
+    echo "   skip: tmp/s17/tcc-mk が無い (sh tools/tcc17.sh mk で作れる)"
+    echo "   **第 3 部の 3 の 2 の完了条件はこの節である**"
+else
+    # **同じものが出ること。** 道が 2 つあって違うものが出るなら，
+    # どちらかが間違っている
+    cmp -s tmp/s17/tcc tmp/s17/tcc-mk
+    report $? "same: Makefile から出た tcc と，命令を直に並べた tcc がバイト一致"
+    # **我々の OS の上で作った tccdefs_.h** がホストのものと一致すること
+    cmp -s tmp/s17/back/t/tccdefs_.h tmp/tcc/build/tccdefs_.h
+    report $? "same: 我々の c2str が作った tccdefs_.h がホストのものとバイト一致"
+    # 出来た tcc が実際に翻訳できること
+    [ -s tmp/s17/hello.o ]
+    report $? "run: 我々の OS の上で組んだ tcc が hello.o を出した (tcc17.sh check)"
+fi
+
 summary
