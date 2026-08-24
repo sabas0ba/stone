@@ -408,11 +408,19 @@ int main(int argc, char **argv) {
       objs[nobj] = ins[i];
       nobj = nobj + 1;
     } else {
-      /* .c か "-"。翻訳して .o を積む */
-      sprintf(path, "_t%d.o", i);
-      compile1(ins[i], path);
-      objs[nobj] = malloc((int)strlen(path) + 1);
-      strcpy(objs[nobj], path);
+      /* .c か "-"。翻訳して .o を積む。
+       *
+       * **名前は局所に作る。** 大域の path へ作って compile1 へ渡すと，
+       * その中の adddir が同じ器を書き潰し，**出力が最後に走査した
+       * ヘッダの上に書かれる** (cc18 にこの誤りがある。19.3)。
+       * しかも壊した先を自分で読み直すので**辻褄が合い，リンクは
+       * 通って走ってしまう**。我々が繰り返し踏んでいる型である
+       * (docs/dev-notes.md の「大域の器を跨いで渡さない」) */
+      char tmpo[64];
+      sprintf(tmpo, "_t%d.o", i);
+      compile1(ins[i], tmpo);
+      objs[nobj] = malloc((int)strlen(tmpo) + 1);
+      strcpy(objs[nobj], tmpo);
       nobj = nobj + 1;
     }
   }

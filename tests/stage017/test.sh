@@ -796,4 +796,89 @@ else
     echo "   skip: host に make か gcc が無い (裏取りができない)"
 fi
 
+section "第 3 部の 3 の 2: -I を探す道として持つ (docs/stage017-cc.md 19 章)"
+
+# **第 3 部の 3 の 2 の要である。**
+#
+# ヘッダを inc/ にだけ置き，束ねには入れない。cc18 の「-I は階層ごと
+# 束ねる」ではこれも通るが，tcc の木では員が上限を超えて落ちる (16.2)。
+# cc19 は -I を pp17 へ渡し，pp17 が要るものだけを開く。
+#
+# **道は変えたが出るものは変わっていないこと**を，cc18 の出力と
+# バイトで突き合わせて見る。
+#
+# 併せて 19.3 の破壊が戻っていないことを見る。cc18 は -o を付けた
+# 結合で「最後に走査したヘッダ」を .o で潰していた。**症状が出ない**
+# 壊れ方なので，出力ではなく**入力が無傷であること**を見るしかない。
+r=$out/proot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/inc"
+cp tmp/build/pp16cmd "$r/bin/pp16"
+cp tmp/build/pp17 "$r/bin/pp17"
+cp tmp/build/cc15pcmd "$r/bin/cc15p"
+cp tmp/build/ld16cmd "$r/bin/ld16"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp stage017/libc19/include/*.h "$r/include/"
+cp stage017/libc19/include/sys/*.h "$r/include/sys/"
+cp tmp/build/l19_src_string.o tmp/build/l19_src_stdlib.o \
+   tmp/build/l19_src_misc15.o tmp/build/l19_posix_sys.o \
+   tmp/build/l19_posix_morecore.o tmp/build/l19_posix_stdio.o \
+   tmp/build/l19_posix_assert.o tmp/build/l19_posix_dir.o \
+   tmp/build/rt64.o tmp/build/rtfp.o "$r/lib/"
+cp tmp/build/cc18 "$r/cc18"
+cp tmp/build/cc19 "$r/cc19"
+printf '#define BASE 40\n' > "$r/inc/conf.h"
+printf '#include "conf.h"\n#define TOTAL (BASE + 2)\n' > "$r/inc/extra.h"
+cat > "$r/main.c" <<'CEOF'
+#include <stdio.h>
+#include "extra.h"
+int main(void) { printf("total %d\n", TOTAL); return 0; }
+CEOF
+cat > "$r/go.sh" <<'EOF'
+cc18 -c main.c -o m18.o -I inc
+echo "cc18 $?"
+cc19 -c main.c -o m19.o -I inc
+echo "cc19 $?"
+cc19 -o prog main.c -I inc
+echo "link $?"
+prog
+echo "run $?"
+cc19 -c main.c -o bad.o
+echo "noinc $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/pi.out" 8388608 512
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/incpath.txt "$out/pi.out" \
+    > "$out/pi.diff"
+report $? "run: ヘッダが -I にしか無くても cc19 が翻訳・結合し，走る"
+[ -s "$out/pi.diff" ] && sed -n '4,$p' "$out/pi.diff"
+
+# 走った後の像を戻して中身を見る
+if [ "$rc" -eq 0 ]; then
+    dd if="$out/r3" of="$out/pi.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/piback"
+    sh tools/sfs3.sh unpack "$out/pi.img" "$out/piback" > /dev/null 2>&1
+fi
+
+# **束ねる道と探す道が同じ .o を出すこと** (19.2 の C)
+[ "$rc" -eq 0 ] && cmp -s "$out/piback/m18.o" "$out/piback/m19.o"
+report $? "same: cc18 (束ねる) と cc19 (探す道) が同じ .o を出す"
+
+# **入力が無傷であること** (19.3 の破壊が戻っていないこと)
+ok=0
+for f in inc/conf.h inc/extra.h main.c include/sys/time.h include/sys/stat.h; do
+    if ! cmp -s "$r/$f" "$out/piback/$f"; then
+        ok=1
+        echo "   壊れた: $f ($(wc -c < "$r/$f") -> $(wc -c < "$out/piback/$f" 2> /dev/null) バイト)"
+    fi
+done
+[ "$rc" -eq 0 ] && [ "$ok" -eq 0 ]
+report $? "spec: 結合しても入力のヘッダとソースが 1 バイトも変わらない (19.3)"
+
+# .o が名前どおりの場所にできていること (潰した先へ書いていない証拠)
+[ "$rc" -eq 0 ] && [ -s "$out/piback/_t0.o" ]
+report $? "spec: 中間の .o が _t0.o として在る (19.3)"
+
 summary
