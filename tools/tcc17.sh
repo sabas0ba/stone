@@ -46,7 +46,16 @@ do_root() {
     mkdir -p "$root/bin" "$root/include/sys" "$root/lib" "$root/t"
     cp tmp/build/pp16cmd  "$root/bin/pp16"
     cp tmp/build/pp17     "$root/bin/pp17"
-    cp tmp/build/cc15pcmd "$root/bin/cc15p"
+    # **器を差し替えて試せるようにする。** 凍結世代を直すかどうかを
+    # 決める前に「直したら通るのか」を測るためのもので，既定では
+    # 使わない (docs/stage017-cc.md 25.3)
+    if [ -n "${STONE_CC15P:-}" ]; then
+        need "$STONE_CC15P" "STONE_CC15P に置いた器"
+        cp "$STONE_CC15P" "$root/bin/cc15p"
+        echo "note: cc15p を $STONE_CC15P で差し替えた" >&2
+    else
+        cp tmp/build/cc15pcmd "$root/bin/cc15p"
+    fi
     cp tmp/build/ld16cmd  "$root/bin/ld16"
     cp tmp/build/sh2.bin  "$root/bin/sh2"
     cp tmp/build/sh2.bin  "$root/sh2"
@@ -83,7 +92,7 @@ do_root() {
 # その 1 本の入力が前と同じなら飛ばす
 stampkey() {
     sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
-        tmp/build/cc19 tmp/build/pp17 tmp/build/cc15pcmd tmp/build/ld16cmd \
+        tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15pcmd}" tmp/build/ld16cmd \
         tmp/build/kernel24.bin 2> /dev/null | sha256sum | cut -d' ' -f1
 }
 
@@ -235,6 +244,23 @@ mk_scaffold() {
     cp "$src/Makefile" "$root/t/Makefile"
     [ -d "$src/include" ] && mkdir -p "$root/t/include" \
         && cp "$src"/include/*.h "$root/t/include/"
+    # **libc のヘッダも t/include へ置く。** lib/ の命令は -B.. なので，
+    # 出来た tcc はそこを sysinclude として見る (CONFIG_TCCDIR の / では
+    # なくなる)。tcov.c が <stdio.h> を読む。
+    #
+    # **tcc 自身のものを上書きしない。** stdarg.h / stddef.h は tcc の
+    # ものでなければならない —— 我々の stdarg.h は cc 専用の隠しローカル
+    # を使うので，tcc が訳すときには通らない
+    # (tools/tcc-stone.sh の「平らな名前空間」の註)
+    for f in stage017/libc19/include/*.h; do
+        b=$(basename "$f")
+        [ -f "$root/t/include/$b" ] || cp "$f" "$root/t/include/$b"
+    done
+    mkdir -p "$root/t/include/sys"
+    for f in stage017/libc19/include/sys/*.h; do
+        b=$(basename "$f")
+        [ -f "$root/t/include/sys/$b" ] || cp "$f" "$root/t/include/sys/$b"
+    done
     cp stage015/tcc/config-stone.h "$root/t/config.h"
     cat > "$root/t/config.mak" <<'CFEOF'
 # 我々の OS 向けの config.mak (docs/stage017-cc.md 21 章)。
