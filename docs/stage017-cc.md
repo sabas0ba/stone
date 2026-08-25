@@ -1797,3 +1797,67 @@ make: 15 行 / mk20: 15 行
 
 **`config.mak` は「上位から与える設定」であって，階層ごとに変わる値を
 書く場所ではない。** `TOPSRC=$(TOP)` だけを置くのが正しい。
+
+## 23. `libtcc1.a` の途中で止まった (第 3 部の 3 の 3)
+
+### 23.1 どこまで行ったか
+
+`mk20` に `lib/Makefile` を読ませ，**我々が作った `tcc` 自身**に翻訳
+させた。
+
+```
+$ sh tools/tcc17.sh lib
+../tcc -c libtcc1.c -o libtcc1.o -B.. -I..      通った
+../tcc -c riscv32.c -o riscv32.o -B.. -I..      通った
+../tcc -c stdatomic.c -o stdatomic.o -B.. -I..
+stdatomic.c:72: error: ',' expected (got ')')
+longjmp: not supported (compile error path)
+mk: *** [stdatomic.o] error 1
+```
+
+**2 本は通った。** `libtcc1.c` (64 bit 演算の塊) と `riscv32.c`
+(`riscv32.patch` が足した実行時支援) を，我々の OS の上の我々の tcc が
+訳した。これは小さくない。
+
+3 本目で止まった。
+
+### 23.2 これは環境ではなく，我々の誤訳である
+
+`stdatomic.c:72` は `ATOMIC_GEN(uint8_t, 1)` —— マクロの展開である。
+
+**上流の tcc は同じファイルを通す。**
+
+```
+$ tmp/tcc/build/riscv32-tcc -c stdatomic.c -o /tmp/sa.o -B<src> -I.
+rc=0
+```
+
+同じソース・同じヘッダで，**ホストの gcc が作った tcc は通り，我々の
+cc が作った tcc は拒む**。違いは「誰が tcc を訳したか」だけである。
+したがってこれは `docs/stage015-tcc.md` 12.18 が言う型 ——
+**我々の cc が tcc を誤訳した**——に当たる。
+
+止まった場所がマクロの展開なので，疑うべきは我々が訳した `tccpp.o`
+(tcc の前処理器) である。
+
+### 23.3 `longjmp` がここで効いた
+
+20.2 で「実害は小さい」と書いたが，ここでも同じ形が出た。
+
+```
+stdatomic.c:72: error: ',' expected (got ')')      <- 誤りの本文は出る
+longjmp: not supported (compile error path)        <- そのあと我々が止める
+```
+
+**誤りの内容は伝わる。** ただし tcc は本来 1 つ目の誤りで諦めずに
+続きを読むので，**2 つ目以降の誤りが見えない**。原因を絞るときには
+効いてくる。`setjmp.h` が言う「実測で判ったら入れ直す」の理由が
+1 つ増えた。
+
+### 23.4 次にやること
+
+いきなり `tccpp.o` を疑うのではなく，まず**どこで食い違うかを狭める**。
+Stage 15 に道具がある (`tools/t1cmp.sh` / `tools/t1probe.sh`) ——
+同じソースを我々の tcc とホストの `tccH` の両方に OS の上で訳させ，
+出た `.o` を突き合わせる形である。`stdatomic.c` を最小化してから
+当てるのが早い。
