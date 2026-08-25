@@ -114,9 +114,18 @@ stampkey() {
         # **libc のヘッダも数える。** cc19 は /include から読むので
         # (do_root が libc20 のものを置く)，直したら翻訳結果が変わりうる。
         # 入れていないと「直したのに作り直されない」が起きる —— この道具で
-        # 2 度やった取り違えと同じ族である (docs/stage017-cc.md 28.5)。
+        # 何度もやった取り違えと同じ族である (docs/stage017-cc.md 28.5)。
         # 見るのは $root/include であって $root/t/include ではない
         find "$root/include" -type f | sort | xargs sha256sum
+        # **tcc の木も丸ごと数える。** 単位は -I t で訳すので，共有の
+        # 宣言 (tcc.h / tcctok.h / *.def) を直せば結果が変わる。さらに
+        # tcc.c は tcctools.c を，libtcc.c は他を #include するので
+        # 「.c は自分のぶんだけ」も足りない。**数え落としを避ける方を
+        # 採る** —— 素材は patch を当て直したときにしか動かないので，
+        # そのときに 11 本まとめて作り直せばよい
+        find "$root/t" -maxdepth 1 -type f \
+            \( -name '*.c' -o -name '*.h' -o -name '*.def' \) \
+            | sort | xargs sha256sum
     } 2> /dev/null | sha256sum | cut -d' ' -f1
 }
 

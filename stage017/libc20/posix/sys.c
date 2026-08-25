@@ -133,20 +133,15 @@ int fcntl(int fd, int cmd, void *arg) {
     errno = EBADF;
     return -1;
   }
-  if (cmd == F_GETLK) {
-    /* 問い合わせ。**答を書かなければ意味がない。** 競合相手が居ないので
-     * 答は常に「誰も持っていない」である。書かずに 0 を返すと，呼ぶ側は
-     * 自分が入れた l_type をそのまま読み，**衝突していると受け取る** */
-    if (arg == 0) { errno = EINVAL; return -1; }
-    fl = (struct flock *)arg;
-    fl->l_type = F_UNLCK;
-    return 0;
-  }
-  if (cmd == F_SETLK || cmd == F_SETLKW) {
-    /* 競合相手が居ないので必ず取れる。ただし **依頼の形が壊れている
-     * ものは受けない** —— 受けると，何も指していない依頼が通ったと
-     * 呼ぶ側に読める。「知らないものは受けて捨てない」を，命令だけで
-     * なく**中身にも**当てる */
+  if (cmd == F_GETLK || cmd == F_SETLK || cmd == F_SETLKW) {
+    /* **依頼の形は 3 つとも同じに見る。** 問い合わせ (F_GETLK) も
+     * 「どの種類の錠を，どの範囲について訊くのか」を書いて渡すもので，
+     * 取りに行く側と同じ形である。片方だけ見ていると，壊れた依頼が
+     * 問い合わせの口からだけ通る。
+     *
+     * 「知らないものは受けて捨てない」を，命令だけでなく**中身にも**
+     * 当てる。枝を分けていたせいで，同じ判定を 2 度に分けて入れる
+     * ことになった (レビューで 3 度指摘を受けた)。ここで 1 つにする */
     if (arg == 0) { errno = EINVAL; return -1; }
     fl = (struct flock *)arg;
     if (fl->l_type != F_RDLCK && fl->l_type != F_WRLCK
@@ -160,6 +155,11 @@ int fcntl(int fd, int cmd, void *arg) {
       errno = EINVAL;
       return -1;
     }
+    /* 競合相手が居ないので，取りに行けば必ず取れ，訊けば必ず
+     * 「誰も持っていない」である。**問い合わせは答を書く** ——
+     * 書かずに 0 を返すと，呼ぶ側は自分が入れた l_type をそのまま
+     * 読んで衝突していると受け取る */
+    if (cmd == F_GETLK) fl->l_type = F_UNLCK;
     return 0;
   }
   /* 知らない命令は受けて捨てない */

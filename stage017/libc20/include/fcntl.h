@@ -60,10 +60,12 @@ struct flock {
  * **arg が無い依頼は 3 つとも EINVAL で拒む。** 何を取る (何を問う) のか
  * が書いていないものを通すと，形の壊れた依頼が受理されたと読める。
  *
- * **F_SETLK / F_SETLKW は中身も見る。** l_type が F_RDLCK / F_WRLCK /
+ * **中身も 3 つとも同じに見る。** l_type が F_RDLCK / F_WRLCK /
  * F_UNLCK のどれでもない，あるいは l_whence が SEEK_SET / SEEK_CUR /
- * SEEK_END のどれでもない依頼は EINVAL で拒む。「知らないものは受けて
- * 捨てない」を，命令だけでなく**中身にも**当てる */
+ * SEEK_END のどれでもない依頼は EINVAL で拒む。問い合わせ (F_GETLK) も
+ * 「どの種類の錠を，どの範囲について訊くのか」を書いて渡すものなので，
+ * 取りに行く側と同じ形である。「知らないものは受けて捨てない」を，
+ * 命令だけでなく**中身にも**当てる */
 int fcntl(int fd, int cmd, void *arg);
 
 #endif
