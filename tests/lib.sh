@@ -86,37 +86,6 @@ summary() {
 # 並列に走るので，共有するとお互いの中間結果を踏む
 stable_dir=${stable_dir:-tmp/stable}
 
-# QEMU を回して出力を作る手順を，**打ち切られたときだけ**やり直す。
-#
-#   stable_out <名前> <手順>
-#
-# <手順> は引数を取らず，QEMU を回して出力を作り，成否を終了状態で返す。
-# tools/run-qemu.sh は打ち切ったとき 124 を返すので，**それだけ**を見る。
-#
-# **答が違うときはやり直さない。** それは中身の話であって環境ではない
-# (そちらは stable_cmp が扱う)。ここが見るのは「1 秒で終わるはずのものが
-# 900 秒動かない」という，答以前の揺らぎである (docs/dev-notes.md 1.6)。
-#
-# やり直しは 1 度きり。**本当に止まるものは 2 度目も止まる。**
-stable_out() {
-    _oname=$1
-    _oproc=$2
-    _on=0
-    while :; do
-        "$_oproc"
-        _orc=$?
-        [ "$_orc" -ne 124 ] && return "$_orc"
-        _on=$((_on + 1))
-        echo "   $_oname: QEMU が打ち切られた ($_on 回目)"
-        if [ "$_on" -ge 2 ]; then
-            echo "     2 度とも打ち切られた。環境として片付けず，そのまま落とす"
-            return 124
-        fi
-        echo "     1 秒で終わるはずのものが打ち切りまで動かないのは中身の話では"
-        echo "     ない (docs/dev-notes.md 1.6)。もう一度だけ走らせる"
-    done
-}
-
 stable_cmp() {
     _sname=$1
     _sgen=$2
