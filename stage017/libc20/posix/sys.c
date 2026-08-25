@@ -119,7 +119,7 @@ int spawn(char *path, char **argv, char *in, char *out) {
  */
 
 int fcntl(int fd, int cmd, void *arg) {
-  (void)arg;
+  struct flock *fl;
   /* 開いていない fd を黙って受けない。**受けると「ロックが取れた」と
    * 読める答を返してしまう。**
    *
@@ -133,10 +133,18 @@ int fcntl(int fd, int cmd, void *arg) {
     errno = EBADF;
     return -1;
   }
-  if (cmd == F_SETLK || cmd == F_SETLKW || cmd == F_GETLK) {
-    /* 競合相手が居ないので必ず取れる。F_GETLK は「誰も持っていない」
-     * を返すべきだが，呼ぶ側 (tcc の tcov.c) は使っていないので
-     * arg を書き換えない。**書き換えないことを註に残す** */
+  if (cmd == F_GETLK) {
+    /* 問い合わせ。**答を書かなければ意味がない。** 競合相手が居ないので
+     * 答は常に「誰も持っていない」である。書かずに 0 を返すと，呼ぶ側は
+     * 自分が入れた l_type をそのまま読み，**衝突していると受け取る** */
+    if (arg == 0) { errno = EINVAL; return -1; }
+    fl = (struct flock *)arg;
+    fl->l_type = F_UNLCK;
+    return 0;
+  }
+  if (cmd == F_SETLK || cmd == F_SETLKW) {
+    /* 競合相手が居ないので必ず取れる */
+    (void)arg;
     return 0;
   }
   /* 知らない命令は受けて捨てない */
