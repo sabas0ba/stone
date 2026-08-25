@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15p.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15q.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -58,6 +58,7 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15k.bin:stage015/cc15k.md cc15l.bin:stage015/cc15l.md \
         cc15m.bin:stage015/cc15m.md cc15n.bin:stage015/cc15n.md \
         cc15o.bin:stage015/cc15o.md cc15p.bin:stage015/cc15p.md \
+        cc15q.bin:stage015/cc15q.md \
         pp15.bin:stage015/pp15.md \
         pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
@@ -65,18 +66,18 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15p と pp15 / pp16 / ld16 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15q と pp15 / pp16 / ld16 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
 fp15gen() {
-    { cat stage015/cc15p.sc; printf '\004'; } \
-        | sh tools/env.sh qemu tmp/build/cc15p.bin > tmp/s15/b3.o \
+    { cat stage015/cc15q.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15q.bin > tmp/s15/b3.o \
         && { cat tmp/s15/b3.o; printf '\0'; } \
             | sh tools/env.sh qemu "$ld" > "$1"
 }
-stable_cmp "fixpoint(cc15p)" fp15gen tmp/build/cc15p.bin
-report $? "fixpoint: cc15p が自分自身を再生成する (B2 == B3)"
+stable_cmp "fixpoint(cc15q)" fp15gen tmp/build/cc15q.bin
+report $? "fixpoint: cc15q が自分自身を再生成する (B2 == B3)"
 
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
@@ -87,7 +88,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15p が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15q が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 section "適合台帳の照合 (64 bit の土台)"
 
