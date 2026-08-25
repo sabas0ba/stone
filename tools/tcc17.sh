@@ -431,6 +431,13 @@ do_lib() {
         echo "FAIL: libtcc1.a を ar17 が読めない (書庫として壊れている。$out/lib.log)" >&2
         return 1
     fi
+    # **lib/Makefile が最後まで通ること。** libtcc1.a の後にも作るものが
+    # あり (runmain.o)，そこで止まっていては「回した」と言えない
+    # (docs/stage017-cc.md 29 章)
+    if ! grep -q '^lib 0$' "$out/lib.log"; then
+        echo "FAIL: mk -C t/lib が最後まで通っていない ($out/lib.log)" >&2
+        return 1
+    fi
     echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト / \
 $(grep -c . "$out/libtcc1.list") 員)" >&2
 }

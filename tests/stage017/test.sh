@@ -958,6 +958,10 @@ else
     printf '%s\n' $LIBTCC1_MEMBERS > tmp/s17/libtcc1.want
     cmp -s tmp/s17/libtcc1.list tmp/s17/libtcc1.want
     report $? "lib: 我々の OS の上で組んだ tcc の -ar が作った libtcc1.a を ar17 が読め，員が 10 本そろっている"
+    # **最後まで通ること。** libtcc1.a の後にも作るものがある (runmain.o)。
+    # 逆進 (backtrace) を切る前は bt-exe.c で止まっていた (29 章)
+    grep -q '^lib 0$' tmp/s17/lib.log
+    report $? "lib: lib/Makefile が最後まで通る (mk -C t/lib が rc 0)"
 fi
 
 summary

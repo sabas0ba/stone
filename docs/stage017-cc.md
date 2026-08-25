@@ -2408,4 +2408,61 @@ native でないと言う。** その食い違いがここに出た。
 も左右するので tcc の中身が変わる。別の一区切りとして進める。
 
 `libtcc1.a` は `bt-exe.o` を員に持たない (`lib/Makefile` の `EXTRA_O`
-にある) ので，**書庫としては完成している**。
+にある) ので，**書庫としては完成している**。直したのは 29 章。
+
+## 29. `lib/Makefile` が最後まで通った (第 3 部の 3 の 3 の完了)
+
+### 29.1 直したのは設定 2 か所
+
+28.6 で見たとおり，`Makefile` 側は我々を native と言い，ソース側は
+native でないと言っていた。上流の `configure` が
+`--config-backtrace=no` で書く 2 か所を，我々も手で書く。
+
+| 置き場 | 足したもの |
+|---|---|
+| `stage017/tcc/config-stone.h` (新しい世代) | `CONFIG_TCC_BACKTRACE 0` / `CONFIG_TCC_BCHECK 0` |
+| `tools/tcc17.sh` の `config.mak` | `CONFIG_backtrace=no` / `CONFIG_bcheck=no` |
+
+**片方だけでは意味がない。** `config.h` だけ切ると `Makefile` は
+`bt-exe.o` を作らせ続け，型が無いまま翻訳して落ちる。`config.mak` だけ
+切ると `tcc` の中に逆進の実装が残る。**同じ 1 つの決めごとを 2 つの
+場所で言う**形になっているので，両方を揃える。
+
+`stage015/tcc/config-stone.h` は凍結世代なので触らず，全文複製して
+`stage017/tcc/` に置いた (`docs/artifacts.md` 4 章)。
+
+### 29.2 結果
+
+```
+../tcc -ar rcs ../libtcc1.a libtcc1.o riscv32.o ... dsohandle.o
+../tcc -c runmain.c -o ../runmain.o -B.. -I..
+lib 0
+---- ar t ----
+libtcc1.o riscv32.o stdatomic.o atomic.o builtin.o
+alloca.o alloca-bt.o tcov.o armflush.o dsohandle.o
+arlist 0
+```
+
+`bt-exe.c` は**作られなくなった**。`runmain.o` はそのまま作られる
+(`Nat` の側で，`Cbt` ではない)。`mk -C t/lib` が rc 0 で終わる。
+
+### 29.3 逆進を切ると tcc が小さくなる
+
+| | 逆進あり | 逆進なし |
+|---|---|---|
+| `tccgen.o` | 313,220 | 306,816 |
+| `tccelf.o` | 139,520 | 135,016 |
+| `riscv64-gen.o` | 96,760 | 91,936 |
+| `tmp/s17/tcc` | 985,568 | **973,316** |
+
+`tccelf.c` の btstub と `tccrun.c` の逆進の実装が落ちた分である。
+**`tcc -b` は使えなくなる。** 我々の OS には signal も dlopen も無い
+ので，元から動かせない機能だった。
+
+### 29.4 完了条件を強くした
+
+`tools/tcc17.sh lib` は `lib 0` を要求するようにした。`libtcc1.a` の
+後にも作るものがあり (`runmain.o`)，そこで止まっていては「`Makefile`
+を回した」と言えない。`tests/stage017` も同じものを見る。
+
+第 3 部の 3 の 3 はここで一区切りである。
