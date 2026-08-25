@@ -2337,16 +2337,50 @@ void __bt_init(rt_context *p, int is_exe)
 ```
 
 で，`rt_context` が型として通っていない (通っていれば `*` は宣言子の
-一部として読める)。`rt_context` は `tccrun.c` の中で
-`#ifdef CONFIG_TCC_BACKTRACE` に包まれており，その印は `tcc.h` の
+一部として読める)。
+
+**これは我々の cc の誤りではなく，我々の設定の抜けである。**
+`rt_context` は `tccrun.c` の中で
 
 ```c
-#if defined CONFIG_TCC_BACKTRACE && CONFIG_TCC_BACKTRACE==0
+#ifdef TCC_IS_NATIVE
+#ifdef CONFIG_TCC_BACKTRACE
+typedef struct rt_context { ... } rt_context;
 ```
 
-という条件から立つ。**まだ原因を突き止めていない。** 我々の cc が
-`tccpp.c` を誤って翻訳しているのか，`tcc.h` の読み込みの順が違うのか，
-どちらとも言える段階ではない。次に見る。
+と二重に包まれている。そして `tcc.h` の `TCC_IS_NATIVE` の条件は
 
-`libtcc1.a` は `bt-exe.o` を員に持たないので，**書庫としては完成して
-いる**。`bt-exe.o` は逆進 (backtrace) の実行時支援で，別に置かれる。
+```c
+# elif defined __riscv && defined __LP64__ && defined TCC_TARGET_RISCV64
+#  define TCC_IS_NATIVE
+```
+
+—— **riscv は 64 bit しか見ていない。** 我々は RV32 なので `__LP64__` が
+立たず，`TCC_IS_NATIVE` が定義されない。上流の tcc から見て，我々の
+対象では逆進 (backtrace) の実行時支援は最初から作れない。
+
+ところが `lib/Makefile` の側は
+
+```make
+Nat = $(if $X,no,)
+Cbt = $(Nat)$(subst yes,,$(CONFIG_backtrace))
+$(Cbt)COMMON_O += bt-exe.o bt-log.o
+```
+
+で，交叉の接頭辞 `X` を置いていない我々を「native」とみなして
+`bt-exe.o` を作らせる。**Makefile 側は native と言い，ソース側は
+native でないと言う。** その食い違いがここに出た。
+
+上流の `configure` は `--config-backtrace=no` を受けると
+
+- `config.h` に `#define CONFIG_TCC_BACKTRACE 0`
+- `config.mak` に `CONFIG_backtrace=no`
+
+の 2 つを書く (`configure` 704〜705 行)。我々の `config-stone.h` /
+`config-stone.mak` は手で固定しているので，この 2 つが抜けていた。
+**次はここを直す** —— tcc のソースには手を入れず，設定だけで済む。
+ただし `CONFIG_TCC_BACKTRACE` は `tcc -b` の実装 (`tccelf.c` の btstub)
+も左右するので tcc の中身が変わる。別の一区切りとして進める。
+
+`libtcc1.a` は `bt-exe.o` を員に持たない (`lib/Makefile` の `EXTRA_O`
+にある) ので，**書庫としては完成している**。
