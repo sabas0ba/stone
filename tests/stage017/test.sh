@@ -944,13 +944,17 @@ alloca.o alloca-bt.o tcov.o armflush.o dsohandle.o"
 if [ ! -d docs/external/tcc ]; then
     echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
     echo "   **第 3 部の 3 の 3 の完了条件はこの節である。CI では走らない**"
-elif [ ! -s tmp/s17/libtcc1.a ] || [ ! -s tmp/s17/libtcc1.list ]; then
+elif [ ! -s tmp/s17/libtcc1.a ]; then
+    # **飛ばしてよいのは「書庫がまだ無い」ときだけ。** 書庫が在るのに
+    # 員の並びが無い (ar17 が読めなかった) のは壊れているということで，
+    # それは飛ばさず落とす —— **「材料が無い」と「壊れている」は別**
     echo "   skip: tmp/s17 の材料が揃っていない"
     echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link \\"
     echo "     && sh tools/tcc17.sh mk && sh tools/tcc17.sh lib"
 else
     # 我々の ar17 が，我々の tcc が作った書庫を読めること。
-    # 10 本すべてが，Makefile の並びどおりに出ること
+    # 10 本すべてが，Makefile の並びどおりに出ること。
+    # libtcc1.list が空 (読めなかった) ならここで落ちる
     printf '%s\n' $LIBTCC1_MEMBERS > tmp/s17/libtcc1.want
     cmp -s tmp/s17/libtcc1.list tmp/s17/libtcc1.want
     report $? "lib: 我々の OS の上で組んだ tcc の -ar が作った libtcc1.a を ar17 が読め，員が 10 本そろっている"

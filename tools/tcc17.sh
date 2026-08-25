@@ -388,17 +388,27 @@ do_lib() {
     dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
     rm -rf "$out/back"
     sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
-    if [ -s "$out/back/t/libtcc1.a" ]; then
-        cp "$out/back/t/libtcc1.a" "$out/libtcc1.a"
-        # ar17 が読めた員の並びを取っておく。テストはこれを見る
-        sed -n '/^---- ar t ----$/,/^arlist /p' "$out/lib.log" \
-            | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/libtcc1.list"
-        echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト / \
-$(grep -c . "$out/libtcc1.list") 員)" >&2
-    else
+    if [ ! -s "$out/back/t/libtcc1.a" ]; then
         echo "FAIL: libtcc1.a ができていない ($out/lib.log)" >&2
         return 1
     fi
+    # **壊れていても取り出す。** 読めない書庫そのものが手掛かりになる
+    # (27 章はこれを見て原因に行き着いた)
+    cp "$out/back/t/libtcc1.a" "$out/libtcc1.a"
+    # ar17 が読めた員の並びを取っておく。テストはこれを見る
+    sed -n '/^---- ar t ----$/,/^arlist /p' "$out/lib.log" \
+        | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/libtcc1.list"
+    # **ファイルが出たことを成功にしてはいけない。** 員の見出しが 2 進数の
+    # まま 50,412 バイトのファイルが出ることが実際にあった (27〜28 章)。
+    # ar17 が読めなければここで落とす —— 落とさないと libtcc1.list が空に
+    # なり，テスト側はそれを「材料が無い」と読んで飛ばしてしまう。
+    # **「材料が無い」と「壊れている」は別である**
+    if ! grep -q '^arlist 0$' "$out/lib.log" || [ ! -s "$out/libtcc1.list" ]; then
+        echo "FAIL: libtcc1.a を ar17 が読めない (書庫として壊れている。$out/lib.log)" >&2
+        return 1
+    fi
+    echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト / \
+$(grep -c . "$out/libtcc1.list") 員)" >&2
 }
 
 case ${1:-all} in
