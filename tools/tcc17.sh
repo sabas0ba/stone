@@ -392,7 +392,7 @@ do_lib() {
         cp "$out/back/t/libtcc1.a" "$out/libtcc1.a"
         # ar17 が読めた員の並びを取っておく。テストはこれを見る
         sed -n '/^---- ar t ----$/,/^arlist /p' "$out/lib.log" \
-            | sed -e '1d' -e '$d' > "$out/libtcc1.list"
+            | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/libtcc1.list"
         echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト / \
 $(grep -c . "$out/libtcc1.list") 員)" >&2
     else
