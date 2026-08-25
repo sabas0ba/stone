@@ -67,7 +67,11 @@ build_stage017() {
              posix/sys posix/morecore posix/stdio posix/assert posix/dir; do
         n=$(echo "$f" | tr / _)
         step "l19_$n" "l19_$n.o" \
-            -- "stage017/libc19/$f.c" tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- "stage017/libc19/$f.c" \
+               stage017/libc19/include/*.h \
+               stage017/libc19/include/sys/time.h \
+               stage017/libc19/include/sys/stat.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
             -- libc19_run "$f" "$n"
     done
 
@@ -86,11 +90,21 @@ build_stage017() {
     # libc の第 20 世代 (第 3 部の 3 の 3)。libc19 との差は
     # 助言的ロック (fcntl) と getpid と EINTR だけ。tcc の lib/tcov.c が
     # 要る (docs/stage017-cc.md 27 章)
+    #
+    # **ヘッダも入力に数える。** libc*_run は include/*.h を束ねてから
+    # 翻訳するので，ヘッダを直したら .o が変わりうる。ここに書かないと
+    # 外側の stage の印だけが変わって build_stage017 が走り，中の step は
+    # 「前と同じ」と言って**古い .o を持ち回ったまま新しい印が書かれる**。
+    # 数えるのは束ねているものと同じ並びにすること
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
              posix/sys posix/morecore posix/stdio posix/assert posix/dir; do
         n=$(echo "$f" | tr / _)
         step "l20_$n" "l20_$n.o" \
-            -- "stage017/libc20/$f.c" tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- "stage017/libc20/$f.c" \
+               stage017/libc20/include/*.h \
+               stage017/libc20/include/sys/time.h \
+               stage017/libc20/include/sys/stat.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
             -- libc20_run "$f" "$n"
     done
 

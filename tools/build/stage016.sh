@@ -41,15 +41,27 @@ build_stage016() {
              posix/sys posix/morecore posix/stdio posix/assert posix/dir; do
         n=$(echo "$f" | tr / _)
         step "l16_$n" "l16_$n.o" \
-            -- "stage016/libc/$f.c" tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- "stage016/libc/$f.c" \
+               stage016/libc/include/*.h \
+               stage016/libc/include/sys/time.h \
+               stage016/libc/include/sys/stat.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
             -- libc16_run "$f" "$n"
         # 第 17 世代 (第 4 部の 1)。libc16 との差は unlink と realpath
         step "l17_$n" "l17_$n.o" \
-            -- "stage016/libc17/$f.c" tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- "stage016/libc17/$f.c" \
+               stage016/libc17/include/*.h \
+               stage016/libc17/include/sys/time.h \
+               stage016/libc17/include/sys/stat.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
             -- libc17_run "$f" "$n"
         # 第 18 世代 (第 4 部の 2)。libc17 との差は spawn2 だけ
         step "l18_$n" "l18_$n.o" \
-            -- "stage016/libc18/$f.c" tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- "stage016/libc18/$f.c" \
+               stage016/libc18/include/*.h \
+               stage016/libc18/include/sys/time.h \
+               stage016/libc18/include/sys/stat.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
             -- libc18_run "$f" "$n"
     done
 
