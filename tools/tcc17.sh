@@ -332,9 +332,20 @@ do_mk() {
 # アセンブラを通る —— 我々が訳した riscv64-asm.o がここで初めて
 # 本気で使われる (docs/stage017-cc.md 22.2)。
 do_lib() {
-    [ -s "$out/tcc" ] || { echo "error: $out/tcc が無い (先に link か mk)" >&2; exit 1; }
+    # **どちらの道で作った tcc でもよい。** Makefile から回したもの
+    # (tcc-mk) を優先する —— そちらが本筋だからである。
+    # 名前を 1 つに決め打ちして「無い」と言うのは，前に検査でも
+    # 踏んだ形である (docs/stage017-cc.md 21 章の註)
+    _tcc=
+    [ -s "$out/tcc-mk" ] && _tcc=$out/tcc-mk
+    [ -z "$_tcc" ] && [ -s "$out/tcc" ] && _tcc=$out/tcc
+    [ -n "$_tcc" ] || {
+        echo "error: $out/tcc-mk も $out/tcc も無い (先に mk か link)" >&2
+        exit 1
+    }
+    echo "note: $_tcc を使う" >&2
     mk_scaffold
-    cp "$out/tcc" "$root/t/tcc"
+    cp "$_tcc" "$root/t/tcc"
     rm -f "$root/t/lib"/*.o "$root/t/libtcc1.a"
     {
         printf 'mk -C t/lib -n\necho "dry $?"\n'
