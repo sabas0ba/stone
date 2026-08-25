@@ -902,12 +902,21 @@ if [ ! -d docs/external/tcc ]; then
     echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
     echo "   **第 3 部の 3 の 2 の完了条件はこの節である。CI では走らない**"
     echo "   手元では sh tools/tcc17.sh all && sh tools/tcc17.sh mk を走らせること"
-elif [ ! -s tmp/s17/tcc-mk ]; then
-    echo "   skip: tmp/s17/tcc-mk が無い (sh tools/tcc17.sh mk で作れる)"
+elif [ ! -s tmp/s17/tcc-mk ] || [ ! -s tmp/s17/tcc ] \
+    || [ ! -s tmp/s17/hello.o ] || [ ! -s tmp/s17/back/t/tccdefs_.h ]; then
+    # **見るものが揃っていなければ飛ばす。** 前提を 1 つだけ見て断言を
+    # 3 つ立てていたので，手で別の実験をした後に素の FAIL になった。
+    # 「材料が無い」と「壊れている」は別である
+    echo "   skip: tmp/s17 の材料が揃っていない"
     echo "   **第 3 部の 3 の 2 の完了条件はこの節である**"
+    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link \\"
+    echo "     && sh tools/tcc17.sh mk && sh tools/tcc17.sh check"
 else
     # **同じものが出ること。** 道が 2 つあって違うものが出るなら，
-    # どちらかが間違っている
+    # どちらかが間違っている。
+    #
+    # **両方を同じ回で作ること。** 片方だけ作り直すと出所の違うものを
+    # 比べることになり，中身の話でないところで落ちる (実際に落とした)
     cmp -s tmp/s17/tcc tmp/s17/tcc-mk
     report $? "same: Makefile から出た tcc と，命令を直に並べた tcc がバイト一致"
     # **我々の OS の上で作った tccdefs_.h** がホストのものと一致すること
