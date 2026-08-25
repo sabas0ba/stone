@@ -146,5 +146,5 @@ do_stage016() {
            stage016/libc17/src/*.c stage016/libc17/posix/*.c \
            stage016/libc/include/*.h stage016/libc/include/sys/*.h \
            stage016/libc/src/*.c stage016/libc/posix/*.c \
-           tmp/build/stage015c.stamp tools/build/stage016.sh
+           tmp/build/stage015c.stamp tools/build/stage016.sh tools/bundle.sh
 }

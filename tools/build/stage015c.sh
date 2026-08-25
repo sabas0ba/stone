@@ -55,5 +55,5 @@ do_stage015c() {
            stage015/libc/include/sys/*.h \
            stage015/libc/src/*.c stage015/libc/posix/*.c \
            stage015/rt64.c stage015/rtfp.c \
-           tmp/build/stage015b.stamp tools/build/stage015c.sh
+           tmp/build/stage015b.stamp tools/build/stage015c.sh tools/bundle.sh
 }
