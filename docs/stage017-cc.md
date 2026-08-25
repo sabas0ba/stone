@@ -1730,3 +1730,70 @@ git: not found
   実測は済んだ
 - **`ld16` が未定義記号の名前を言わない** (20.4)。`ld` に世代を刻む
   ときに直す
+
+## 22. 第 3 部の 3 の 3 の実測: 読む側は足りている
+
+`lib/` が `libtcc1.a` を作る段である。まず 14 章・16 章と同じように
+数える。
+
+### 22.1 `mk20` は `lib/Makefile` も読めた
+
+`lib/Makefile` は上位と作りが違う。
+
+```make
+TOP = ..
+include $(TOP)/Makefile
+VPATH = $(TOPSRC)/lib $(TOPSRC)/win32/lib
+T = $(or $(CROSS_TARGET),$(NATIVE_TARGET),unknown)
+XCFG = $(or $(findstring -win,$T),-unx)
+```
+
+**`VPATH` がある。** 14 章で「上位の `Makefile` には要らない」と数えた
+ものが，ここでは出てくる。`mk21` が要るかと思ったが，**要らなかった**。
+
+```
+$ cd lib && mk20 -n
+make: 15 行 / mk20: 15 行
+一致した
+```
+
+15 行が本物の `make -n` と完全に一致する。`VPATH` が効くのは元が
+別の階層にあるときで，ここでは `$(TOPSRC)/lib` が `lib/` 自身を指す
+ので探しに行く必要がない。**「使っている」と「効いている」は違う。**
+
+出る命令はこうである。
+
+```
+../tcc -c libtcc1.c -o libtcc1.o -B.. -I..
+../tcc -c riscv32.c -o riscv32.o -B.. -I..
+../tcc -c atomic.S -o atomic.o -B.. -I..        <- アセンブラ
+   ... (10 本)
+../tcc -ar rcs ../libtcc1.a libtcc1.o ... dsohandle.o
+../tcc -c runmain.c -o ../runmain.o -B.. -I..
+   ... (bcheck.o まで 4 本)
+```
+
+### 22.2 したがって残りは「通す側」だけ
+
+読む側 (`mk20`) は足りている。足りるかどうかが判らないのは，
+**出来た `tcc` 自身**の側である。
+
+1. **`.S` を 3 本** (`atomic.S` `alloca.S` `alloca-bt.S`) —— tcc 自身の
+   アセンブラを通る。我々が翻訳した `riscv64-asm.o` がここで初めて
+   本気で使われる
+2. **`../tcc -ar`** —— tcc 自身の書庫作り
+3. **`-B..`** —— tcc が実行時支援を探す道
+4. `riscv32.c` —— `riscv32.patch` が足した実行時支援
+
+我々の `tcc` が作れることは 20〜21 章で確かめた。**それが翻訳器・
+アセンブラ・書庫作りとして働けるか**がここの問いである。
+
+### 22.3 `config.mak` で 1 つ踏んだ
+
+最初 `config.mak` に `TOP=.` と書いて，`lib/Makefile` の `TOP = ..` を
+潰した (`lib/Makefile` は `TOP = ..` を置いてから `$(TOP)/Makefile` を
+取り込み，その中で `config.mak` が読まれる)。命令が `./tcc` になり，
+`-B` の引数が空になった。
+
+**`config.mak` は「上位から与える設定」であって，階層ごとに変わる値を
+書く場所ではない。** `TOPSRC=$(TOP)` だけを置くのが正しい。
