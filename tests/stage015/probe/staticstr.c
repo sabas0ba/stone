@@ -38,6 +38,11 @@ int f(void) {
   static S1 s1 = { "abc" };
   static S2 s2 = { "abc", "xy" };
   static S3 s3 = { 7, "abc" };
+  /* **ポインタの配列**。ここは実体ではなく再配置を置く場所である。
+   * 「配列なら並べる」と読むとポインタの枠に字が入り，参照先が不正に
+   * なって落ちる (レビューで指摘を受けて直した。cc15q は文字型の配列
+   * だけを受ける) */
+  static struct { char *p[1]; int n; } sp = { "A", 5 };
   /* 前からできていた形。直しで壊していないことを見る */
   static char c[8] = "abc";
   static int  n[2] = { 3, 4 };
@@ -46,6 +51,7 @@ int f(void) {
   if (s1.a[0] != 'a' || s1.a[3] != 0) return 'n';
   if (s2.a[0] != 'a' || s2.b[0] != 'x') return 'n';
   if (s3.n != 7 || s3.a[0] != 'a') return 'n';
+  if (sp.p[0][0] != 'A' || sp.n != 5) return 'n';
   if (c[0] != 'a' || n[0] != 3) return 'n';
   /* その 2 (大域の static。関数内かどうかに関係なく同じ道) */
   if (gh.nm[0] != '/' || gh.sz[0] != '2') return 'n';
