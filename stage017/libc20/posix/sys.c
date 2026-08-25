@@ -143,8 +143,10 @@ int fcntl(int fd, int cmd, void *arg) {
     return 0;
   }
   if (cmd == F_SETLK || cmd == F_SETLKW) {
-    /* 競合相手が居ないので必ず取れる */
-    (void)arg;
+    /* 競合相手が居ないので必ず取れる。ただし **何を取るのかが書いて
+     * いないものは受けない** —— 受けると，形の壊れた依頼が通ったと
+     * 呼ぶ側に読める。F_GETLK と同じに扱う */
+    if (arg == 0) { errno = EINVAL; return -1; }
     return 0;
   }
   /* 知らない命令は受けて捨てない */
