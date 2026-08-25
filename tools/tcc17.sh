@@ -104,9 +104,16 @@ do_root() {
 
 # その 1 本の入力が前と同じなら飛ばす
 stampkey() {
-    sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
-        tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15qcmd}" tmp/build/ld16cmd \
-        tmp/build/kernel24.bin 2> /dev/null | sha256sum | cut -d' ' -f1
+    # **ヘッダも数える。** tcc.h は <fcntl.h> などを読むので，libc の
+    # ヘッダを直したら翻訳結果が変わりうる。ここに入れていないと
+    # 「直したのに作り直されない」が起きる —— この道具で 2 度やった
+    # 取り違えと同じ族である (docs/stage017-cc.md 28.5)
+    {
+        sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
+            tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15qcmd}" \
+            tmp/build/ld16cmd tmp/build/kernel24.bin
+        find "$root/t/include" -type f | sort | xargs sha256sum
+    } 2> /dev/null | sha256sum | cut -d' ' -f1
 }
 
 do_unit() {

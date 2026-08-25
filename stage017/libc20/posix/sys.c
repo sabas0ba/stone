@@ -121,8 +121,18 @@ int spawn(char *path, char **argv, char *in, char *out) {
 int fcntl(int fd, int cmd, void *arg) {
   (void)arg;
   /* 開いていない fd を黙って受けない。**受けると「ロックが取れた」と
-   * 読める答を返してしまう** */
+   * 読める答を返してしまう。**
+   *
+   * 負値だけを弾くのでは足りない。999 のような「負でないが開いていない」
+   * fd も来る。lseek を位置を動かさない形 (SEEK_CUR + 0) で叩いて確かめる
+   * —— 副作用が無く，開いていなければカーネルが EBADF を返す。
+   * 0/1/2 は常に開いているが，カーネルの lseek は端末を扱えないので
+   * 弾かれる。ここで先に通しておく */
   if (fd < 0) { errno = EBADF; return -1; }
+  if (fd > 2 && sys_ecall(SYS_LSEEK, fd, 0, 1) < 0) {
+    errno = EBADF;
+    return -1;
+  }
   if (cmd == F_SETLK || cmd == F_SETLKW || cmd == F_GETLK) {
     /* 競合相手が居ないので必ず取れる。F_GETLK は「誰も持っていない」
      * を返すべきだが，呼ぶ側 (tcc の tcov.c) は使っていないので
