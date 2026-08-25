@@ -107,8 +107,18 @@ step() {
     while [ "$1" != -- ]; do _ins="$_ins $1"; shift; done
     shift
     _stamp=tmp/build/step-$_name.stamp
+    # **束ね役も入力である。** ほとんどの手順は tools/bundle.sh を通して
+    # から翻訳するので，bundle.sh を直せば出るものが変わりうる。
+    # 各 step の入力欄に書き忘れると，Stage の印だけが変わって
+    # build_stageNNN は走るが，中の step は「前と同じ」と言って
+    # **古い生成物に新しい印が書かれる**。書き忘れを 20 か所で拾うのを
+    # やめ，ここで必ず数える (レビューでの指摘。
+    # docs/stage017-cc.md 28.5 の 6)
+    #
+    # 各手順に固有の入力 (ヘッダなど) は，今までどおり呼ぶ側が書くこと。
+    # ここで数えられるのは**どの手順にも共通のもの**だけである
     # shellcheck disable=SC2086
-    _new=$(sha256sum $_ins 2> /dev/null | sha256sum | cut -d' ' -f1)
+    _new=$(sha256sum $_ins tools/bundle.sh 2> /dev/null | sha256sum | cut -d' ' -f1)
     # shellcheck disable=SC2086
     if [ -z "${STONE_FORCE_BUILD:-}" ] && [ -f "$_stamp" ] \
         && [ "$(head -n 1 "$_stamp")" = "$_new" ] \
