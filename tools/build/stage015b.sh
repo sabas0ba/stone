@@ -18,9 +18,11 @@ build_stage015b() {
     ccgen cc15o cc15n stage015/cc15o.sc
     # 構造体の配置を C89 に揃える (14 章)
     ccgen cc15p cc15o stage015/cc15p.sc
-    # 第 17 世代。cc15p との差は 1 か所だけ (関数内 static の初期化子が
-    # 文字列へのポインタのとき lsoff が埋まらない。docs/stage017-cc.md 25 章)。
-    # **鎖の成果物は変わらない** —— 既存のソースはこの形を使っていない
+    # 第 17 世代。cc15p との差は 2 か所で，どちらも「静的な器の初期化子に
+    # 文字列リテラルが出てくると値が壊れる」という 1 つの誤りの別の現れ方
+    # (docs/stage017-cc.md 25 章 / 28 章)。
+    # **鎖の成果物は変わらない** —— 既存のソースはどちらの形も使っていない。
+    # 使うのは tcc の作業場だけ (tools/tcc17.sh)
     ccgen cc15q cc15p stage015/cc15q.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc

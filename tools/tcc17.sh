@@ -39,22 +39,28 @@ need() { [ -e "$1" ] || { echo "error: $1 が無い ($2)" >&2; exit 1; }; }
 do_root() {
     need "$src" "sh tools/tcc.sh src"
     need tmp/tcc/build/tccdefs_.h "sh tools/tcc.sh host"
-    for f in pp16cmd pp17 cc15pcmd ld16cmd sh2.bin cc19 kernel24.bin; do
+    for f in pp16cmd pp17 cc15qcmd ld16cmd sh2.bin cc19 kernel24.bin; do
         need "tmp/build/$f" "sh tools/build.sh stage017"
     done
     rm -rf "$root"
     mkdir -p "$root/bin" "$root/include/sys" "$root/lib" "$root/t"
     cp tmp/build/pp16cmd  "$root/bin/pp16"
     cp tmp/build/pp17     "$root/bin/pp17"
-    # **器を差し替えて試せるようにする。** 凍結世代を直すかどうかを
-    # 決める前に「直したら通るのか」を測るためのもので，既定では
-    # 使わない (docs/stage017-cc.md 25.3)
+    # **名前は cc15p のまま，中身は cc15q を置く。**
+    # cc19 は器の位置を "/bin/cc15p" と焼き込んでいる (stage017/cc19.c 53 行)。
+    # cc19 は凍結世代なのでこの名前は変えられない。一方 cc15p は静的な
+    # 初期化子の中の文字列を壊すので，tcc を cc15p で組むと tcc 自身の
+    # `tcc -ar` が壊れた書庫を吐く (docs/stage017-cc.md 27〜28 章)。
+    # ここは記録対象の作業場ではないので，名前と中身の対応を替えて済ませる
+    #
+    # STONE_CC15P はさらに差し替えて試すための穴。凍結世代を直すかどうかを
+    # 決める前に「直したら通るのか」を測るためのもので，既定では使わない
     if [ -n "${STONE_CC15P:-}" ]; then
         need "$STONE_CC15P" "STONE_CC15P に置いた器"
         cp "$STONE_CC15P" "$root/bin/cc15p"
         echo "note: cc15p を $STONE_CC15P で差し替えた" >&2
     else
-        cp tmp/build/cc15pcmd "$root/bin/cc15p"
+        cp tmp/build/cc15qcmd "$root/bin/cc15p"
     fi
     cp tmp/build/ld16cmd  "$root/bin/ld16"
     cp tmp/build/sh2.bin  "$root/bin/sh2"
@@ -94,13 +100,12 @@ do_root() {
 # その 1 本の入力が前と同じなら飛ばす
 stampkey() {
     sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
-        tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15pcmd}" tmp/build/ld16cmd \
+        tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15qcmd}" tmp/build/ld16cmd \
         tmp/build/kernel24.bin 2> /dev/null | sha256sum | cut -d' ' -f1
 }
 
 do_unit() {
     u=$1
-    [ -d "$root" ] || do_root
     mkdir -p "$out/obj"
     key=$(stampkey "$u")
     if [ -z "${STONE_FORCE_TCC17:-}" ] && [ -s "$out/obj/$u.o" ] \
@@ -108,6 +113,12 @@ do_unit() {
         echo "cached $u ($out/obj/$u.o)" >&2
         return 0
     fi
+    # **作り直すなら root も作り直す。** ここが `[ -d "$root" ] || do_root`
+    # だったせいで，STONE_CC15P で器を差し替えても古い root の bin/cc15p が
+    # そのまま使われ，「差し替えたのに何も変わらない」という測り違いをした。
+    # do_link で同じ誤りを直した (「在れば使う」をやめた) のに，こちらを
+    # 見落としていた —— 1 か所で起きるものは他でも起きる
+    do_root
     # tcc.c と libtcc.c だけ -DONE_SOURCE=0 が要る (16.1 の 34 行のとおり)
     d=
     case $u in tcc|libtcc) d=" -D ONE_SOURCE=0" ;; esac
@@ -336,9 +347,15 @@ do_lib() {
     # (tcc-mk) を優先する —— そちらが本筋だからである。
     # 名前を 1 つに決め打ちして「無い」と言うのは，前に検査でも
     # 踏んだ形である (docs/stage017-cc.md 21 章の註)
+    # ただし **古い方を掴んではいけない。** tcc-mk を無条件に優先して
+    # いたせいで，link で作り直した新しい tcc があるのに古い tcc-mk で
+    # libtcc1.a を作り，「直したのに直っていない」と読み違えた。
+    # 両方あるときは新しい方を採る
     _tcc=
     [ -s "$out/tcc-mk" ] && _tcc=$out/tcc-mk
-    [ -z "$_tcc" ] && [ -s "$out/tcc" ] && _tcc=$out/tcc
+    if [ -s "$out/tcc" ]; then
+        if [ -z "$_tcc" ] || [ "$out/tcc" -nt "$_tcc" ]; then _tcc=$out/tcc; fi
+    fi
     [ -n "$_tcc" ] || {
         echo "error: $out/tcc-mk も $out/tcc も無い (先に mk か link)" >&2
         exit 1
@@ -350,6 +367,12 @@ do_lib() {
     {
         printf 'mk -C t/lib -n\necho "dry $?"\n'
         printf 'mk -C t/lib\necho "lib $?"\n'
+        # **出来た書庫を我々自身の ar で読み直す。** ファイルが出たことと
+        # 書庫になっていることは別で，実際に員の見出しが 2 進数のまま
+        # 50,412 バイトのファイルが出ていた (docs/stage017-cc.md 27〜28 章)。
+        # ホストの ar ではなく ar17 で読む —— 同じ走行の中で済むので
+        # QEMU の起動が増えない
+        printf 'echo "---- ar t ----"\nt/ar t t/libtcc1.a\necho "arlist $?"\n'
     } > "$root/go.sh"
     printf 'sh2 go.sh\n' > "$root/boot"
     sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
@@ -367,7 +390,11 @@ do_lib() {
     sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
     if [ -s "$out/back/t/libtcc1.a" ]; then
         cp "$out/back/t/libtcc1.a" "$out/libtcc1.a"
-        echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト)" >&2
+        # ar17 が読めた員の並びを取っておく。テストはこれを見る
+        sed -n '/^---- ar t ----$/,/^arlist /p' "$out/lib.log" \
+            | sed -e '1d' -e '$d' > "$out/libtcc1.list"
+        echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト / \
+$(grep -c . "$out/libtcc1.list") 員)" >&2
     else
         echo "FAIL: libtcc1.a ができていない ($out/lib.log)" >&2
         return 1

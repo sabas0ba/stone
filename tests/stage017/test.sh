@@ -927,4 +927,33 @@ else
     report $? "run: 我々の OS の上で組んだ tcc が hello.o を出した (tcc17.sh check)"
 fi
 
+section "第 3 部の 3 の 3: libtcc1.a (手元でのみ走る)"
+
+# 出来た tcc が lib/Makefile を回して libtcc1.a を作れること。
+# ここも素材が要るので CI では走らない。
+#
+#   sh tools/tcc17.sh lib
+#
+# **ファイルが出たことを完了条件にしてはいけない。** 実際に，員の
+# 見出しが 2 進数のまま 50,412 バイトの「書庫でないファイル」が出て
+# いた (docs/stage017-cc.md 27〜28 章)。見るのは ar17 が読めた員の
+# 並びである
+LIBTCC1_MEMBERS="libtcc1.o riscv32.o stdatomic.o atomic.o builtin.o
+alloca.o alloca-bt.o tcov.o armflush.o dsohandle.o"
+
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   **第 3 部の 3 の 3 の完了条件はこの節である。CI では走らない**"
+elif [ ! -s tmp/s17/libtcc1.a ] || [ ! -s tmp/s17/libtcc1.list ]; then
+    echo "   skip: tmp/s17 の材料が揃っていない"
+    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link \\"
+    echo "     && sh tools/tcc17.sh mk && sh tools/tcc17.sh lib"
+else
+    # 我々の ar17 が，我々の tcc が作った書庫を読めること。
+    # 10 本すべてが，Makefile の並びどおりに出ること
+    printf '%s\n' $LIBTCC1_MEMBERS > tmp/s17/libtcc1.want
+    cmp -s tmp/s17/libtcc1.list tmp/s17/libtcc1.want
+    report $? "lib: 我々の OS の上で組んだ tcc の -ar が作った libtcc1.a を ar17 が読め，員が 10 本そろっている"
+fi
+
 summary

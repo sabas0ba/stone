@@ -30,6 +30,10 @@ cmdlink_run() {
 build_stage017() {
     cmdlink pp16cmd pp16
     cmdlink cc15pcmd cc15p
+    # tcc の作業場で使う器。cc15p は静的な初期化子の文字列を壊すので
+    # (docs/stage017-cc.md 24〜28 章)，tcc を正しく組むには cc15q が要る。
+    # 鎖のプログラムは今までどおり cc15pcmd で組む
+    cmdlink cc15qcmd cc15q
     cmdlink ld16cmd ld16
 
     step cc17 cc17 \
@@ -243,7 +247,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
