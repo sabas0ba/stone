@@ -143,10 +143,23 @@ int fcntl(int fd, int cmd, void *arg) {
     return 0;
   }
   if (cmd == F_SETLK || cmd == F_SETLKW) {
-    /* 競合相手が居ないので必ず取れる。ただし **何を取るのかが書いて
-     * いないものは受けない** —— 受けると，形の壊れた依頼が通ったと
-     * 呼ぶ側に読める。F_GETLK と同じに扱う */
+    /* 競合相手が居ないので必ず取れる。ただし **依頼の形が壊れている
+     * ものは受けない** —— 受けると，何も指していない依頼が通ったと
+     * 呼ぶ側に読める。「知らないものは受けて捨てない」を，命令だけで
+     * なく**中身にも**当てる */
     if (arg == 0) { errno = EINVAL; return -1; }
+    fl = (struct flock *)arg;
+    if (fl->l_type != F_RDLCK && fl->l_type != F_WRLCK
+        && fl->l_type != F_UNLCK) {
+      errno = EINVAL;
+      return -1;
+    }
+    /* 0/1/2 は SEEK_SET / SEEK_CUR / SEEK_END である (値は stdio.h に
+     * あるが，ここは stdio を読まないので数で書く) */
+    if (fl->l_whence != 0 && fl->l_whence != 1 && fl->l_whence != 2) {
+      errno = EINVAL;
+      return -1;
+    }
     return 0;
   }
   /* 知らない命令は受けて捨てない */

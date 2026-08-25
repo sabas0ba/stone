@@ -58,7 +58,12 @@ struct flock {
  * l_type をそのまま読んで**衝突していると受け取る**。
  *
  * **arg が無い依頼は 3 つとも EINVAL で拒む。** 何を取る (何を問う) のか
- * が書いていないものを通すと，形の壊れた依頼が受理されたと読める */
+ * が書いていないものを通すと，形の壊れた依頼が受理されたと読める。
+ *
+ * **F_SETLK / F_SETLKW は中身も見る。** l_type が F_RDLCK / F_WRLCK /
+ * F_UNLCK のどれでもない，あるいは l_whence が SEEK_SET / SEEK_CUR /
+ * SEEK_END のどれでもない依頼は EINVAL で拒む。「知らないものは受けて
+ * 捨てない」を，命令だけでなく**中身にも**当てる */
 int fcntl(int fd, int cmd, void *arg);
 
 #endif
