@@ -1,0 +1,301 @@
+#!/bin/sh
+# tcc の翻訳単位を**我々の OS の上で**1 本ずつ訳す (第 3 部の 3 の 2)。
+#
+#   tcc17.sh root          作業用の像の元 (tmp/s17/root) を組む
+#   tcc17.sh unit <名前>   翻訳単位を 1 本訳し，.o を tmp/s17/obj へ出す
+#   tcc17.sh all           11 本すべて (既にできているものは飛ばす)
+#   tcc17.sh link          libtcc.a にまとめ tcc に繋ぐ (これも OS の上で)
+#   tcc17.sh check         出来た tcc に実際に翻訳させる
+#   tcc17.sh mk            **mk20 に tcc の Makefile を読ませて回す**
+#   tcc17.sh clean         tmp/s17 を消す
+#
+# ---- なぜ 1 本ずつ別の起動にするか ----
+#
+# 1 本あたり数分かかる。11 本を 1 度の起動でやると，**途中で殺された
+# ときに全部やり直しになる** (docs/dev-notes.md 1.5)。1 本ごとに
+# 起動を分け，出来た .o をホスト側へ取り出してスタンプを置く。
+# 殺されても失うのは高々 1 本である。
+#
+# ---- 素材 ----
+#
+# docs/external/tcc (tools/fetch.sh tcc) と，そこへ patch を当てた
+# tmp/tcc/src (tools/tcc.sh src)。tccdefs_.h はホストの tcc が作った
+# ものを使う —— これを我々の OS の上で作るのは 16.3 の別件である。
+set -eu
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repo_root"
+
+src=tmp/tcc/src
+out=tmp/s17
+root=$out/root
+
+# Makefile の 34 行が -c する翻訳単位 (docs/stage017-cc.md 16.1)
+UNITS="tccpp tccgen tccdbg tccelf tccasm tccrun riscv64-gen riscv64-link riscv64-asm libtcc tcc"
+
+need() { [ -e "$1" ] || { echo "error: $1 が無い ($2)" >&2; exit 1; }; }
+
+do_root() {
+    need "$src" "sh tools/tcc.sh src"
+    need tmp/tcc/build/tccdefs_.h "sh tools/tcc.sh host"
+    for f in pp16cmd pp17 cc15pcmd ld16cmd sh2.bin cc19 kernel24.bin; do
+        need "tmp/build/$f" "sh tools/build.sh stage017"
+    done
+    rm -rf "$root"
+    mkdir -p "$root/bin" "$root/include/sys" "$root/lib" "$root/t"
+    cp tmp/build/pp16cmd  "$root/bin/pp16"
+    cp tmp/build/pp17     "$root/bin/pp17"
+    cp tmp/build/cc15pcmd "$root/bin/cc15p"
+    cp tmp/build/ld16cmd  "$root/bin/ld16"
+    cp tmp/build/sh2.bin  "$root/bin/sh2"
+    cp tmp/build/sh2.bin  "$root/sh2"
+    cp tmp/build/cc19     "$root/cc19"
+    cp stage017/libc19/include/*.h     "$root/include/"
+    cp stage017/libc19/include/sys/*.h "$root/include/sys/"
+    # **/lib は 1 揃いだけ。** cc19 は /lib/*.o を全部並べるので，
+    # 鎖が繋ぐ 8 本 + rt64 + rtfp と同じにする。ctype と morecore を
+    # 足すと多重定義になる (tools/build/stage017.sh の osprog19_run と
+    # 同じ並びであること)
+    cp tmp/build/l19_src_string.o tmp/build/l19_src_stdlib.o \
+       tmp/build/l19_src_misc15.o tmp/build/l19_posix_sys.o \
+       tmp/build/l19_posix_morecore.o tmp/build/l19_posix_stdio.o \
+       tmp/build/l19_posix_assert.o tmp/build/l19_posix_dir.o \
+       tmp/build/rt64.o tmp/build/rtfp.o "$root/lib/"
+    # **木のうち .c と .h だけを載せる。** configure や .texi は要らない
+    for f in "$src"/*.c "$src"/*.h "$src"/*.def; do
+        [ -f "$f" ] && cp "$f" "$root/t/"
+    done
+    cp tmp/tcc/build/tccdefs_.h "$root/t/"
+    # **tcc 自身の組み込みヘッダ。** 出来た tcc が翻訳するときに
+    # CONFIG_TCCDIR/include から読む (config-stone.h は "/" なので
+    # /include)。無いと "include file 'tccdefs.h' not found" で止まる
+    cp "$src/include/tccdefs.h" "$root/include/"
+    cp stage015/tcc/config-stone.h "$root/t/config.h"
+    echo "root: $(find "$root" -type f | wc -l) ファイル / $(du -sb "$root" | cut -f1) バイト" >&2
+}
+
+# その 1 本の入力が前と同じなら飛ばす
+stampkey() {
+    sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
+        tmp/build/cc19 tmp/build/pp17 tmp/build/cc15pcmd tmp/build/ld16cmd \
+        tmp/build/kernel24.bin 2> /dev/null | sha256sum | cut -d' ' -f1
+}
+
+do_unit() {
+    u=$1
+    [ -d "$root" ] || do_root
+    mkdir -p "$out/obj"
+    key=$(stampkey "$u")
+    if [ -z "${STONE_FORCE_TCC17:-}" ] && [ -s "$out/obj/$u.o" ] \
+        && [ "$(cat "$out/step-$u.stamp" 2> /dev/null)" = "$key" ]; then
+        echo "cached $u ($out/obj/$u.o)" >&2
+        return 0
+    fi
+    # tcc.c と libtcc.c だけ -DONE_SOURCE=0 が要る (16.1 の 34 行のとおり)
+    d=
+    case $u in tcc|libtcc) d=" -D ONE_SOURCE=0" ;; esac
+    printf 'cc19 -c t/%s.c -o t/%s.o -I t%s\necho "rc $?"\n' "$u" "$u" "$d" \
+        > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/$u.log" 2>&1 || true
+    # 走った後の像から .o を取り出す
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if grep -q '^rc 0$' "$out/$u.log" && [ -s "$out/back/t/$u.o" ]; then
+        cp "$out/back/t/$u.o" "$out/obj/$u.o"
+        echo "$key" > "$out/step-$u.stamp"
+        echo "built $u ($(wc -c < "$out/obj/$u.o") バイト)" >&2
+        return 0
+    fi
+    echo "FAIL $u ($out/$u.log):" >&2
+    sed -n '1,12p' "$out/$u.log" >&2
+    return 1
+}
+
+# 34 行の残り 2 手 (16.1)。
+#
+#   ar rcs libtcc.a libtcc.o tccpp.o ... riscv64-asm.o
+#   cc -o tcc tcc.o libtcc.a ...
+#
+# **これも OS の上でやる。** ホストの ar / ld を使ったら，我々の OS の
+# 上で組めたことにならない。
+LIBOBJS="libtcc tccpp tccgen tccdbg tccelf tccasm tccrun riscv64-gen riscv64-link riscv64-asm"
+
+do_link() {
+    # **毎回組み直す。** 「在れば使う」にしていたら，root の作り方を
+    # 直したのに古い root が使われ，lib/ が空のままリンクが落ちた。
+    # 組み直しは写すだけで数秒である
+    do_root
+    for u in $UNITS; do
+        [ -s "$out/obj/$u.o" ] || { echo "error: $out/obj/$u.o が無い (先に all)" >&2; exit 1; }
+    done
+    need tmp/build/ar17 "sh tools/build.sh stage017"
+    rm -rf "$root/t"/*.o
+    for u in $UNITS; do cp "$out/obj/$u.o" "$root/t/$u.o"; done
+    cp tmp/build/ar17 "$root/ar"
+    _mem=""
+    for u in $LIBOBJS; do _mem="$_mem t/$u.o"; done
+    {
+        printf 'ar rcs t/libtcc.a%s\n' "$_mem"
+        printf 'echo "ar $?"\n'
+        printf 'cc19 -o tcc t/tcc.o t/libtcc.a\n'
+        printf 'echo "link $?"\n'
+        printf 'tcc -v\n'
+        printf 'echo "run $?"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/link.log" 2>&1 || true
+    cat "$out/link.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if [ -s "$out/back/tcc" ]; then
+        cp "$out/back/tcc" "$out/tcc"
+        [ -s "$out/back/t/libtcc.a" ] && cp "$out/back/t/libtcc.a" "$out/libtcc.a"
+        echo "built $out/tcc ($(wc -c < "$out/tcc") バイト)" >&2
+    else
+        echo "FAIL: tcc ができていない ($out/link.log)" >&2
+        return 1
+    fi
+}
+
+# 出来た tcc に実際に翻訳させる。**-v が通っただけでは動くと言えない。**
+do_check() {
+    [ -s "$out/tcc" ] || { echo "error: $out/tcc が無い (先に link)" >&2; exit 1; }
+    do_root
+    cp "$out/tcc" "$root/tcc"
+    printf 'int main(void) { return 7; }\n' > "$root/hello.c"
+    {
+        printf 'tcc -v\necho "v $?"\n'
+        printf 'tcc -c hello.c -o hello.o -B/ -I/include\necho "compile $?"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-1800} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/check.log" 2>&1 || true
+    cat "$out/check.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if [ -s "$out/back/hello.o" ]; then
+        cp "$out/back/hello.o" "$out/hello.o"
+        echo "我々の OS の上で組んだ tcc が hello.o を出した ($(wc -c < "$out/hello.o") バイト)" >&2
+    else
+        echo "FAIL: hello.o ができていない ($out/check.log)" >&2
+        return 1
+    fi
+}
+
+# **mk20 に tcc の Makefile を読ませて回す** (第 3 部の 3 の 2 の完了条件)。
+#
+# 木は t/ の中に置く。像の根に置くと，tcc の include/ が我々の
+# /include を隠してしまう —— cc19 は /include/*.h を束ねるので，
+# そこが tcc のものに替わると自分の libc のヘッダを見失う
+# (tools/tcc-stone.sh の「平らな名前空間」の註と同じ話)。
+#
+# t/ で走らせる以上，素の名前は t/ からしか引けない (探す道は無い。
+# 16.3)。cc19 / ar / mk を t/ にも置く。
+do_mk() {
+    do_root
+    need tmp/build/ar17 "sh tools/build.sh stage017"
+    need tmp/build/mk20 "sh tools/build.sh stage017"
+    cp tmp/build/cc19 "$root/t/cc19"
+    cp tmp/build/ar17 "$root/t/ar"
+    cp tmp/build/mk20 "$root/t/mk"
+    cp tmp/build/mk20 "$root/mk"
+    cp "$src/Makefile" "$root/t/Makefile"
+    [ -d "$src/include" ] && mkdir -p "$root/t/include" \
+        && cp "$src"/include/*.h "$root/t/include/"
+    cp stage015/tcc/config-stone.h "$root/t/config.h"
+    cat > "$root/t/config.mak" <<'CFEOF'
+# 我々の OS 向けの config.mak (docs/stage017-cc.md 21 章)。
+# 上流の configure はホストでしか動かないので手で固定する
+CC=cc19
+CC_NAME=cc19
+GCC_MAJOR=0
+GCC_MINOR=0
+AR=ar
+LIBSUF=.a
+EXESUF=
+DLLSUF=.so
+CFLAGS=
+LDFLAGS=
+LIBS=
+ARCH=riscv32
+TARGETOS=stone
+TOP=.
+TOPSRC=$(TOP)
+CONFIG_riscv32=yes
+prefix=/
+bindir=/
+tccdir=/
+libdir=/
+includedir=/include
+CFEOF
+    rm -f "$root/t"/*.o "$root/t/libtcc.a" "$root/t/tcc"
+    {
+        printf 'mk -C t -n tcc\necho "dry $?"\n'
+        printf 'mk -C t tcc\necho "mk $?"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/mk.log" 2>&1 || true
+    cat "$out/mk.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if [ -s "$out/back/t/tcc" ]; then
+        cp "$out/back/t/tcc" "$out/tcc-mk"
+        echo "Makefile から tcc ができた ($(wc -c < "$out/tcc-mk") バイト)" >&2
+    else
+        echo "FAIL: t/tcc ができていない ($out/mk.log)" >&2
+        return 1
+    fi
+}
+
+case ${1:-all} in
+root) do_root ;;
+mk) do_mk ;;
+link) do_link ;;
+check) do_check ;;
+unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
+clean) rm -rf "$out" ;;
+all)
+    do_root
+    fail=0
+    for u in $UNITS; do do_unit "$u" || fail=$((fail + 1)); done
+    echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
+    [ "$fail" -eq 0 ]
+    ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|clean]" >&2; exit 2 ;;
+esac

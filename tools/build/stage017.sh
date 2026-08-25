@@ -79,6 +79,25 @@ build_stage017() {
            tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
         -- osprog19_run mk19 stage017/mk19.c
 
+    # 前処理器の第 17 世代 (第 3 部の 3 の 2)。-I を探す道として持つ。
+    # **libc を繋がない** —— sys_* は 'E' 前置部のものを直に呼ぶ
+    # (docs/stage017-cc.md 17 章)
+    step pp17 pp17 \
+        -- stage017/pp17.sc tmp/build/cc15p.bin tmp/build/ld16.bin \
+        -- pp17_run
+
+    # cc の第 19 世代 (第 3 部の 3 の 2)。-I を束ねず pp17 へ渡す
+    step cc19 cc19 \
+        -- stage017/cc19.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
+        -- osprog19_run cc19 stage017/cc19.c
+
+    # make の第 20 世代 (第 3 部の 3 の 1)。tcc の Makefile を読む
+    step mk20 mk20 \
+        -- stage017/mk20.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
+        -- osprog19_run mk20 stage017/mk20.c
+
     # 時刻を読む検査用のプログラム (第 4 部の 1)。**libc19 と繋ぐ**
     step stamp stamp \
         -- tests/stage017/user/stamp.c tmp/build/cc15p.bin tmp/build/pp16.bin \
@@ -139,6 +158,17 @@ osprog19_run() {
     echo "built tmp/build/$1" >&2
 }
 
+# pp17 は .sc なので前処理を通さない (tool1 と同じ道)。ただし 'E' で
+# 組む —— sys_openat などのスタブは 'E' 前置部にしかないからである。
+# フラットで組むと未定義で落ちる (実測 rc=7)
+pp17_run() {
+    { cat stage017/pp17.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15p.bin > tmp/build/pp17.o
+    { printf 'E'; cat tmp/build/pp17.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/build/pp17
+    echo "built tmp/build/pp17" >&2
+}
+
 kernel23_run() {
     sh tools/bundle.sh stage017/kernel23.c \
         | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/build/kernel23.i
@@ -191,14 +221,16 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17 mk18 mk19 stamp \
+    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
         l19_posix_sys.o l19_posix_morecore.o l19_posix_stdio.o \
         l19_posix_assert.o l19_posix_dir.o \
-        -- stage017/cc17.c stage017/cc18.c stage017/ar17.c \
+        -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
+           stage017/pp17.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
+           stage017/mk20.c \
            stage017/kernel23.c stage017/kernel24.c \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \

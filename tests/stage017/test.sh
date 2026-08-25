@@ -713,4 +713,209 @@ else
     echo "   skip: host に make か gcc が無い (裏取りができない)"
 fi
 
+section "第 3 部の 3 の 1: tcc の Makefile の形 (docs/stage017-cc.md 15.1)"
+
+# **第 3 部の 3 の 1 の完了条件である。**
+#
+# 完了条件は「tcc の Makefile が読めること」ではない —— **そこから出る
+# 命令の並びが本物の make と一致すること**である。読めることと正しく
+# 読めることは違う。実際，読めてはいたが $< が別のファイルを指し，
+# 目標特有の += が変数を凍らせていた (15.3)。
+#
+# 本物の tcc の Makefile での突き合わせは下の 15.2 に置いた手順で行う。
+# 素材 (docs/external/tcc) は repo に入れない決まりなので CI では走らない。
+# ここでは tcc の Makefile が使う 6 つの形を自前で並べた記述を使う
+r=$out/kroot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/src" "$r/lib"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tmp/build/mk20 "$r/mk"
+cp tmp/build/mk20 "$r/bin/mk"
+cp tests/stage017/mk/tccish-os.mk "$r/Makefile"
+cp tests/stage017/mk/tccish-oslib.mk "$r/lib/Makefile"
+printf 'BASE\n'  > "$r/base.txt"
+printf 'EXTRA\n' > "$r/extra.txt"
+printf 'M\n'     > "$r/src/main.src"
+printf 'U\n'     > "$r/src/util.src"
+printf 'H\n'     > "$r/config.h"
+printf 'A\n'     > "$r/asm.asm"
+printf 'a\n'     > "$r/lib/a.src"
+printf 'b\n'     > "$r/lib/b.src"
+touch -d '@1500000000.000000000' "$r/base.txt" "$r/extra.txt" \
+    "$r/src/main.src" "$r/src/util.src" "$r/config.h" "$r/asm.asm" \
+    "$r/lib/a.src" "$r/lib/b.src"
+cat > "$r/go.sh" <<'EOF'
+echo "--dry--"
+mk -n
+echo "--build--"
+mk
+echo "--again--"
+mk
+echo "--touch--"
+echo U2 > src/util.src
+mk
+echo "--prog--"
+cat prog
+echo "--libx--"
+cat lib/libx
+echo "--end--"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/tccish.out"
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/tccish.txt "$out/tccish.out" \
+    > "$out/tccish.diff"
+report $? "run: 6 つの形が我々の OS の上で順に効く (再帰する MAKE を含む)"
+[ -s "$out/tccish.diff" ] && sed -n '4,$p' "$out/tccish.diff"
+
+# **本物の make と突き合わせる。** 我々の -n の出力だけを見ていても，
+# それが正しいかどうかは判らない。ホストに素材があるときはここで見る
+if command -v make > /dev/null 2>&1 && command -v gcc > /dev/null 2>&1; then
+    gcc -w -o "$out/mk20host" tests/stage017/host/mk20host.c 2> /dev/null
+    r2=$?
+    d=$out/tidry
+    rm -rf "$d"
+    mkdir -p "$d/src" "$d/lib"
+    cp tests/stage017/mk/tccish.mk "$d/Makefile"
+    cp tests/stage017/mk/tccish-lib.mk "$d/lib/Makefile"
+    # zmain は **並びを見るため**に置く。readdir の順は作った順なので，
+    # 名前の順に直していなければここで食い違う (15.3)
+    touch "$d/src/zmain.c" "$d/src/util.c" "$d/src/main.c" \
+          "$d/config.h" "$d/asm.S" "$d/lib/a.c" "$d/lib/b.c"
+    ( cd "$d" && make -n --no-print-directory all lib ) > "$out/ti.ref" 2>&1
+    if [ "$r2" -eq 0 ]; then
+        ( cd "$d" && "$OLDPWD/$out/mk20host" -n all lib ) > "$out/ti.raw" 2>&1
+        # $(MAKE) は自分自身なので綴りが違う。そこだけ揃える
+        sed "s#$OLDPWD/$out/mk20host -n#make#g" "$out/ti.raw" > "$out/ti.got"
+    fi
+    [ "$r2" -eq 0 ] && diff -q "$out/ti.ref" "$out/ti.got" > /dev/null
+    report $? "ref: 本物の make と，出る命令の並びが一致する"
+    [ "$r2" -eq 0 ] && diff -u "$out/ti.ref" "$out/ti.got" | sed -n '4,$p'
+else
+    echo "   skip: host に make か gcc が無い (裏取りができない)"
+fi
+
+section "第 3 部の 3 の 2: -I を探す道として持つ (docs/stage017-cc.md 19 章)"
+
+# **第 3 部の 3 の 2 の要である。**
+#
+# ヘッダを inc/ にだけ置き，束ねには入れない。cc18 の「-I は階層ごと
+# 束ねる」ではこれも通るが，tcc の木では員が上限を超えて落ちる (16.2)。
+# cc19 は -I を pp17 へ渡し，pp17 が要るものだけを開く。
+#
+# **道は変えたが出るものは変わっていないこと**を，cc18 の出力と
+# バイトで突き合わせて見る。
+#
+# 併せて 19.3 の破壊が戻っていないことを見る。cc18 は -o を付けた
+# 結合で「最後に走査したヘッダ」を .o で潰していた。**症状が出ない**
+# 壊れ方なので，出力ではなく**入力が無傷であること**を見るしかない。
+r=$out/proot
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/inc"
+cp tmp/build/pp16cmd "$r/bin/pp16"
+cp tmp/build/pp17 "$r/bin/pp17"
+cp tmp/build/cc15pcmd "$r/bin/cc15p"
+cp tmp/build/ld16cmd "$r/bin/ld16"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp stage017/libc19/include/*.h "$r/include/"
+cp stage017/libc19/include/sys/*.h "$r/include/sys/"
+cp tmp/build/l19_src_string.o tmp/build/l19_src_stdlib.o \
+   tmp/build/l19_src_misc15.o tmp/build/l19_posix_sys.o \
+   tmp/build/l19_posix_morecore.o tmp/build/l19_posix_stdio.o \
+   tmp/build/l19_posix_assert.o tmp/build/l19_posix_dir.o \
+   tmp/build/rt64.o tmp/build/rtfp.o "$r/lib/"
+cp tmp/build/cc18 "$r/cc18"
+cp tmp/build/cc19 "$r/cc19"
+printf '#define BASE 40\n' > "$r/inc/conf.h"
+printf '#include "conf.h"\n#define TOTAL (BASE + 2)\n' > "$r/inc/extra.h"
+cat > "$r/main.c" <<'CEOF'
+#include <stdio.h>
+#include "extra.h"
+int main(void) { printf("total %d\n", TOTAL); return 0; }
+CEOF
+cat > "$r/go.sh" <<'EOF'
+cc18 -c main.c -o m18.o -I inc
+echo "cc18 $?"
+cc19 -c main.c -o m19.o -I inc
+echo "cc19 $?"
+cc19 -o prog main.c -I inc
+echo "link $?"
+prog
+echo "run $?"
+cc19 -c main.c -o bad.o
+echo "noinc $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/pi.out" 8388608 512
+rc=$?
+[ "$rc" -eq 0 ] && diff -u tests/stage017/expected/incpath.txt "$out/pi.out" \
+    > "$out/pi.diff"
+report $? "run: ヘッダが -I にしか無くても cc19 が翻訳・結合し，走る"
+[ -s "$out/pi.diff" ] && sed -n '4,$p' "$out/pi.diff"
+
+# 走った後の像を戻して中身を見る
+if [ "$rc" -eq 0 ]; then
+    dd if="$out/r3" of="$out/pi.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/piback"
+    sh tools/sfs3.sh unpack "$out/pi.img" "$out/piback" > /dev/null 2>&1
+fi
+
+# **束ねる道と探す道が同じ .o を出すこと** (19.2 の C)
+[ "$rc" -eq 0 ] && cmp -s "$out/piback/m18.o" "$out/piback/m19.o"
+report $? "same: cc18 (束ねる) と cc19 (探す道) が同じ .o を出す"
+
+# **入力が無傷であること** (19.3 の破壊が戻っていないこと)
+ok=0
+for f in inc/conf.h inc/extra.h main.c include/sys/time.h include/sys/stat.h; do
+    if ! cmp -s "$r/$f" "$out/piback/$f"; then
+        ok=1
+        echo "   壊れた: $f ($(wc -c < "$r/$f") -> $(wc -c < "$out/piback/$f" 2> /dev/null) バイト)"
+    fi
+done
+[ "$rc" -eq 0 ] && [ "$ok" -eq 0 ]
+report $? "spec: 結合しても入力のヘッダとソースが 1 バイトも変わらない (19.3)"
+
+# .o が名前どおりの場所にできていること (潰した先へ書いていない証拠)
+[ "$rc" -eq 0 ] && [ -s "$out/piback/_t0.o" ]
+report $? "spec: 中間の .o が _t0.o として在る (19.3)"
+
+section "第 3 部の 3 の 2 の完了条件: tcc の Makefile を回す (21 章)"
+
+# **これが第 3 部の 3 の 2 の完了条件である。**
+#
+# 上の節までは「同じ形が同じに読める」「-I が探す道として効く」を
+# 見ているだけで，**本物の tcc の Makefile を回してはいない**。
+# 素材 (docs/external/tcc) は repo に入れない決まりなので CI では
+# 取得できず，ここは走らない。手元では必ず走らせること。
+#
+#   sh tools/fetch.sh tcc      素材を取る
+#   sh tools/tcc.sh src        patch を当てる
+#   sh tools/tcc17.sh all      11 本を訳す (1 本ずつ。中断しても続きから)
+#   sh tools/tcc17.sh mk       **Makefile を mk20 に読ませて回す**
+#   sh tools/tcc17.sh check    出来た tcc に実際に翻訳させる
+#
+# 21.2 の突き合わせ 2 つ (Makefile から出た tcc == 手で回した tcc /
+# 我々の c2str が作った tccdefs_.h == ホストのもの) までを見ること。
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   **第 3 部の 3 の 2 の完了条件はこの節である。CI では走らない**"
+    echo "   手元では sh tools/tcc17.sh all && sh tools/tcc17.sh mk を走らせること"
+elif [ ! -s tmp/s17/tcc-mk ]; then
+    echo "   skip: tmp/s17/tcc-mk が無い (sh tools/tcc17.sh mk で作れる)"
+    echo "   **第 3 部の 3 の 2 の完了条件はこの節である**"
+else
+    # **同じものが出ること。** 道が 2 つあって違うものが出るなら，
+    # どちらかが間違っている
+    cmp -s tmp/s17/tcc tmp/s17/tcc-mk
+    report $? "same: Makefile から出た tcc と，命令を直に並べた tcc がバイト一致"
+    # **我々の OS の上で作った tccdefs_.h** がホストのものと一致すること
+    cmp -s tmp/s17/back/t/tccdefs_.h tmp/tcc/build/tccdefs_.h
+    report $? "same: 我々の c2str が作った tccdefs_.h がホストのものとバイト一致"
+    # 出来た tcc が実際に翻訳できること
+    [ -s tmp/s17/hello.o ]
+    report $? "run: 我々の OS の上で組んだ tcc が hello.o を出した (tcc17.sh check)"
+fi
+
 summary

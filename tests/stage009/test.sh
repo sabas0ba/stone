@@ -20,6 +20,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s9
+stable_dir=tmp/s9/stable
 
 pp=tmp/build/pp.bin
 cc=tmp/build/cc8.bin
@@ -59,14 +60,19 @@ report $? "build: pp.bin の SHA-256 が stage009/pp.md 記載値と一致"
 # 2. 素通し
 # 指令を含まないソースは，pp を通してもコンパイル結果が変わってはならない。
 # コメントの除去と行連結が意味を変えないことの検査でもある。
+#
+# **落ちたときに「中身が違う」のか「実行が再現していない」のかを
+# 分ける** (docs/dev-notes.md 1.6)。この検査は CI で実際に揺らいだ
 passthru() {
     input=$1
     ref=$2
     name=$3
-    plain "$input" > "tmp/s9/$name.i" \
-        && compile "tmp/s9/$name.i" "tmp/s9/$name.o" \
-        && link "tmp/s9/$name.bin" "tmp/s9/$name.o" \
-        && cmp -s "tmp/s9/$name.bin" "$ref"
+    ptgen() {
+        plain "$input" > "tmp/s9/$name.i" \
+            && compile "tmp/s9/$name.i" "tmp/s9/$name.o" \
+            && link "$1" "tmp/s9/$name.o"
+    }
+    stable_cmp "passthru($name)" ptgen "$ref"
     report $? "passthru: pp($name) -> cc8 -> ld が $name.bin と一致"
 }
 passthru stage008/cc.sc tmp/build/cc8.bin cc8

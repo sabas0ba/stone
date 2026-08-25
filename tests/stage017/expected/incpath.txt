@@ -1,0 +1,8 @@
+cc18 0
+cc19 0
+link 0
+total 42
+run 0
+pp: cannot find include: extra.h
+cc: preprocess failed
+noinc 2
