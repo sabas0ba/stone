@@ -60,16 +60,18 @@ do_root() {
     cp tmp/build/sh2.bin  "$root/bin/sh2"
     cp tmp/build/sh2.bin  "$root/sh2"
     cp tmp/build/cc19     "$root/cc19"
-    cp stage017/libc19/include/*.h     "$root/include/"
-    cp stage017/libc19/include/sys/*.h "$root/include/sys/"
+    cp stage017/libc20/include/*.h     "$root/include/"
+    cp stage017/libc20/include/sys/*.h "$root/include/sys/"
     # **/lib は 1 揃いだけ。** cc19 は /lib/*.o を全部並べるので，
     # 鎖が繋ぐ 8 本 + rt64 + rtfp と同じにする。ctype と morecore を
-    # 足すと多重定義になる (tools/build/stage017.sh の osprog19_run と
-    # 同じ並びであること)
-    cp tmp/build/l19_src_string.o tmp/build/l19_src_stdlib.o \
-       tmp/build/l19_src_misc15.o tmp/build/l19_posix_sys.o \
-       tmp/build/l19_posix_morecore.o tmp/build/l19_posix_stdio.o \
-       tmp/build/l19_posix_assert.o tmp/build/l19_posix_dir.o \
+    # 足すと多重定義になる。
+    #
+    # **libc20 を使う** (第 3 部の 3 の 3)。tcc の lib/tcov.c が
+    # fcntl / getpid / EINTR を要る (docs/stage017-cc.md 27 章)
+    cp tmp/build/l20_src_string.o tmp/build/l20_src_stdlib.o \
+       tmp/build/l20_src_misc15.o tmp/build/l20_posix_sys.o \
+       tmp/build/l20_posix_morecore.o tmp/build/l20_posix_stdio.o \
+       tmp/build/l20_posix_assert.o tmp/build/l20_posix_dir.o \
        tmp/build/rt64.o tmp/build/rtfp.o "$root/lib/"
     # **木のうち .c と .h だけを載せる。** configure や .texi は要らない
     for f in "$src"/*.c "$src"/*.h "$src"/*.def; do
@@ -252,12 +254,12 @@ mk_scaffold() {
     # ものでなければならない —— 我々の stdarg.h は cc 専用の隠しローカル
     # を使うので，tcc が訳すときには通らない
     # (tools/tcc-stone.sh の「平らな名前空間」の註)
-    for f in stage017/libc19/include/*.h; do
+    for f in stage017/libc20/include/*.h; do
         b=$(basename "$f")
         [ -f "$root/t/include/$b" ] || cp "$f" "$root/t/include/$b"
     done
     mkdir -p "$root/t/include/sys"
-    for f in stage017/libc19/include/sys/*.h; do
+    for f in stage017/libc20/include/sys/*.h; do
         b=$(basename "$f")
         [ -f "$root/t/include/sys/$b" ] || cp "$f" "$root/t/include/sys/$b"
     done
