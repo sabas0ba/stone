@@ -7,6 +7,7 @@
 #   tcc17.sh link          libtcc.a にまとめ tcc に繋ぐ (これも OS の上で)
 #   tcc17.sh check         出来た tcc に実際に翻訳させる
 #   tcc17.sh mk            **mk20 に tcc の Makefile を読ませて回す**
+#   tcc17.sh lib           libtcc1.a を我々が作った tcc 自身で作る
 #   tcc17.sh clean         tmp/s17 を消す
 #
 # ---- なぜ 1 本ずつ別の起動にするか ----
@@ -70,6 +71,11 @@ do_root() {
     # CONFIG_TCCDIR/include から読む (config-stone.h は "/" なので
     # /include)。無いと "include file 'tccdefs.h' not found" で止まる
     cp "$src/include/tccdefs.h" "$root/include/"
+    # **lib/ も載せる** (第 3 部の 3 の 3)。libtcc1.a を作る側である
+    mkdir -p "$root/t/lib"
+    for f in "$src"/lib/*.c "$src"/lib/*.S "$src"/lib/Makefile; do
+        [ -f "$f" ] && cp "$f" "$root/t/lib/"
+    done
     cp stage015/tcc/config-stone.h "$root/t/config.h"
     echo "root: $(find "$root" -type f | wc -l) ファイル / $(du -sb "$root" | cut -f1) バイト" >&2
 }
@@ -218,7 +224,7 @@ do_check() {
 #
 # t/ で走らせる以上，素の名前は t/ からしか引けない (探す道は無い。
 # 16.3)。cc19 / ar / mk を t/ にも置く。
-do_mk() {
+mk_scaffold() {
     do_root
     need tmp/build/ar17 "sh tools/build.sh stage017"
     need tmp/build/mk20 "sh tools/build.sh stage017"
@@ -246,7 +252,11 @@ LDFLAGS=
 LIBS=
 ARCH=riscv32
 TARGETOS=stone
-TOP=.
+# **TOP は書かない。** lib/Makefile は TOP = .. を置いてから
+# $(TOP)/Makefile を取り込み，その中で config.mak が読まれる。
+# ここで TOP=. と書くと lib/ の TOP を潰し，命令が ./tcc になって
+# -B の引数が空になる (docs/stage017-cc.md 22.3)。
+# TOPSRC は上流の configure が書くものなので，ここで与える
 TOPSRC=$(TOP)
 CONFIG_riscv32=yes
 prefix=/
@@ -255,6 +265,10 @@ tccdir=/
 libdir=/
 includedir=/include
 CFEOF
+}
+
+do_mk() {
+    mk_scaffold
     rm -f "$root/t"/*.o "$root/t/libtcc.a" "$root/t/tcc"
     {
         printf 'mk -C t -n tcc\necho "dry $?"\n'
@@ -283,9 +297,48 @@ CFEOF
     fi
 }
 
+# **libtcc1.a を我々の OS の上で作る** (第 3 部の 3 の 3)。
+#
+# ここで使う翻訳器は cc19 ではなく **我々が作った tcc 自身**である
+# (lib/Makefile の $(TCC) = ../tcc)。.S が 3 本あり，tcc 自身の
+# アセンブラを通る —— 我々が訳した riscv64-asm.o がここで初めて
+# 本気で使われる (docs/stage017-cc.md 22.2)。
+do_lib() {
+    [ -s "$out/tcc" ] || { echo "error: $out/tcc が無い (先に link か mk)" >&2; exit 1; }
+    mk_scaffold
+    cp "$out/tcc" "$root/t/tcc"
+    rm -f "$root/t/lib"/*.o "$root/t/libtcc1.a"
+    {
+        printf 'mk -C t/lib -n\necho "dry $?"\n'
+        printf 'mk -C t/lib\necho "lib $?"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/lib.log" 2>&1 || true
+    cat "$out/lib.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if [ -s "$out/back/t/libtcc1.a" ]; then
+        cp "$out/back/t/libtcc1.a" "$out/libtcc1.a"
+        echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト)" >&2
+    else
+        echo "FAIL: libtcc1.a ができていない ($out/lib.log)" >&2
+        return 1
+    fi
+}
+
 case ${1:-all} in
 root) do_root ;;
 mk) do_mk ;;
+lib) do_lib ;;
 link) do_link ;;
 check) do_check ;;
 unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
@@ -297,5 +350,5 @@ all)
     echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
     [ "$fail" -eq 0 ]
     ;;
-*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|clean]" >&2; exit 2 ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|clean]" >&2; exit 2 ;;
 esac
