@@ -30,12 +30,21 @@ exp=tests/stage011/expected
 runcase() {
     name=$1
     shift
-    sh tools/bundle.sh stage011/libc/include/*.h "$src/$name.c" \
-        | sh tools/env.sh qemu "$pp" > "tmp/s11/$name.i" \
-        && sh tools/env.sh qemu "$cc" < "tmp/s11/$name.i" > "tmp/s11/$name.o" \
-        && { cat "tmp/s11/$name.o" "$@"; printf '\0'; } \
-            | sh tools/env.sh qemu "$ld" > "tmp/s11/$name.bin" \
-        && sh tools/env.sh qemu "tmp/s11/$name.bin" < /dev/null > "tmp/s11/$name.out"
+    objs=$*
+    # 手順を関数にしておく。**打ち切られたときだけ**丸ごとやり直せるように
+    # するためである (CI で 1 度，1 秒で終わるはずの str が打ち切りまで
+    # 動かなかった。docs/dev-notes.md 1.6)。標準入力を使う段があるので
+    # やり直しは**手順の頭から**でなければならない
+    # shellcheck disable=SC2086
+    do_runcase() {
+        sh tools/bundle.sh stage011/libc/include/*.h "$src/$name.c" \
+            | sh tools/env.sh qemu "$pp" > "tmp/s11/$name.i" \
+            && sh tools/env.sh qemu "$cc" < "tmp/s11/$name.i" > "tmp/s11/$name.o" \
+            && { cat "tmp/s11/$name.o" $objs; printf '\0'; } \
+                | sh tools/env.sh qemu "$ld" > "tmp/s11/$name.bin" \
+            && sh tools/env.sh qemu "tmp/s11/$name.bin" < /dev/null > "tmp/s11/$name.out"
+    }
+    stable_out "feature: $name" do_runcase
     rc=$?
     [ "$rc" -eq 0 ] && diff -q "tmp/s11/$name.out" "$exp/$name.txt" > /dev/null
     report $? "feature: $name"
