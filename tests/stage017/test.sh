@@ -903,7 +903,7 @@ if [ ! -d docs/external/tcc ]; then
     echo "   **第 3 部の 3 の 2 の完了条件はこの節である。CI では走らない**"
     echo "   手元では sh tools/tcc17.sh all && sh tools/tcc17.sh mk を走らせること"
 elif [ ! -s tmp/s17/tcc-mk ] || [ ! -s tmp/s17/tcc ] \
-    || [ ! -s tmp/s17/hello.o ] || [ ! -s tmp/s17/back/t/tccdefs_.h ]; then
+    || [ ! -s tmp/s17/hello.o ] || [ ! -s tmp/s17/tccdefs_.h-mk ]; then
     # **見るものが揃っていなければ飛ばす。** 前提を 1 つだけ見て断言を
     # 3 つ立てていたので，手で別の実験をした後に素の FAIL になった。
     # 「材料が無い」と「壊れている」は別である
@@ -919,8 +919,14 @@ else
     # 比べることになり，中身の話でないところで落ちる (実際に落とした)
     cmp -s tmp/s17/tcc tmp/s17/tcc-mk
     report $? "same: Makefile から出た tcc と，命令を直に並べた tcc がバイト一致"
-    # **我々の OS の上で作った tccdefs_.h** がホストのものと一致すること
-    cmp -s tmp/s17/back/t/tccdefs_.h tmp/tcc/build/tccdefs_.h
+    # **我々の OS の上で作った tccdefs_.h** がホストのものと一致すること。
+    #
+    # **見るのは mk が取り分けた写しである。** back を見てはいけない ——
+    # back は次の走行 (check や lib) で上書きされ，その root には
+    # do_root が**ホストの** tccdefs_.h を写しているので，back を見ると
+    # ホスト同士を比べることになって検査が空回りする
+    # (レビューで指摘を受けて直した)
+    cmp -s tmp/s17/tccdefs_.h-mk tmp/tcc/build/tccdefs_.h
     report $? "same: 我々の c2str が作った tccdefs_.h がホストのものとバイト一致"
     # 出来た tcc が実際に翻訳できること
     [ -s tmp/s17/hello.o ]

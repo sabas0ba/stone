@@ -103,42 +103,45 @@ do_root() {
 }
 
 # その 1 本の入力が前と同じなら飛ばす
+# **do_root の直後にだけ呼ぶこと。** 印は $root の中身を見るので，
+# 中身が「前に何をしたか」で変わってはならない (mk / lib は
+# mk_scaffold で $root/t/include を足す)。
 stampkey() {
-    # **ヘッダも数える。** tcc.h は <fcntl.h> などを読むので，libc の
-    # ヘッダを直したら翻訳結果が変わりうる。ここに入れていないと
-    # 「直したのに作り直されない」が起きる —— この道具で 2 度やった
-    # 取り違えと同じ族である (docs/stage017-cc.md 28.5)
     {
         sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
             tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15qcmd}" \
             tmp/build/ld16cmd tmp/build/kernel24.bin
-        find "$root/t/include" -type f | sort | xargs sha256sum
+        # **libc のヘッダも数える。** cc19 は /include から読むので
+        # (do_root が libc20 のものを置く)，直したら翻訳結果が変わりうる。
+        # 入れていないと「直したのに作り直されない」が起きる —— この道具で
+        # 2 度やった取り違えと同じ族である (docs/stage017-cc.md 28.5)。
+        # 見るのは $root/include であって $root/t/include ではない
+        find "$root/include" -type f | sort | xargs sha256sum
     } 2> /dev/null | sha256sum | cut -d' ' -f1
 }
 
 do_unit() {
     u=$1
     mkdir -p "$out/obj"
-    # **印を取る前に材料を揃える。** stampkey は $root/t/config.h と
-    # $root/t/tccdefs_.h も混ぜる。clean の直後に unit を名指しで呼ぶと
-    # それらがまだ無く，sha256sum の苦情は捨てられて **入力の一部が
-    # 抜けた印**ができてしまう。次に同じことをすると印が変わり，
-    # QEMU を回し直すことになる
-    [ -d "$root" ] || do_root
+    # **毎回 root を作り直してから印を取る。** 2 つの理由がある。
+    #
+    #  1. 印は $root の中身を見る。作り直さないと，直前に mk や lib を
+    #     走らせたかどうかで中身が変わり (mk_scaffold が t/include を
+    #     足す)，同じことをしても印が変わって QEMU を回し直すことになる
+    #  2. STONE_CC15P で差し替えた器を確実に置く。ここが
+    #     `[ -d "$root" ] || do_root` だったせいで，差し替えても古い
+    #     bin/cc15p がそのまま使われ「差し替えたのに何も変わらない」と
+    #     いう測り違いをした。do_link では同じ誤りを既に直していたのに，
+    #     こちらを見落としていた —— 1 か所で起きるものは他でも起きる
+    #
+    # 作り直しは写すだけで数秒である
+    do_root
     key=$(stampkey "$u")
     if [ -z "${STONE_FORCE_TCC17:-}" ] && [ -s "$out/obj/$u.o" ] \
         && [ "$(cat "$out/step-$u.stamp" 2> /dev/null)" = "$key" ]; then
         echo "cached $u ($out/obj/$u.o)" >&2
         return 0
     fi
-    # **作り直すなら root も作り直す。** ここが `[ -d "$root" ] || do_root`
-    # だけだったせいで，STONE_CC15P で器を差し替えても古い root の
-    # bin/cc15p がそのまま使われ，「差し替えたのに何も変わらない」という
-    # 測り違いをした。do_link で同じ誤りを直した (「在れば使う」をやめた)
-    # のに，こちらを見落としていた —— 1 か所で起きるものは他でも起きる。
-    # 上の「印を取る前」の呼出しとは役割が違う (あちらは材料を揃えるため，
-    # こちらは古いものを捨てるため)。写すだけなので数秒である
-    do_root
     # tcc.c と libtcc.c だけ -DONE_SOURCE=0 が要る (16.1 の 34 行のとおり)
     d=
     case $u in tcc|libtcc) d=" -D ONE_SOURCE=0" ;; esac
@@ -358,13 +361,23 @@ do_mk() {
     dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
     rm -rf "$out/back"
     sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
-    if [ -s "$out/back/t/tcc" ]; then
-        cp "$out/back/t/tcc" "$out/tcc-mk"
-        echo "Makefile から tcc ができた ($(wc -c < "$out/tcc-mk") バイト)" >&2
-    else
+    if [ ! -s "$out/back/t/tcc" ]; then
         echo "FAIL: t/tcc ができていない ($out/mk.log)" >&2
         return 1
     fi
+    cp "$out/back/t/tcc" "$out/tcc-mk"
+    # **我々の c2str が作った tccdefs_.h をここで取り分ける。**
+    # back は次の走行 (check や lib) で上書きされ，その root には
+    # do_root が **ホストの** tccdefs_.h を写している。取り分けずに
+    # back の中を見ると，**ホスト同士を比べる**ことになって検査が
+    # 空回りする (レビューで指摘を受けて直した)
+    if [ -s "$out/back/t/tccdefs_.h" ]; then
+        cp "$out/back/t/tccdefs_.h" "$out/tccdefs_.h-mk"
+    else
+        echo "FAIL: t/tccdefs_.h ができていない ($out/mk.log)" >&2
+        return 1
+    fi
+    echo "Makefile から tcc ができた ($(wc -c < "$out/tcc-mk") バイト)" >&2
 }
 
 # **libtcc1.a を我々の OS の上で作る** (第 3 部の 3 の 3)。
