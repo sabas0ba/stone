@@ -93,7 +93,12 @@ do_root() {
     for f in "$src"/lib/*.c "$src"/lib/*.S "$src"/lib/Makefile; do
         [ -f "$f" ] && cp "$f" "$root/t/lib/"
     done
-    cp stage015/tcc/config-stone.h "$root/t/config.h"
+    # **第 2 世代の config を使う。** 逆進 (backtrace) と境界検査を切る
+    # 2 行だけ違う。RV32 では上流の tcc がそれらを作れないのに
+    # lib/Makefile は作らせようとするので，その食い違いを閉じる
+    # (docs/stage017-cc.md 28.6)。対になる CONFIG_backtrace=no は
+    # config.mak にある —— **片方だけでは意味がない**
+    cp stage017/tcc/config-stone.h "$root/t/config.h"
     echo "root: $(find "$root" -type f | wc -l) ファイル / $(du -sb "$root" | cut -f1) バイト" >&2
 }
 
@@ -274,7 +279,12 @@ mk_scaffold() {
         b=$(basename "$f")
         [ -f "$root/t/include/sys/$b" ] || cp "$f" "$root/t/include/sys/$b"
     done
-    cp stage015/tcc/config-stone.h "$root/t/config.h"
+    # **第 2 世代の config を使う。** 逆進 (backtrace) と境界検査を切る
+    # 2 行だけ違う。RV32 では上流の tcc がそれらを作れないのに
+    # lib/Makefile は作らせようとするので，その食い違いを閉じる
+    # (docs/stage017-cc.md 28.6)。対になる CONFIG_backtrace=no は
+    # config.mak にある —— **片方だけでは意味がない**
+    cp stage017/tcc/config-stone.h "$root/t/config.h"
     cat > "$root/t/config.mak" <<'CFEOF'
 # 我々の OS 向けの config.mak (docs/stage017-cc.md 21 章)。
 # 上流の configure はホストでしか動かないので手で固定する
@@ -298,6 +308,12 @@ TARGETOS=stone
 # TOPSRC は上流の configure が書くものなので，ここで与える
 TOPSRC=$(TOP)
 CONFIG_riscv32=yes
+# 逆進と境界検査を作らない。config-stone.h の CONFIG_TCC_BACKTRACE 0 /
+# CONFIG_TCC_BCHECK 0 と対になる (上流の configure が
+# --config-backtrace=no で書く 2 か所と同じ)。これが無いと
+# lib/Makefile が bt-exe.o を作らせ，型が無いまま翻訳して落ちる
+CONFIG_backtrace=no
+CONFIG_bcheck=no
 prefix=/
 bindir=/
 tccdir=/
