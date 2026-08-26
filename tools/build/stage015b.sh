@@ -31,6 +31,11 @@ build_stage015b() {
     # **鎖の成果物は変わらない** —— 既存のソースは文字列リテラルの
     # sizeof を使っていない
     ccgen cc15r cc15q stage015/cc15r.sc
+    # 第 19 世代。文字列リテラルの族の**最後の 1 つ** ——
+    # 多次元の char 配列を文字列で初期化する形 (台帳の staticstr2)。
+    # 畳むかどうかを「下位の初期化子が入れ子か」で決める
+    # (docs/stage017-cc.md 33 章)
+    ccgen cc15s cc15r stage015/cc15s.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -45,11 +50,11 @@ do_stage015b() {
     run_stage stage015b cc15l0.bin cc15l.bin \
         cc15m0.bin cc15m.bin cc15n0.bin cc15n.bin cc15o0.bin cc15o.bin \
         cc15p0.bin cc15p.bin cc15q0.bin cc15q.bin \
-        cc15r0.bin cc15r.bin \
+        cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
-           stage015/cc15r.sc \
+           stage015/cc15r.sc stage015/cc15s.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh

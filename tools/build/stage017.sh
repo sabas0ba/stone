@@ -37,6 +37,11 @@ build_stage017() {
     # 第 18 世代。文字列リテラルの sizeof を直したもの。tcc が書庫を
     # 読むのにこれが要る (docs/stage017-cc.md 31 章)
     cmdlink cc15rcmd cc15r
+    # 第 19 世代。多次元の char 配列の初期化子を直したもの (33 章)。
+    # tcc はこの形を使わないので tcc のバイト列は変わらないが、
+    # **最前線を 2 つに分けない** —— 台帳を測る器と tcc を組む器は
+    # 同じものにする
+    cmdlink cc15scmd cc15s
     cmdlink ld16cmd ld16
 
     step cc17 cc17 \
@@ -264,7 +269,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
