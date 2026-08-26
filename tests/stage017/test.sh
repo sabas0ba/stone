@@ -970,4 +970,36 @@ else
     report $? "lib: lib/Makefile が最後まで通る (mk -C t/lib が rc 0)"
 fi
 
+section "第 5 部の 1: tcc が組んだ実行形式が走る (手元でのみ走る)"
+
+# **tcc に結合まで任せる。** ここまで tcc は -c までしか使っていない。
+# 結合まで任せるには 3 つ要る (docs/stage017-cc.md 30 章)。
+#
+#   crt1.o / crti.o / crtn.o        stage017/crt1.S + crt1c.c
+#   -Wl,-Ttext=0x86000000           我々の UBASE
+#   -static                         動的リンクだと INTERP を頼って止まる
+#
+#   sh tools/tcc17.sh crt
+#
+# 見るのは**終了コード**である。像ができたことではなく，走って正しい
+# 値を返したことを見る (28 章の「ファイルが出たことを完了条件にしては
+# いけない」と同じ)。
+CRT_EXPECT='p1 7
+p2 1
+p3 9'
+
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   **第 5 部の 1 の完了条件はこの節である。CI では走らない**"
+elif [ ! -s tmp/s17/crt-run.txt ]; then
+    echo "   skip: tmp/s17 の材料が揃っていない"
+    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link && sh tools/tcc17.sh crt"
+else
+    [ "$(cat tmp/s17/crt-run.txt)" = "$CRT_EXPECT" ]
+    report $? "crt: tcc が組んだ像が走り，返り値・argc・argv が届く (p1=7 p2=argc p3=argv)"
+    # 入口そのものも我々の OS の上で tcc が組んだものであること
+    head -c 4 tmp/s17/crt1.o 2> /dev/null | grep -q 'ELF'
+    report $? "crt: crt1.o が我々の OS の上で組まれた ELF である"
+fi
+
 summary

@@ -389,6 +389,92 @@ do_mk() {
     echo "Makefile から tcc ができた ($(wc -c < "$out/tcc-mk") バイト)" >&2
 }
 
+# **tcc が結合した実行形式を我々の OS の上で走らせる** (第 5 部の 1)。
+#
+# ここまで tcc は `-c` までしか使っていない (do_check)。結合まで任せると
+# 3 つ足りないものが出る。
+#
+#   1. crt1.o / crti.o / crtn.o が無い  -> stage017/crt1.S + crt1c.c を
+#                                          tcc 自身に組ませて /usr/lib へ置く
+#   2. 既定の載せ先が 0x0001_0000     -> -Wl,-Ttext=0x86000000
+#                                          (我々の UBASE。kernel24.c)
+#   3. 既定が動的リンク (INTERP を持つ) -> -static
+#
+# 3 つとも「我々の OS の形」であって tcc の誤りではない。**唯一の誤りは
+# tcc のアセンブラの `call`** で，それは crt1.S の側で避けている
+# (docs/stage017-cc.md 30 章)。
+#
+# 完了条件は**終了コード**で見る。tcc が組んだ像が走り，main の返り値が
+# 終了コードになり，argc / argv が届いていること。
+CRTPROG_EXPECT='p1 7
+p2 1
+p3 9'
+
+do_crt() {
+    do_root
+    need stage017/crt1.S "リポジトリ"
+    need stage017/crt1c.c "リポジトリ"
+    [ -s "$out/tcc" ] || { echo "error: $out/tcc が無い (先に link)" >&2; exit 1; }
+    cp "$out/tcc" "$root/tcc"
+    mkdir -p "$root/usr/lib"
+    cp stage017/crt1.S  "$root/crt1.S"
+    cp stage017/crt1c.c "$root/crt1c.c"
+    : > "$root/empty.S"
+    # 7 を返す / argc を返す / argv[0] の 1 文字目を見る。
+    # ./p3 で呼ぶので argv[0] は "./p3" である
+    printf 'int main(int argc, char **argv) { return 7; }\n' > "$root/p1.c"
+    printf 'int main(int argc, char **argv) { return argc; }\n' > "$root/p2.c"
+    printf 'int main(int argc, char **argv) { return argv[0][0] == 46 ? 9 : 1; }\n' \
+        > "$root/p3.c"
+    {
+        # **1 本ずつ数える。** まとめて $? を見ると最後の 1 本しか
+        # 見ないことになる (28.5 の 4「数えているつもりで数えていない」)
+        printf 'tcc -c crt1.S -o usr/lib/crt1.o -B/\necho "crt-crt1 $?"\n'
+        printf 'tcc -c crt1c.c -o usr/lib/crt1c.o -B/\necho "crt-crt1c $?"\n'
+        printf 'tcc -c empty.S -o usr/lib/crti.o -B/\necho "crt-crti $?"\n'
+        printf 'tcc -c empty.S -o usr/lib/crtn.o -B/\necho "crt-crtn $?"\n'
+        for n in p1 p2 p3; do
+            printf 'tcc -static -o %s %s.c -B/ -nostdlib -Wl,-Ttext=0x86000000 usr/lib/crt1.o usr/lib/crt1c.o\n' "$n" "$n"
+            printf 'echo "link-%s $?"\n' "$n"
+        done
+        printf 'echo "---- run ----"\n'
+        for n in p1 p2 p3; do
+            printf './%s\necho "%s $?"\n' "$n" "$n"
+        done
+        printf 'echo "---- end ----"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-1800} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/crt.log" 2>&1 || true
+    cat "$out/crt.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    # **走った結果を取り分ける。** back は次の走行で上書きされる
+    # (28.5 の 5 と同じ話)
+    sed -n '/^---- run ----$/,/^---- end ----$/p' "$out/crt.log" \
+        | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/crt-run.txt"
+    if [ ! -s "$out/back/usr/lib/crt1.o" ]; then
+        echo "FAIL: crt1.o ができていない ($out/crt.log)" >&2
+        return 1
+    fi
+    cp "$out/back/usr/lib/crt1.o" "$out/crt1.o"
+    if [ "$(cat "$out/crt-run.txt")" != "$CRTPROG_EXPECT" ]; then
+        echo "FAIL: tcc が組んだ像の走りが期待と違う ($out/crt.log)" >&2
+        echo "--- 実測:" >&2; cat "$out/crt-run.txt" >&2
+        echo "--- 期待:" >&2; printf '%s\n' "$CRTPROG_EXPECT" >&2
+        return 1
+    fi
+    echo "tcc が組んだ実行形式が我々の OS の上で走った (p1=7 p2=argc p3=argv)" >&2
+}
+
 # **libtcc1.a を我々の OS の上で作る** (第 3 部の 3 の 3)。
 #
 # ここで使う翻訳器は cc19 ではなく **我々が作った tcc 自身**である
@@ -475,6 +561,7 @@ case ${1:-all} in
 root) do_root ;;
 mk) do_mk ;;
 lib) do_lib ;;
+crt) do_crt ;;
 link) do_link ;;
 check) do_check ;;
 unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
@@ -486,5 +573,5 @@ all)
     echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
     [ "$fail" -eq 0 ]
     ;;
-*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|clean]" >&2; exit 2 ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|crt|clean]" >&2; exit 2 ;;
 esac
