@@ -34,6 +34,9 @@ build_stage017() {
     # (docs/stage017-cc.md 24〜28 章)，tcc を正しく組むには cc15q が要る。
     # 鎖のプログラムは今までどおり cc15pcmd で組む
     cmdlink cc15qcmd cc15q
+    # 第 18 世代。文字列リテラルの sizeof を直したもの。tcc が書庫を
+    # 読むのにこれが要る (docs/stage017-cc.md 31 章)
+    cmdlink cc15rcmd cc15r
     cmdlink ld16cmd ld16
 
     step cc17 cc17 \
@@ -261,7 +264,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \

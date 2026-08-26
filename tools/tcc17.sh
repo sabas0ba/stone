@@ -39,18 +39,20 @@ need() { [ -e "$1" ] || { echo "error: $1 が無い ($2)" >&2; exit 1; }; }
 do_root() {
     need "$src" "sh tools/tcc.sh src"
     need tmp/tcc/build/tccdefs_.h "sh tools/tcc.sh host"
-    for f in pp16cmd pp17 cc15qcmd ld16cmd sh2.bin cc19 kernel24.bin; do
+    for f in pp16cmd pp17 cc15rcmd ld16cmd sh2.bin cc19 kernel24.bin; do
         need "tmp/build/$f" "sh tools/build.sh stage017"
     done
     rm -rf "$root"
     mkdir -p "$root/bin" "$root/include/sys" "$root/lib" "$root/t"
     cp tmp/build/pp16cmd  "$root/bin/pp16"
     cp tmp/build/pp17     "$root/bin/pp17"
-    # **名前は cc15p のまま，中身は cc15q を置く。**
+    # **名前は cc15p のまま，中身は cc15r を置く。**
     # cc19 は器の位置を "/bin/cc15p" と焼き込んでいる (stage017/cc19.c 53 行)。
     # cc19 は凍結世代なのでこの名前は変えられない。一方 cc15p は静的な
     # 初期化子の中の文字列を壊すので，tcc を cc15p で組むと tcc 自身の
     # `tcc -ar` が壊れた書庫を吐く (docs/stage017-cc.md 27〜28 章)。
+    # さらに cc15q は文字列リテラルの sizeof をポインタの大きさで答える
+    # ので，その tcc は**書庫を読めない** (31 章)。cc15r が要る。
     # ここは記録対象の作業場ではないので，名前と中身の対応を替えて済ませる
     #
     # STONE_CC15P はさらに差し替えて試すための穴。凍結世代を直すかどうかを
@@ -60,7 +62,7 @@ do_root() {
         cp "$STONE_CC15P" "$root/bin/cc15p"
         echo "note: cc15p を $STONE_CC15P で差し替えた" >&2
     else
-        cp tmp/build/cc15qcmd "$root/bin/cc15p"
+        cp tmp/build/cc15rcmd "$root/bin/cc15p"
     fi
     cp tmp/build/ld16cmd  "$root/bin/ld16"
     cp tmp/build/sh2.bin  "$root/bin/sh2"
@@ -109,7 +111,7 @@ do_root() {
 stampkey() {
     {
         sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
-            tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15qcmd}" \
+            tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15rcmd}" \
             tmp/build/ld16cmd tmp/build/kernel24.bin
         # **libc のヘッダも数える。** cc19 は /include から読むので
         # (do_root が libc20 のものを置く)，直したら翻訳結果が変わりうる。
@@ -607,7 +609,7 @@ int main(int argc, char **argv) {
 }
 VEOF
     # **同じことを cc19 でも測る。** 上の v.c は tcc が訳したものだが，
-    # 折れているのは **cc19 (= cc15q) が訳した tcc** の側かもしれない。
+    # 折れているのは **cc19 (= cc15r) が訳した tcc** の側かもしれない。
     # 器が違えば測っている対象が違う —— 両方要る
     cat > "$root/pr.c" <<'PREOF'
 #include <stdio.h>
