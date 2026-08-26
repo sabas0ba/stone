@@ -1032,10 +1032,49 @@ else
     [ "$(cat tmp/s17/oslibc-run.txt)" = "$OSLIBC_EXP" ]
     report $? "oslibc: -nostdlib 無しで繋いだ像が走り、printf / malloc / strlen / fopen が働く"
     # 書庫として読めること。ファイルが出たことを完了条件にしない (28 章)
-    [ -s tmp/s17/libc.list ] && [ "$(grep -c . tmp/s17/libc.list)" = 11 ]
-    report $? "oslibc: tcc -ar が作った libc.a を ar17 が読め、員が 11 本そろっている"
+    [ -s tmp/s17/libc.list ] && [ "$(grep -c . tmp/s17/libc.list)" = 12 ]
+    report $? "oslibc: tcc -ar が作った libc.a を ar17 が読め、員が 12 本そろっている"
     [ "$(cat tmp/s17/oslibc-probe.txt 2> /dev/null)" = "$PROBE_EXP" ]
     report $? "oslibc: 測り手が通る (書庫の読み / 文字列リテラルの sizeof が 9)"
+fi
+
+section "5.2: zlib / bzip2 を tcc で組む (手元でのみ走る)"
+
+# **tcc より一段大きい実物**を我々の OS の上で tcc に組ませる
+# (docs/stage017-gcc.md 5.2 / stage017-cc.md 32 章)。
+#
+#   sh tools/tcc17.sh ext
+#
+# Stage 14 は同じ 2 つを**ホストの鎖**で訳した (tests/stage014 第 8〜9 部)。
+# ここは我々の OS の上で tcc が訳す。往復の答が同じなら退行の検査になる。
+EXT_EXP='compress: 4096 -> 2555 sum=59847
+roundtrip ok
+bz-rt 0
+zex 0'
+
+if [ ! -d docs/external/zlib ] || [ ! -d docs/external/bzip2 ]; then
+    echo "   skip: docs/external の素材が無い (sh tools/fetch.sh zlib / bzip2)"
+    echo "   **5.2 の完了条件はこの節である。CI では走らない**"
+elif [ ! -s tmp/s17/ext-run.txt ]; then
+    echo "   skip: tmp/s17 の材料が揃っていない (sh tools/tcc17.sh ext)"
+else
+    [ "$(cat tmp/s17/ext-run.txt)" = "$EXT_EXP" ]
+    report $? "ext: zlib の自己検査が通り、libbz2 が Stage 14 と同じ答を出す"
+    # zlib の自己検査が**何を確かめたか**。終了コードだけだと
+    # 「走ったが何もしなかった」と区別が付かない
+    grep -q '^zlib version 1\.3\.1 ' tmp/s17/zex.out 2> /dev/null \
+        && grep -q '^large_inflate(): OK$' tmp/s17/zex.out \
+        && grep -q '^inflate with dictionary: hello, hello!$' tmp/s17/zex.out
+    report $? "ext: zex が gzread / gzseek / inflateSync / 辞書つき伸長まで通す"
+    [ -s tmp/s17/libz.a ] && [ -s tmp/s17/libbz2.a ]
+    report $? "ext: libz.a と libbz2.a が我々の OS の上に出来ている"
+    # **まだ通らないものを黙らせない。** bzip2 の命令そのものは
+    # utime / fchmod / fileno / getenv / isatty / perror が要る (32.4)
+    if grep -q '^bz-prog 0$' tmp/s17/ext.log 2> /dev/null; then
+        echo "   note: bzip2 の命令が通るようになった。32.4 の表を直すこと"
+    else
+        echo "   gap:  bzip2 の命令はまだ組めない (utime.h ほか。32.4)"
+    fi
 fi
 
 summary

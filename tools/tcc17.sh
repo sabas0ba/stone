@@ -514,7 +514,19 @@ do_crt() {
 # 切れて見えた。**書庫の中で名前が変わる**のは避ける
 OSLIBC_UNITS='src/string:string src/stdlib:stdlib src/ctype:ctype
 src/misc15:misc15 posix/sys:sys posix/morecore:morecore
-posix/stdio:stdio posix/assert:assert posix/dir:dir'
+posix/stdio:stdio posix/assert:assert posix/dir:dir posix/signal:signal'
+
+# **tcc の世界は libc21 を使う。** libc20 との差は 3 つで、どれも
+# 「実物が読むのに我々が持っていなかったもの」である (32 章)。
+#
+#   include/sys/types.h   zlib の zconf.h が読む (off_t)
+#   include/signal.h      bzip2 の bzip2.c が読む
+#   posix/signal.c        受け付けて何も起こさない signal / 拒む raise
+#
+# **鎖の側 (cc19 が tcc を組む道) は libc20 のままにする。** そちらを
+# 動かすと 21 章・29 章の突き合わせが動く。libc21 から作られる記録対象の
+# 成果物はまだ無いので、世代を刻んでも鎖は 1 バイトも変わらない
+OSLIBC_SRC=stage017/libc21
 
 OSLIBC_EXPECT='q1 hello 5
 q2 1 ./q
@@ -543,7 +555,7 @@ do_oslibc() {
     # なので、-B/tccb なら /usr/lib で引ける (tcc.h 291 行)
     cp "$out/libtcc1.a" "$root/usr/lib/libtcc1.a"
     for u in $OSLIBC_UNITS; do
-        cp "stage017/libc20/${u%%:*}.c" "$root/libc/${u#*:}.c"
+        cp "$OSLIBC_SRC/${u%%:*}.c" "$root/libc/${u#*:}.c"
     done
     cp stage017/crt1.S    "$root/crt1.S"
     cp stage017/crt1c.c   "$root/libc/crt1c.c"
@@ -571,8 +583,8 @@ do_oslibc() {
     # ぶつかる —— sfs では同じ名前の枝と葉は持てない
     mkdir -p "$root/tccb/include" "$root/usr/include/sys"
     cp "$src"/include/*.h "$root/tccb/include/"
-    cp stage017/libc20/include/*.h     "$root/usr/include/"
-    cp stage017/libc20/include/sys/*.h "$root/usr/include/sys/"
+    cp "$OSLIBC_SRC"/include/*.h     "$root/usr/include/"
+    cp "$OSLIBC_SRC"/include/sys/*.h "$root/usr/include/sys/"
     # **"invalid archive" の切り分け (31.3)。**
     #
     # tcc の書庫読みが折れている。原因を「書庫の側」と「lseek / read の
@@ -904,6 +916,139 @@ CEOF
 $(grep -c . "$out/libc.list") 員)。-nostdlib 無しで printf が使える" >&2
 }
 
+# **tcc より一段大きい実物を，我々の OS の上で tcc に組ませる**
+# (stage017-gcc.md 5.2)。
+#
+# 狙いは「何が足りないかを数える」ことである。Stage 16 の教訓は
+# 「律速はコンパイラではなく OS だった」なので (stage016-os.md 1〜4 章)，
+# GCC の素材が無いうちに，手元にある一段大きい実物で同じことを測る。
+#
+# Stage 14 は同じ 2 つを**ホストの鎖**で訳した (tests/stage014 第 8〜9 部)。
+# ここは **我々の OS の上で tcc が**訳す。退行の検査にもなる。
+#
+# **1 単位ずつ終了コードを数える。** どこまで通ってどこで止まるかが
+# 判らないと「足りないものの表」が書けない。
+#
+# **完了条件は走らせて見る。** ここは「組めた段の数」ではなく
+# `---- run ----` の塊がそのまま合うことで見る —— 段ごとの数え上げだけに
+# すると、走っていないのに通ったように見える行が混ざる。実際
+# `diff seed.txt seed.orig` は **bzip2 が動かなければ必ず 0 を返す**。
+EXT_EXPECT='compress: 4096 -> 2555 sum=59847
+roundtrip ok
+bz-rt 0
+zex 0'
+
+BZ_UNITS='blocksort huffman crctable randtable compress decompress bzlib'
+Z_UNITS='adler32 compress crc32 deflate infback inffast inflate inftrees
+trees uncompr zutil gzclose gzlib gzread gzwrite'
+
+do_ext() {
+    mk_scaffold
+    need "$out/tcc" "sh tools/tcc17.sh link"
+    need "$out/libc.a" "sh tools/tcc17.sh oslibc"
+    need "$out/libtcc1.a" "sh tools/tcc17.sh lib"
+    need docs/external/bzip2 "sh tools/fetch.sh bzip2"
+    need docs/external/zlib "sh tools/fetch.sh zlib"
+    need stage017/crt1.S "リポジトリ"
+    need stage017/crt1c.c "リポジトリ"
+    need stage017/syscall.S "リポジトリ"
+    cp "$out/tcc" "$root/tcc"
+    mkdir -p "$root/usr/lib" "$root/tccb/include" "$root/usr/include/sys" \
+             "$root/bz" "$root/z"
+    cp "$out/libc.a"    "$root/usr/lib/libc.a"
+    cp "$out/libtcc1.a" "$root/usr/lib/libtcc1.a"
+    cp "$src"/include/*.h "$root/tccb/include/"
+    cp "$OSLIBC_SRC"/include/*.h     "$root/usr/include/"
+    cp "$OSLIBC_SRC"/include/sys/*.h "$root/usr/include/sys/"
+    # crt は毎回この場で組む (libc.a と揃っている必要がある)
+    cp stage017/crt1.S "$root/crt1.S"
+    : > "$root/empty.S"
+    for f in docs/external/bzip2/*.c docs/external/bzip2/*.h; do
+        cp "$f" "$root/bz/"
+    done
+    for f in docs/external/zlib/*.c docs/external/zlib/*.h; do
+        cp "$f" "$root/z/"
+    done
+    cp docs/external/zlib/test/example.c "$root/z/zex.c"
+    # libbz2 の往復検査。**Stage 14 が我々の鎖で組んだのと同じ本**を
+    # 使う (tests/stage014/user/bzt.c)。同じ答が出れば退行の検査になる
+    need tests/stage014/user/bzt.c "リポジトリ"
+    cp tests/stage014/user/bzt.c "$root/bz/bzt.c"
+    {
+        printf 'tcc -c crt1.S -o usr/lib/crt1.o -B/tccb\necho "crt $?"\n'
+        printf 'tcc -c empty.S -o usr/lib/crti.o -B/tccb\n'
+        printf 'tcc -c empty.S -o usr/lib/crtn.o -B/tccb\n'
+        printf 'echo "---- bz ----"\n'
+        for u in $BZ_UNITS; do
+            printf 'tcc -c bz/%s.c -o bz/%s.o -B/tccb -I bz\necho "bz-%s $?"\n' \
+                "$u" "$u" "$u"
+        done
+        printf 'tcc -ar rcs usr/lib/libbz2.a'
+        for u in $BZ_UNITS; do printf ' bz/%s.o' "$u"; done
+        printf '\necho "bz-ar $?"\n'
+        # 往復検査の本。**これが libbz2 が使えることの証拠**である
+        printf 'tcc -static -o bzt bz/bzt.c -B/tccb -I bz'
+        printf ' -Wl,-Ttext=0x86000000 usr/lib/libbz2.a\necho "bz-drv $?"\n'
+        # bzip2 の**命令そのもの**。ここは通らない見込みで、通らない
+        # 理由を数えるために回す (32 章)
+        printf 'tcc -static -o bzip2 bz/bzip2.c -B/tccb -I bz'
+        printf ' -Wl,-Ttext=0x86000000 usr/lib/libbz2.a\necho "bz-prog $?"\n'
+        printf 'echo "---- z ----"\n'
+        for u in $Z_UNITS; do
+            printf 'tcc -c z/%s.c -o z/%s.o -B/tccb -I z\necho "z-%s $?"\n' \
+                "$u" "$u" "$u"
+        done
+        printf 'tcc -ar rcs usr/lib/libz.a'
+        for u in $Z_UNITS; do printf ' z/%s.o' "$u"; done
+        printf '\necho "z-ar $?"\n'
+        printf 'tcc -static -o zex z/zex.c -B/tccb -I z'
+        printf ' -Wl,-Ttext=0x86000000 usr/lib/libz.a\necho "z-prog $?"\n'
+        # **走らせる。** 組めたことは完了条件ではない (28 章)
+        printf 'echo "---- run ----"\n'
+        printf './bzt\necho "bz-rt $?"\n'
+        # zex はよく喋るので，出力は別に取る。見るのは終了コード
+        printf './zex > zex.out\necho "zex $?"\n'
+        printf 'echo "---- end ----"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 67108864 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/ext.log" 2>&1 || true
+    cat "$out/ext.log"
+    # **走った結果を取り分ける。** zex はよく喋るので出力を別に取って
+    # あり (zex.out)、そちらが「何を確かめたか」の証拠になる
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    cp "$out/back/zex.out" "$out/zex.out" 2> /dev/null || : > "$out/zex.out"
+    [ -s "$out/back/usr/lib/libz.a" ] && cp "$out/back/usr/lib/libz.a" "$out/libz.a"
+    [ -s "$out/back/usr/lib/libbz2.a" ] && cp "$out/back/usr/lib/libbz2.a" "$out/libbz2.a"
+    sed -n '/^---- run ----$/,/^---- end ----$/p' "$out/ext.log" \
+        | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/ext-run.txt"
+    # **足りないものの表。** 通った数ではなく，通らなかった段とその理由を出す
+    grep -E '^(bz|z)-[a-z0-9]+ [^0]' "$out/ext.log" > "$out/ext-bad.txt" || true
+    echo "---- 通らなかった段: $(grep -c . "$out/ext-bad.txt") ----" >&2
+    grep -oE "include file '[^']+' not found" "$out/ext.log" | sort -u >&2 || true
+    if [ "$(cat "$out/ext-run.txt")" != "$EXT_EXPECT" ]; then
+        echo "FAIL: zlib / bzip2 がまだ走らない ($out/ext.log)" >&2
+        echo "--- 実測:" >&2; cat "$out/ext-run.txt" >&2
+        echo "--- 期待:" >&2; printf '%s\n' "$EXT_EXPECT" >&2
+        return 1
+    fi
+    if ! grep -q '^zlib version 1\.3\.1 ' "$out/zex.out"; then
+        echo "FAIL: zex の出力が取れていない ($out/zex.out)" >&2
+        return 1
+    fi
+    echo "zlib ($(wc -c < "$out/libz.a") バイト) と libbz2 \
+($(wc -c < "$out/libbz2.a") バイト) が我々の OS の上で tcc に組まれ，走った" >&2
+}
+
 # **libtcc1.a を我々の OS の上で作る** (第 3 部の 3 の 3)。
 #
 # ここで使う翻訳器は cc19 ではなく **我々が作った tcc 自身**である
@@ -992,6 +1137,7 @@ mk) do_mk ;;
 lib) do_lib ;;
 crt) do_crt ;;
 oslibc) do_oslibc ;;
+ext) do_ext ;;
 link) do_link ;;
 check) do_check ;;
 unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
@@ -1003,5 +1149,5 @@ all)
     echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
     [ "$fail" -eq 0 ]
     ;;
-*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|crt|oslibc|clean]" >&2; exit 2 ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|crt|oslibc|ext|clean]" >&2; exit 2 ;;
 esac
