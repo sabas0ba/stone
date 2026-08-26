@@ -1073,7 +1073,8 @@ else
     if grep -q '^bz-prog 0$' tmp/s17/ext.log 2> /dev/null; then
         echo "   note: bzip2 の命令が通るようになった。32.4 の表を直すこと"
     else
-        echo "   gap:  bzip2 の命令はまだ組めない (utime.h ほか。32.4)"
+        echo "   gap:  bzip2 の命令はまだ組めない —— 壁は libc ではなく"
+        echo "         struct stat の線である (許可・所有者・参照数が sfs に無い。32.4)"
     fi
 fi
 
