@@ -507,10 +507,11 @@ int fseek(FILE *f, long off, int whence)
 FILE *fdopen(int fd, char *mode)
 {
     int k;
-    (void)mode;
     __stdfile(0);
     if (fd < 0)
         return NULL;
+    /* 0 / 1 / 2 は UART で，位置を持たない。**追記の印は立てない** ——
+     * 立てると書くたびに lseek が失敗する (第 21 世代) */
     if (fd < 3)
         return &files[fd];
     for (k = 3; k < NFILE; k++) {
@@ -519,10 +520,12 @@ FILE *fdopen(int fd, char *mode)
             files[k].back = -1;
             files[k].eof = 0;
             files[k].err = 0;
-            /* **印を落とす。** fclose は fd を -1 にするだけなので，
-             * 追記の流れが閉じた枠には app = 1 が残る。落とさないと
-             * 次にこの枠を取った流れが末尾へ寄せてしまう (第 21 世代) */
-            files[k].app = 0;
+            /* **印は mode で決める。** fclose は fd を -1 にするだけ
+             * なので，追記の流れが閉じた枠には app = 1 が残る。
+             * 落とさないと次にこの枠を取った流れが末尾へ寄せてしまう。
+             * かといって落とすだけだと fdopen(fd, "a") が追記に
+             * ならない —— **どちらも黙って誤る形である** (第 21 世代) */
+            files[k].app = (mode != 0 && mode[0] == 'a');
             return &files[k];
         }
     }

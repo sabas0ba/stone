@@ -1016,6 +1016,7 @@ OSLIBC_EXP='q1 hello 5
 q2 1 ./q
 q3 abc
 q4 ABCD
+q5 ABCDEF
 q 5'
 # 測り手 (31.3)。szstr は文字列リテラルの sizeof で、これが 4 に戻ると
 # tcc は書庫を読めなくなる
@@ -1031,7 +1032,7 @@ elif [ ! -s tmp/s17/oslibc-run.txt ]; then
     echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link && sh tools/tcc17.sh lib && sh tools/tcc17.sh oslibc"
 else
     [ "$(cat tmp/s17/oslibc-run.txt)" = "$OSLIBC_EXP" ]
-    report $? "oslibc: -nostdlib 無しで繋いだ像が走り、printf / malloc / strlen / fopen / 追記が働く"
+    report $? "oslibc: -nostdlib 無しで繋いだ像が走り、printf / malloc / strlen / fopen / 追記 (fopen と fdopen) が働く"
     # 書庫として読めること。ファイルが出たことを完了条件にしない (28 章)
     [ -s tmp/s17/libc.list ] && [ "$(grep -c . tmp/s17/libc.list)" = 12 ]
     report $? "oslibc: tcc -ar が作った libc.a を ar17 が読め、員が 12 本そろっている"

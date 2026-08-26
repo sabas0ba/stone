@@ -534,6 +534,7 @@ OSLIBC_EXPECT='q1 hello 5
 q2 1 ./q
 q3 abc
 q4 ABCD
+q5 ABCDEF
 q 5'
 
 # 測り手の答 (31.3)。**印刷するだけでは検査にならない**ので突き合わせる。
@@ -821,6 +822,7 @@ int main(int argc, char **argv) {
   char b[16];
   FILE *f;
   int n;
+  int fd;
   p = malloc(64);
   strcpy(p, "hello");
   n = strlen(p);
@@ -853,6 +855,20 @@ int main(int argc, char **argv) {
   fgets(b, 16, f);
   fclose(f);
   printf("q4 %s\n", b);
+  /* fdopen(fd, "a") も追記になるか (32 章のレビュー指摘)。
+     open で開いた fd を包んで書き足す */
+  fd = open("q4.txt", 1, 0);
+  if (fd < 0) return 96;
+  f = fdopen(fd, "a");
+  if (f == 0) return 97;
+  fputs("EF", f);
+  fclose(f);
+  f = fopen("q4.txt", "r");
+  if (f == 0) return 98;
+  b[0] = 0;
+  fgets(b, 16, f);
+  fclose(f);
+  printf("q5 %s\n", b);
   return n;
 }
 CEOF
