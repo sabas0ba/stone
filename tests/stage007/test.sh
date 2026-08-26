@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp
+stable_dir=tmp/stable7
 
 occ=tmp/build/occ.bin
 doc=stage007/occ.md
@@ -34,7 +35,13 @@ actual=${actual%% *}
 report $? "build: B2 (occ.bin) の SHA-256 が occ.md 記載値と一致"
 
 # 2. 固定点
-csc stage007/occ.sc tmp/occ3.bin && cmp -s tmp/occ3.bin "$occ"
+#
+# **QEMU を通す実行は CI で稀に揺らぐ** (docs/dev-notes.md 1.6)。
+# 素の cmp だと，中身の退行と実行の非再現が同じ FAIL に見える
+fp7gen() {
+    { cat stage007/occ.sc; printf '\004'; } | sh tools/env.sh qemu "$occ" > "$1"
+}
+stable_cmp "fixpoint(occ)" fp7gen "$occ"
 report $? "fixpoint: B3 = B2(occ.sc) が B2 とビット一致 (完了条件)"
 
 # 3. 同値性: Stage 5 仕様スイート

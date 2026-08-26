@@ -902,20 +902,72 @@ if [ ! -d docs/external/tcc ]; then
     echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
     echo "   **第 3 部の 3 の 2 の完了条件はこの節である。CI では走らない**"
     echo "   手元では sh tools/tcc17.sh all && sh tools/tcc17.sh mk を走らせること"
-elif [ ! -s tmp/s17/tcc-mk ]; then
-    echo "   skip: tmp/s17/tcc-mk が無い (sh tools/tcc17.sh mk で作れる)"
+elif [ ! -s tmp/s17/tcc-mk ] || [ ! -s tmp/s17/tcc ] \
+    || [ ! -s tmp/s17/hello.o ] || [ ! -s tmp/s17/tccdefs_.h-mk ]; then
+    # **見るものが揃っていなければ飛ばす。** 前提を 1 つだけ見て断言を
+    # 3 つ立てていたので，手で別の実験をした後に素の FAIL になった。
+    # 「材料が無い」と「壊れている」は別である
+    echo "   skip: tmp/s17 の材料が揃っていない"
     echo "   **第 3 部の 3 の 2 の完了条件はこの節である**"
+    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link \\"
+    echo "     && sh tools/tcc17.sh mk && sh tools/tcc17.sh check"
 else
     # **同じものが出ること。** 道が 2 つあって違うものが出るなら，
-    # どちらかが間違っている
+    # どちらかが間違っている。
+    #
+    # **両方を同じ回で作ること。** 片方だけ作り直すと出所の違うものを
+    # 比べることになり，中身の話でないところで落ちる (実際に落とした)
     cmp -s tmp/s17/tcc tmp/s17/tcc-mk
     report $? "same: Makefile から出た tcc と，命令を直に並べた tcc がバイト一致"
-    # **我々の OS の上で作った tccdefs_.h** がホストのものと一致すること
-    cmp -s tmp/s17/back/t/tccdefs_.h tmp/tcc/build/tccdefs_.h
+    # **我々の OS の上で作った tccdefs_.h** がホストのものと一致すること。
+    #
+    # **見るのは mk が取り分けた写しである。** back を見てはいけない ——
+    # back は次の走行 (check や lib) で上書きされ，その root には
+    # do_root が**ホストの** tccdefs_.h を写しているので，back を見ると
+    # ホスト同士を比べることになって検査が空回りする
+    # (レビューで指摘を受けて直した)
+    cmp -s tmp/s17/tccdefs_.h-mk tmp/tcc/build/tccdefs_.h
     report $? "same: 我々の c2str が作った tccdefs_.h がホストのものとバイト一致"
     # 出来た tcc が実際に翻訳できること
     [ -s tmp/s17/hello.o ]
     report $? "run: 我々の OS の上で組んだ tcc が hello.o を出した (tcc17.sh check)"
+fi
+
+section "第 3 部の 3 の 3: libtcc1.a (手元でのみ走る)"
+
+# 出来た tcc が lib/Makefile を回して libtcc1.a を作れること。
+# ここも素材が要るので CI では走らない。
+#
+#   sh tools/tcc17.sh lib
+#
+# **ファイルが出たことを完了条件にしてはいけない。** 実際に，員の
+# 見出しが 2 進数のまま 50,412 バイトの「書庫でないファイル」が出て
+# いた (docs/stage017-cc.md 27〜28 章)。見るのは ar17 が読めた員の
+# 並びである
+LIBTCC1_MEMBERS="libtcc1.o riscv32.o stdatomic.o atomic.o builtin.o
+alloca.o alloca-bt.o tcov.o armflush.o dsohandle.o"
+
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   **第 3 部の 3 の 3 の完了条件はこの節である。CI では走らない**"
+elif [ ! -s tmp/s17/libtcc1.a ]; then
+    # **飛ばしてよいのは「書庫がまだ無い」ときだけ。** 書庫が在るのに
+    # 員の並びが無い (ar17 が読めなかった) のは壊れているということで，
+    # それは飛ばさず落とす —— **「材料が無い」と「壊れている」は別**
+    echo "   skip: tmp/s17 の材料が揃っていない"
+    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link \\"
+    echo "     && sh tools/tcc17.sh mk && sh tools/tcc17.sh lib"
+else
+    # 我々の ar17 が，我々の tcc が作った書庫を読めること。
+    # 10 本すべてが，Makefile の並びどおりに出ること。
+    # libtcc1.list が空 (読めなかった) ならここで落ちる
+    printf '%s\n' $LIBTCC1_MEMBERS > tmp/s17/libtcc1.want
+    cmp -s tmp/s17/libtcc1.list tmp/s17/libtcc1.want
+    report $? "lib: 我々の OS の上で組んだ tcc の -ar が作った libtcc1.a を ar17 が読め，員が 10 本そろっている"
+    # **最後まで通ること。** libtcc1.a の後にも作るものがある (runmain.o)。
+    # 逆進 (backtrace) を切る前は bt-exe.c で止まっていた (29 章)
+    grep -q '^lib 0$' tmp/s17/lib.log
+    report $? "lib: lib/Makefile が最後まで通る (mk -C t/lib が rc 0)"
 fi
 
 summary

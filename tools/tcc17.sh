@@ -7,6 +7,7 @@
 #   tcc17.sh link          libtcc.a にまとめ tcc に繋ぐ (これも OS の上で)
 #   tcc17.sh check         出来た tcc に実際に翻訳させる
 #   tcc17.sh mk            **mk20 に tcc の Makefile を読ませて回す**
+#   tcc17.sh lib           libtcc1.a を我々が作った tcc 自身で作る
 #   tcc17.sh clean         tmp/s17 を消す
 #
 # ---- なぜ 1 本ずつ別の起動にするか ----
@@ -38,28 +39,45 @@ need() { [ -e "$1" ] || { echo "error: $1 が無い ($2)" >&2; exit 1; }; }
 do_root() {
     need "$src" "sh tools/tcc.sh src"
     need tmp/tcc/build/tccdefs_.h "sh tools/tcc.sh host"
-    for f in pp16cmd pp17 cc15pcmd ld16cmd sh2.bin cc19 kernel24.bin; do
+    for f in pp16cmd pp17 cc15qcmd ld16cmd sh2.bin cc19 kernel24.bin; do
         need "tmp/build/$f" "sh tools/build.sh stage017"
     done
     rm -rf "$root"
     mkdir -p "$root/bin" "$root/include/sys" "$root/lib" "$root/t"
     cp tmp/build/pp16cmd  "$root/bin/pp16"
     cp tmp/build/pp17     "$root/bin/pp17"
-    cp tmp/build/cc15pcmd "$root/bin/cc15p"
+    # **名前は cc15p のまま，中身は cc15q を置く。**
+    # cc19 は器の位置を "/bin/cc15p" と焼き込んでいる (stage017/cc19.c 53 行)。
+    # cc19 は凍結世代なのでこの名前は変えられない。一方 cc15p は静的な
+    # 初期化子の中の文字列を壊すので，tcc を cc15p で組むと tcc 自身の
+    # `tcc -ar` が壊れた書庫を吐く (docs/stage017-cc.md 27〜28 章)。
+    # ここは記録対象の作業場ではないので，名前と中身の対応を替えて済ませる
+    #
+    # STONE_CC15P はさらに差し替えて試すための穴。凍結世代を直すかどうかを
+    # 決める前に「直したら通るのか」を測るためのもので，既定では使わない
+    if [ -n "${STONE_CC15P:-}" ]; then
+        need "$STONE_CC15P" "STONE_CC15P に置いた器"
+        cp "$STONE_CC15P" "$root/bin/cc15p"
+        echo "note: cc15p を $STONE_CC15P で差し替えた" >&2
+    else
+        cp tmp/build/cc15qcmd "$root/bin/cc15p"
+    fi
     cp tmp/build/ld16cmd  "$root/bin/ld16"
     cp tmp/build/sh2.bin  "$root/bin/sh2"
     cp tmp/build/sh2.bin  "$root/sh2"
     cp tmp/build/cc19     "$root/cc19"
-    cp stage017/libc19/include/*.h     "$root/include/"
-    cp stage017/libc19/include/sys/*.h "$root/include/sys/"
+    cp stage017/libc20/include/*.h     "$root/include/"
+    cp stage017/libc20/include/sys/*.h "$root/include/sys/"
     # **/lib は 1 揃いだけ。** cc19 は /lib/*.o を全部並べるので，
     # 鎖が繋ぐ 8 本 + rt64 + rtfp と同じにする。ctype と morecore を
-    # 足すと多重定義になる (tools/build/stage017.sh の osprog19_run と
-    # 同じ並びであること)
-    cp tmp/build/l19_src_string.o tmp/build/l19_src_stdlib.o \
-       tmp/build/l19_src_misc15.o tmp/build/l19_posix_sys.o \
-       tmp/build/l19_posix_morecore.o tmp/build/l19_posix_stdio.o \
-       tmp/build/l19_posix_assert.o tmp/build/l19_posix_dir.o \
+    # 足すと多重定義になる。
+    #
+    # **libc20 を使う** (第 3 部の 3 の 3)。tcc の lib/tcov.c が
+    # fcntl / getpid / EINTR を要る (docs/stage017-cc.md 27 章)
+    cp tmp/build/l20_src_string.o tmp/build/l20_src_stdlib.o \
+       tmp/build/l20_src_misc15.o tmp/build/l20_posix_sys.o \
+       tmp/build/l20_posix_morecore.o tmp/build/l20_posix_stdio.o \
+       tmp/build/l20_posix_assert.o tmp/build/l20_posix_dir.o \
        tmp/build/rt64.o tmp/build/rtfp.o "$root/lib/"
     # **木のうち .c と .h だけを載せる。** configure や .texi は要らない
     for f in "$src"/*.c "$src"/*.h "$src"/*.def; do
@@ -70,21 +88,63 @@ do_root() {
     # CONFIG_TCCDIR/include から読む (config-stone.h は "/" なので
     # /include)。無いと "include file 'tccdefs.h' not found" で止まる
     cp "$src/include/tccdefs.h" "$root/include/"
-    cp stage015/tcc/config-stone.h "$root/t/config.h"
+    # **lib/ も載せる** (第 3 部の 3 の 3)。libtcc1.a を作る側である
+    mkdir -p "$root/t/lib"
+    for f in "$src"/lib/*.c "$src"/lib/*.S "$src"/lib/Makefile; do
+        [ -f "$f" ] && cp "$f" "$root/t/lib/"
+    done
+    # **第 2 世代の config を使う。** 逆進 (backtrace) と境界検査を切る
+    # 2 行だけ違う。RV32 では上流の tcc がそれらを作れないのに
+    # lib/Makefile は作らせようとするので，その食い違いを閉じる
+    # (docs/stage017-cc.md 28.6)。対になる CONFIG_backtrace=no は
+    # config.mak にある —— **片方だけでは意味がない**
+    cp stage017/tcc/config-stone.h "$root/t/config.h"
     echo "root: $(find "$root" -type f | wc -l) ファイル / $(du -sb "$root" | cut -f1) バイト" >&2
 }
 
 # その 1 本の入力が前と同じなら飛ばす
+# **do_root の直後にだけ呼ぶこと。** 印は $root の中身を見るので，
+# 中身が「前に何をしたか」で変わってはならない (mk / lib は
+# mk_scaffold で $root/t/include を足す)。
 stampkey() {
-    sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
-        tmp/build/cc19 tmp/build/pp17 tmp/build/cc15pcmd tmp/build/ld16cmd \
-        tmp/build/kernel24.bin 2> /dev/null | sha256sum | cut -d' ' -f1
+    {
+        sha256sum "$src/$1.c" "$root/t/config.h" "$root/t/tccdefs_.h" \
+            tmp/build/cc19 tmp/build/pp17 "${STONE_CC15P:-tmp/build/cc15qcmd}" \
+            tmp/build/ld16cmd tmp/build/kernel24.bin
+        # **libc のヘッダも数える。** cc19 は /include から読むので
+        # (do_root が libc20 のものを置く)，直したら翻訳結果が変わりうる。
+        # 入れていないと「直したのに作り直されない」が起きる —— この道具で
+        # 何度もやった取り違えと同じ族である (docs/stage017-cc.md 28.5)。
+        # 見るのは $root/include であって $root/t/include ではない
+        find "$root/include" -type f | sort | xargs sha256sum
+        # **tcc の木も丸ごと数える。** 単位は -I t で訳すので，共有の
+        # 宣言 (tcc.h / tcctok.h / *.def) を直せば結果が変わる。さらに
+        # tcc.c は tcctools.c を，libtcc.c は他を #include するので
+        # 「.c は自分のぶんだけ」も足りない。**数え落としを避ける方を
+        # 採る** —— 素材は patch を当て直したときにしか動かないので，
+        # そのときに 11 本まとめて作り直せばよい
+        find "$root/t" -maxdepth 1 -type f \
+            \( -name '*.c' -o -name '*.h' -o -name '*.def' \) \
+            | sort | xargs sha256sum
+    } 2> /dev/null | sha256sum | cut -d' ' -f1
 }
 
 do_unit() {
     u=$1
-    [ -d "$root" ] || do_root
     mkdir -p "$out/obj"
+    # **毎回 root を作り直してから印を取る。** 2 つの理由がある。
+    #
+    #  1. 印は $root の中身を見る。作り直さないと，直前に mk や lib を
+    #     走らせたかどうかで中身が変わり (mk_scaffold が t/include を
+    #     足す)，同じことをしても印が変わって QEMU を回し直すことになる
+    #  2. STONE_CC15P で差し替えた器を確実に置く。ここが
+    #     `[ -d "$root" ] || do_root` だったせいで，差し替えても古い
+    #     bin/cc15p がそのまま使われ「差し替えたのに何も変わらない」と
+    #     いう測り違いをした。do_link では同じ誤りを既に直していたのに，
+    #     こちらを見落としていた —— 1 か所で起きるものは他でも起きる
+    #
+    # 作り直しは写すだけで数秒である
+    do_root
     key=$(stampkey "$u")
     if [ -z "${STONE_FORCE_TCC17:-}" ] && [ -s "$out/obj/$u.o" ] \
         && [ "$(cat "$out/step-$u.stamp" 2> /dev/null)" = "$key" ]; then
@@ -218,7 +278,7 @@ do_check() {
 #
 # t/ で走らせる以上，素の名前は t/ からしか引けない (探す道は無い。
 # 16.3)。cc19 / ar / mk を t/ にも置く。
-do_mk() {
+mk_scaffold() {
     do_root
     need tmp/build/ar17 "sh tools/build.sh stage017"
     need tmp/build/mk20 "sh tools/build.sh stage017"
@@ -229,7 +289,29 @@ do_mk() {
     cp "$src/Makefile" "$root/t/Makefile"
     [ -d "$src/include" ] && mkdir -p "$root/t/include" \
         && cp "$src"/include/*.h "$root/t/include/"
-    cp stage015/tcc/config-stone.h "$root/t/config.h"
+    # **libc のヘッダも t/include へ置く。** lib/ の命令は -B.. なので，
+    # 出来た tcc はそこを sysinclude として見る (CONFIG_TCCDIR の / では
+    # なくなる)。tcov.c が <stdio.h> を読む。
+    #
+    # **tcc 自身のものを上書きしない。** stdarg.h / stddef.h は tcc の
+    # ものでなければならない —— 我々の stdarg.h は cc 専用の隠しローカル
+    # を使うので，tcc が訳すときには通らない
+    # (tools/tcc-stone.sh の「平らな名前空間」の註)
+    for f in stage017/libc20/include/*.h; do
+        b=$(basename "$f")
+        [ -f "$root/t/include/$b" ] || cp "$f" "$root/t/include/$b"
+    done
+    mkdir -p "$root/t/include/sys"
+    for f in stage017/libc20/include/sys/*.h; do
+        b=$(basename "$f")
+        [ -f "$root/t/include/sys/$b" ] || cp "$f" "$root/t/include/sys/$b"
+    done
+    # **第 2 世代の config を使う。** 逆進 (backtrace) と境界検査を切る
+    # 2 行だけ違う。RV32 では上流の tcc がそれらを作れないのに
+    # lib/Makefile は作らせようとするので，その食い違いを閉じる
+    # (docs/stage017-cc.md 28.6)。対になる CONFIG_backtrace=no は
+    # config.mak にある —— **片方だけでは意味がない**
+    cp stage017/tcc/config-stone.h "$root/t/config.h"
     cat > "$root/t/config.mak" <<'CFEOF'
 # 我々の OS 向けの config.mak (docs/stage017-cc.md 21 章)。
 # 上流の configure はホストでしか動かないので手で固定する
@@ -246,15 +328,29 @@ LDFLAGS=
 LIBS=
 ARCH=riscv32
 TARGETOS=stone
-TOP=.
+# **TOP は書かない。** lib/Makefile は TOP = .. を置いてから
+# $(TOP)/Makefile を取り込み，その中で config.mak が読まれる。
+# ここで TOP=. と書くと lib/ の TOP を潰し，命令が ./tcc になって
+# -B の引数が空になる (docs/stage017-cc.md 22.3)。
+# TOPSRC は上流の configure が書くものなので，ここで与える
 TOPSRC=$(TOP)
 CONFIG_riscv32=yes
+# 逆進と境界検査を作らない。config-stone.h の CONFIG_TCC_BACKTRACE 0 /
+# CONFIG_TCC_BCHECK 0 と対になる (上流の configure が
+# --config-backtrace=no で書く 2 か所と同じ)。これが無いと
+# lib/Makefile が bt-exe.o を作らせ，型が無いまま翻訳して落ちる
+CONFIG_backtrace=no
+CONFIG_bcheck=no
 prefix=/
 bindir=/
 tccdir=/
 libdir=/
 includedir=/include
 CFEOF
+}
+
+do_mk() {
+    mk_scaffold
     rm -f "$root/t"/*.o "$root/t/libtcc.a" "$root/t/tcc"
     {
         printf 'mk -C t -n tcc\necho "dry $?"\n'
@@ -274,18 +370,111 @@ CFEOF
     dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
     rm -rf "$out/back"
     sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
-    if [ -s "$out/back/t/tcc" ]; then
-        cp "$out/back/t/tcc" "$out/tcc-mk"
-        echo "Makefile から tcc ができた ($(wc -c < "$out/tcc-mk") バイト)" >&2
-    else
+    if [ ! -s "$out/back/t/tcc" ]; then
         echo "FAIL: t/tcc ができていない ($out/mk.log)" >&2
         return 1
     fi
+    cp "$out/back/t/tcc" "$out/tcc-mk"
+    # **我々の c2str が作った tccdefs_.h をここで取り分ける。**
+    # back は次の走行 (check や lib) で上書きされ，その root には
+    # do_root が **ホストの** tccdefs_.h を写している。取り分けずに
+    # back の中を見ると，**ホスト同士を比べる**ことになって検査が
+    # 空回りする (レビューで指摘を受けて直した)
+    if [ -s "$out/back/t/tccdefs_.h" ]; then
+        cp "$out/back/t/tccdefs_.h" "$out/tccdefs_.h-mk"
+    else
+        echo "FAIL: t/tccdefs_.h ができていない ($out/mk.log)" >&2
+        return 1
+    fi
+    echo "Makefile から tcc ができた ($(wc -c < "$out/tcc-mk") バイト)" >&2
+}
+
+# **libtcc1.a を我々の OS の上で作る** (第 3 部の 3 の 3)。
+#
+# ここで使う翻訳器は cc19 ではなく **我々が作った tcc 自身**である
+# (lib/Makefile の $(TCC) = ../tcc)。.S が 3 本あり，tcc 自身の
+# アセンブラを通る —— 我々が訳した riscv64-asm.o がここで初めて
+# 本気で使われる (docs/stage017-cc.md 22.2)。
+do_lib() {
+    # **どちらの道で作った tcc でもよい。** Makefile から回したもの
+    # (tcc-mk) を優先する —— そちらが本筋だからである。
+    # 名前を 1 つに決め打ちして「無い」と言うのは，前に検査でも
+    # 踏んだ形である (docs/stage017-cc.md 21 章の註)
+    # ただし **古い方を掴んではいけない。** tcc-mk を無条件に優先して
+    # いたせいで，link で作り直した新しい tcc があるのに古い tcc-mk で
+    # libtcc1.a を作り，「直したのに直っていない」と読み違えた。
+    # 両方あるときは新しい方を採る
+    _tcc=
+    [ -s "$out/tcc-mk" ] && _tcc=$out/tcc-mk
+    if [ -s "$out/tcc" ]; then
+        if [ -z "$_tcc" ] || [ "$out/tcc" -nt "$_tcc" ]; then _tcc=$out/tcc; fi
+    fi
+    [ -n "$_tcc" ] || {
+        echo "error: $out/tcc-mk も $out/tcc も無い (先に mk か link)" >&2
+        exit 1
+    }
+    echo "note: $_tcc を使う" >&2
+    mk_scaffold
+    cp "$_tcc" "$root/t/tcc"
+    rm -f "$root/t/lib"/*.o "$root/t/libtcc1.a"
+    {
+        printf 'mk -C t/lib -n\necho "dry $?"\n'
+        printf 'mk -C t/lib\necho "lib $?"\n'
+        # **出来た書庫を我々自身の ar で読み直す。** ファイルが出たことと
+        # 書庫になっていることは別で，実際に員の見出しが 2 進数のまま
+        # 50,412 バイトのファイルが出ていた (docs/stage017-cc.md 27〜28 章)。
+        # ホストの ar ではなく ar17 で読む —— 同じ走行の中で済むので
+        # QEMU の起動が増えない
+        printf 'echo "---- ar t ----"\nt/ar t t/libtcc1.a\necho "arlist $?"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/lib.log" 2>&1 || true
+    cat "$out/lib.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    if [ ! -s "$out/back/t/libtcc1.a" ]; then
+        echo "FAIL: libtcc1.a ができていない ($out/lib.log)" >&2
+        return 1
+    fi
+    # **壊れていても取り出す。** 読めない書庫そのものが手掛かりになる
+    # (27 章はこれを見て原因に行き着いた)
+    cp "$out/back/t/libtcc1.a" "$out/libtcc1.a"
+    # ar17 が読めた員の並びを取っておく。テストはこれを見る
+    sed -n '/^---- ar t ----$/,/^arlist /p' "$out/lib.log" \
+        | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/libtcc1.list"
+    # **ファイルが出たことを成功にしてはいけない。** 員の見出しが 2 進数の
+    # まま 50,412 バイトのファイルが出ることが実際にあった (27〜28 章)。
+    # ar17 が読めなければここで落とす —— 落とさないと libtcc1.list が空に
+    # なり，テスト側はそれを「材料が無い」と読んで飛ばしてしまう。
+    # **「材料が無い」と「壊れている」は別である**
+    if ! grep -q '^arlist 0$' "$out/lib.log" || [ ! -s "$out/libtcc1.list" ]; then
+        echo "FAIL: libtcc1.a を ar17 が読めない (書庫として壊れている。$out/lib.log)" >&2
+        return 1
+    fi
+    # **lib/Makefile が最後まで通ること。** libtcc1.a の後にも作るものが
+    # あり (runmain.o)，そこで止まっていては「回した」と言えない
+    # (docs/stage017-cc.md 29 章)
+    if ! grep -q '^lib 0$' "$out/lib.log"; then
+        echo "FAIL: mk -C t/lib が最後まで通っていない ($out/lib.log)" >&2
+        return 1
+    fi
+    echo "libtcc1.a ができた ($(wc -c < "$out/libtcc1.a") バイト / \
+$(grep -c . "$out/libtcc1.list") 員)" >&2
 }
 
 case ${1:-all} in
 root) do_root ;;
 mk) do_mk ;;
+lib) do_lib ;;
 link) do_link ;;
 check) do_check ;;
 unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
@@ -297,5 +486,5 @@ all)
     echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
     [ "$fail" -eq 0 ]
     ;;
-*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|clean]" >&2; exit 2 ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|clean]" >&2; exit 2 ;;
 esac

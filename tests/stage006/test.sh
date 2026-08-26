@@ -12,6 +12,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp
+stable_dir=tmp/stable6
 
 scc=tmp/build/scc.bin
 doc=stage006/scc.md
@@ -30,7 +31,15 @@ actual=${actual%% *}
 report $? "build: B2 (scc.bin) の SHA-256 が scc.md 記載値と一致"
 
 # 2. 固定点検証
-csc stage006/scc.sc tmp/scc3.bin && cmp -s tmp/scc3.bin "$scc"
+#
+# **QEMU を通す実行は CI で稀に揺らぐ** (docs/dev-notes.md 1.6)。
+# 素の cmp だと，中身の退行と実行の非再現が同じ FAIL に見える。
+# stable_cmp は 2 度作らせて，同じものが 2 度出るなら退行として即座に
+# 落とし，違うものが出るなら環境として数回やり直す
+fp6gen() {
+    { cat stage006/scc.sc; printf '\004'; } | sh tools/env.sh qemu "$scc" > "$1"
+}
+stable_cmp "fixpoint(scc)" fp6gen "$scc"
 report $? "fixpoint: B3 = B2(scc.sc) が B2 とビット一致 (完了条件)"
 
 cmp -s tmp/build/scc1.bin "$scc"

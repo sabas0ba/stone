@@ -18,6 +18,12 @@ build_stage015b() {
     ccgen cc15o cc15n stage015/cc15o.sc
     # 構造体の配置を C89 に揃える (14 章)
     ccgen cc15p cc15o stage015/cc15p.sc
+    # 第 17 世代。cc15p との差は 2 か所で，どちらも「静的な器の初期化子に
+    # 文字列リテラルが出てくると値が壊れる」という 1 つの誤りの別の現れ方
+    # (docs/stage017-cc.md 25 章 / 28 章)。
+    # **鎖の成果物は変わらない** —— 既存のソースはどちらの形も使っていない。
+    # 使うのは tcc の作業場だけ (tools/tcc17.sh)
+    ccgen cc15q cc15p stage015/cc15q.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -31,10 +37,10 @@ build_stage015b() {
 do_stage015b() {
     run_stage stage015b cc15l0.bin cc15l.bin \
         cc15m0.bin cc15m.bin cc15n0.bin cc15n.bin cc15o0.bin cc15o.bin \
-        cc15p0.bin cc15p.bin \
+        cc15p0.bin cc15p.bin cc15q0.bin cc15q.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
-           stage015/cc15o.sc stage015/cc15p.sc \
+           stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh

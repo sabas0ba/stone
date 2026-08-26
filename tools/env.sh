@@ -13,6 +13,9 @@
 #   STONE_IMAGE       イメージ名 (default: stone-env)
 #   STONE_QEMU_TRACE      qemu: 実行トレースの記録先ファイル (tools/run-qemu.sh 参照)
 #   STONE_QEMU_RAM        qemu: RAM 量 (既定 128M)。RAMFILE を使うときだけ効く
+#   STONE_QEMU_TIMEOUT    qemu: 打ち切りまでの秒数 (既定 900。0 で無効)。
+#                         **コンテナへ渡すこと** —— 渡し忘れると，呼ぶ側で
+#                         伸ばしたつもりの値が中で既定に戻る
 #   STONE_QEMU_GDB        qemu: GDB stub の待受けポート。コンテナ外へは 127.0.0.1 のみに公開する
 #   STONE_CONTAINER_NAME  qemu: コンテナ名。テストからの停止操作に使用する
 #   STONE_REBUILD         build: 像が最新でもビルドし直す (env/ をいじりながら試すとき)
@@ -102,6 +105,7 @@ qemu)
         ${STONE_CONTAINER_NAME:+--name "$STONE_CONTAINER_NAME"} \
         ${STONE_QEMU_GDB:+-p "127.0.0.1:$STONE_QEMU_GDB:$STONE_QEMU_GDB" -e STONE_QEMU_GDB} \
         -e STONE_QEMU_TRACE -e STONE_QEMU_RAMFILE -e STONE_QEMU_RAM \
+        -e STONE_QEMU_TIMEOUT \
         "$image" sh tools/run-qemu.sh "$@"
     ;;
 *)

@@ -17,6 +17,7 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
 . tests/lib.sh
 mkdir -p tmp/s11
+stable_dir=tmp/stable11
 
 cc=tmp/build/cc.bin
 pp=tmp/build/pp.bin
@@ -30,14 +31,30 @@ exp=tests/stage011/expected
 runcase() {
     name=$1
     shift
-    sh tools/bundle.sh stage011/libc/include/*.h "$src/$name.c" \
-        | sh tools/env.sh qemu "$pp" > "tmp/s11/$name.i" \
-        && sh tools/env.sh qemu "$cc" < "tmp/s11/$name.i" > "tmp/s11/$name.o" \
-        && { cat "tmp/s11/$name.o" "$@"; printf '\0'; } \
-            | sh tools/env.sh qemu "$ld" > "tmp/s11/$name.bin" \
-        && sh tools/env.sh qemu "tmp/s11/$name.bin" < /dev/null > "tmp/s11/$name.out"
-    rc=$?
-    [ "$rc" -eq 0 ] && diff -q "tmp/s11/$name.out" "$exp/$name.txt" > /dev/null
+    objs=$*
+    # 手順を関数にして stable_cmp に渡す。**2 度作らせて分ける**ため
+    # である (docs/dev-notes.md 1.6)。この節は CI で 2 度落ちており，
+    # 1 度目は打ち切り，2 度目は素の FAIL で**何が違ったのか出て
+    # いなかった**。stable_cmp なら
+    #
+    #   2 度とも作れない -> died   (打ち切りもここに落ちる)
+    #   2 度作って同じ   -> differ (退行。素性を出してすぐ落とす)
+    #   2 度作って違う   -> flaky  (環境。やり直す)
+    #
+    # と分かれ，どれであっても素性が出る。
+    #
+    # 標準入力を使う段があるので，やり直しは**手順の頭から**でなければ
+    # ならない。だから丸ごと 1 つの関数にする
+    # shellcheck disable=SC2086
+    gen11() {
+        sh tools/bundle.sh stage011/libc/include/*.h "$src/$name.c" \
+            | sh tools/env.sh qemu "$pp" > "tmp/s11/$name.i" \
+            && sh tools/env.sh qemu "$cc" < "tmp/s11/$name.i" > "tmp/s11/$name.o" \
+            && { cat "tmp/s11/$name.o" $objs; printf '\0'; } \
+                | sh tools/env.sh qemu "$ld" > "tmp/s11/$name.bin" \
+            && sh tools/env.sh qemu "tmp/s11/$name.bin" < /dev/null > "$1"
+    }
+    stable_cmp "feature: $name" gen11 "$exp/$name.txt"
     report $? "feature: $name"
 }
 

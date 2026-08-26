@@ -30,6 +30,10 @@ cmdlink_run() {
 build_stage017() {
     cmdlink pp16cmd pp16
     cmdlink cc15pcmd cc15p
+    # tcc の作業場で使う器。cc15p は静的な初期化子の文字列を壊すので
+    # (docs/stage017-cc.md 24〜28 章)，tcc を正しく組むには cc15q が要る。
+    # 鎖のプログラムは今までどおり cc15pcmd で組む
+    cmdlink cc15qcmd cc15q
     cmdlink ld16cmd ld16
 
     step cc17 cc17 \
@@ -63,7 +67,11 @@ build_stage017() {
              posix/sys posix/morecore posix/stdio posix/assert posix/dir; do
         n=$(echo "$f" | tr / _)
         step "l19_$n" "l19_$n.o" \
-            -- "stage017/libc19/$f.c" tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- "stage017/libc19/$f.c" \
+               stage017/libc19/include/*.h \
+               stage017/libc19/include/sys/time.h \
+               stage017/libc19/include/sys/stat.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
             -- libc19_run "$f" "$n"
     done
 
@@ -78,6 +86,27 @@ build_stage017() {
         -- stage017/mk19.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin tmp/build/l19_posix_dir.o \
         -- osprog19_run mk19 stage017/mk19.c
+
+    # libc の第 20 世代 (第 3 部の 3 の 3)。libc19 との差は
+    # 助言的ロック (fcntl) と getpid と EINTR だけ。tcc の lib/tcov.c が
+    # 要る (docs/stage017-cc.md 27 章)
+    #
+    # **ヘッダも入力に数える。** libc*_run は include/*.h を束ねてから
+    # 翻訳するので，ヘッダを直したら .o が変わりうる。ここに書かないと
+    # 外側の stage の印だけが変わって build_stage017 が走り，中の step は
+    # 「前と同じ」と言って**古い .o を持ち回ったまま新しい印が書かれる**。
+    # 数えるのは束ねているものと同じ並びにすること
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir; do
+        n=$(echo "$f" | tr / _)
+        step "l20_$n" "l20_$n.o" \
+            -- "stage017/libc20/$f.c" \
+               stage017/libc20/include/*.h \
+               stage017/libc20/include/sys/time.h \
+               stage017/libc20/include/sys/stat.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- libc20_run "$f" "$n"
+    done
 
     # 前処理器の第 17 世代 (第 3 部の 3 の 2)。-I を探す道として持つ。
     # **libc を繋がない** —— sys_* は 'E' 前置部のものを直に呼ぶ
@@ -127,6 +156,17 @@ kern17() {
     { printf 'K'; cat "tmp/build/${1}.o"; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld16.bin > "tmp/build/${1}.bin"
     echo "built tmp/build/${1}.bin" >&2
+}
+
+libc20_run() {
+    sh tools/bundle.sh stage017/libc20/include/*.h \
+        "sys/time.h=stage017/libc20/include/sys/time.h" \
+        "sys/stat.h=stage017/libc20/include/sys/stat.h" \
+        "stage017/libc20/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l20_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l20_$2.i" \
+        > "tmp/build/l20_$2.o"
+    echo "built tmp/build/l20_$2.o" >&2
 }
 
 libc19_run() {
@@ -221,12 +261,16 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
         l19_posix_sys.o l19_posix_morecore.o l19_posix_stdio.o \
         l19_posix_assert.o l19_posix_dir.o \
+        l20_src_string.o l20_src_ctype.o l20_src_stdlib.o \
+        l20_src_morecore.o l20_src_misc15.o \
+        l20_posix_sys.o l20_posix_morecore.o l20_posix_stdio.o \
+        l20_posix_assert.o l20_posix_dir.o \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
@@ -235,6 +279,8 @@ do_stage017() {
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \
+           stage017/libc20/include/*.h stage017/libc20/include/sys/*.h \
+           stage017/libc20/src/*.c stage017/libc20/posix/*.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh
