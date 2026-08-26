@@ -475,6 +475,405 @@ do_crt() {
     echo "tcc が組んだ実行形式が我々の OS の上で走った (p1=7 p2=argc p3=argv)" >&2
 }
 
+# **tcc の世界の libc を作る** (第 5 部の 2)。
+#
+# 30.6 の続き。我々の libc20 の .o は `cc15k` が組んだもので，引数を
+# データスタック (x9) で渡す**我々の規約**に従う。tcc は標準の RISC-V
+# ABI を使うので**この 2 つは互いに呼べない**。だから do_crt では
+# `-nostdlib` が要った。
+#
+# ここでやるのは **libc20 のソースを tcc に訳し直す**ことである。
+# ソースは C なので tcc が読める。`sys_*` だけは 'E' 前置部が機械語で
+# 持っていて我々の規約に従うので，標準 ABI 版を stage017/syscall.S に
+# 書き直して足す。
+#
+# 出来上がりは `/usr/lib/libc.a`。これがあると `-nostdlib` 無しで
+# 結合でき，`tcc -static -o q q.c` だけで `printf` が使える。
+#
+# 完了条件はやはり**走らせて見る**。printf / malloc / strlen / fopen が
+# 実際に働くことを、出力と終了コードで確かめる。
+# 単位は **経路:員の名前** で書く。名前を短くするのは，ar の名前欄が
+# 16 バイトしか無く，GNU の形式は終端に '/' を要るからである。
+# posix_morecore.o はちょうど 16 文字で，我々の ar17 は 15 文字に
+# 切れて見えた。**書庫の中で名前が変わる**のは避ける
+OSLIBC_UNITS='src/string:string src/stdlib:stdlib src/ctype:ctype
+src/misc15:misc15 posix/sys:sys posix/morecore:morecore
+posix/stdio:stdio posix/assert:assert posix/dir:dir'
+
+OSLIBC_EXPECT='q1 hello 5
+q2 1 ./q
+q3 abc
+q 5'
+
+do_oslibc() {
+    # **mk_scaffold が先。** 中で do_root が走り，root を作り直す。
+    # 後から呼ぶと下でここへ置いたものが全部消える。ar17 (t/ar) が要る
+    mk_scaffold
+    need stage017/crt1.S "リポジトリ"
+    need stage017/crt1c.c "リポジトリ"
+    need stage017/syscall.S "リポジトリ"
+    [ -s "$out/tcc" ] || { echo "error: $out/tcc が無い (先に link)" >&2; exit 1; }
+    [ -s "$out/libtcc1.a" ] || {
+        echo "error: $out/libtcc1.a が無い (先に lib)" >&2; exit 1; }
+    cp "$out/tcc" "$root/tcc"
+    mkdir -p "$root/usr/lib" "$root/libc"
+    # **tcc が自分で足す -ltcc1 の相手。** LIBPATHS は {B} と /usr/lib
+    # なので、-B/tccb なら /usr/lib で引ける (tcc.h 291 行)
+    cp "$out/libtcc1.a" "$root/usr/lib/libtcc1.a"
+    for u in $OSLIBC_UNITS; do
+        cp "stage017/libc20/${u%%:*}.c" "$root/libc/${u#*:}.c"
+    done
+    cp stage017/crt1.S    "$root/crt1.S"
+    cp stage017/crt1c.c   "$root/libc/crt1c.c"
+    cp stage017/syscall.S "$root/libc/syscall.S"
+    : > "$root/empty.S"
+    # **tcc に自分の -B の木を与える** (docs/stage017-cc.md 31.2)。
+    #
+    # do_root が置く /include は libc20 のもので，その stdarg.h は
+    # **我々の cc 専用**である —— コンパイラが用意する隠しローカル
+    # __va_ptr を使う (stage017/libc20/include/stdarg.h)。tcc に
+    # 訳させると "'__va_ptr' undeclared" で落ちる。
+    #
+    # 逆に tcc の stddef.h を /include に上書きすると，今度は
+    # **cc19 が読めなくなる**。1 つの /include を 2 つの処理系が
+    # 共有しているのが誤りで，分けるのが答である。
+    #
+    #   /tccb/include  tcc のもの (stdarg.h / stddef.h / tccdefs.h …)
+    #   /usr/include   libc20 のもの
+    #   /include       libc20 のもの (cc19 が読む。**触らない**)
+    #
+    # tcc の探し順は {B}/include -> /usr/include なので (tcc.h 280 行)，
+    # -B/tccb とすれば tcc のものが先に当たり，残りは libc20 から拾える。
+    # 書庫の探し順は {B} -> /usr/lib なので /usr/lib で揃う
+    # 木の名前は /tccb。/tcc にすると本体の実行形式 (/tcc) と
+    # ぶつかる —— sfs では同じ名前の枝と葉は持てない
+    mkdir -p "$root/tccb/include" "$root/usr/include/sys"
+    cp "$src"/include/*.h "$root/tccb/include/"
+    cp stage017/libc20/include/*.h     "$root/usr/include/"
+    cp stage017/libc20/include/sys/*.h "$root/usr/include/sys/"
+    # **"invalid archive" の切り分け (31.3)。**
+    #
+    # tcc の書庫読みが折れている。原因を「書庫の側」と「lseek / read の
+    # 側」と「64 ビットの側」に分けたい。
+    #
+    # 測り手は **tcc で組み，-nostdlib で繋ぐ**。cc19 で組むと我々の
+    # 規約の libc が混ざり，測っている対象が変わってしまう。答は
+    # **終了コード**で受ける (printf が無い)。
+    cat > "$root/v.c" <<'VEOF'
+/* tccelf.c の full_read / read_ar_header と同じ順で当たる。
+ * 位置 8 が書庫の最初の見出し，2704 が最初の員の見出しである
+ * (ホストで od して確かめた値) */
+int sys_openat(int dirfd, char *path, int flags, int mode);
+int sys_read(int fd, void *buf, int n);
+int sys_ecall(int n, int a, int b, int c);
+
+/* tccelf.c 3225 行の full_read の写し。**要求した数で止まらず，
+ * 0 が返るまで読む**ことに注意 */
+static int rd(int fd, char *b, int n) {
+  int rnum = 0;
+  int num;
+  while (1) {
+    num = sys_read(fd, b + rnum, n - rnum);
+    if (num < 0) return num;
+    if (num == 0) return rnum;
+    rnum += num;
+  }
+}
+
+int main(int argc, char **argv) {
+  char h[64];
+  int fd;
+  int r;
+  fd = sys_openat(-100, "usr/lib/libtcc1.a", 0, 0);
+  if (fd < 0) return 41;
+  if (sys_ecall(62, fd, 8, 0) != 8) return 42;
+  r = rd(fd, h, 60);
+  if (r != 60) return 43;
+  if (h[58] != 96 || h[59] != 10) return 44;
+  if (sys_ecall(62, fd, 2704, 0) != 2704) return 45;
+  r = rd(fd, h, 60);
+  if (r != 60) return 46;
+  if (h[58] != 96 || h[59] != 10) return 47;
+  /* 64 ビットの桁送り (get_be)。ここが狂うと員の位置が出鱈目になる */
+  {
+    unsigned long long v = 0;
+    unsigned char a[4];
+    int i;
+    a[0] = 0; a[1] = 0; a[2] = 10; a[3] = 144;   /* 2704 */
+    for (i = 0; i < 4; i++) v = (v << 8) | a[i];
+    if (v != 2704) return 48;
+  }
+  return 55;
+}
+VEOF
+    # **同じことを cc19 でも測る。** 上の v.c は tcc が訳したものだが，
+    # 折れているのは **cc19 (= cc15q) が訳した tcc** の側かもしれない。
+    # 器が違えば測っている対象が違う —— 両方要る
+    cat > "$root/pr.c" <<'PREOF'
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+typedef struct ArchiveHeader {
+  char ar_name[16];
+  char ar_date[12];
+  char ar_uid[6];
+  char ar_gid[6];
+  char ar_mode[8];
+  char ar_size[10];
+  char ar_fmag[2];
+} ArchiveHeader;
+int sys_ecall(int n, int a, int b, int c);
+int main(int argc, char **argv) {
+  ArchiveHeader hdr;
+  ArchiveHeader *h;
+  char *p;
+  char *e;
+  int fd;
+  int r;
+  int size;
+  h = &hdr;
+  printf("sz-hdr %d\n", (int)sizeof(ArchiveHeader));
+  printf("sz-name %d\n", (int)sizeof h->ar_name);
+  printf("sz-size %d\n", (int)sizeof h->ar_size);
+  printf("sz-fmag %d\n", (int)sizeof h->ar_fmag);
+  fd = open("usr/lib/libtcc1.a", 0, 0);
+  r = sys_ecall(62, fd, 8, 0);
+  printf("seek %d\n", r);
+  r = read(fd, h, 60);
+  printf("hdr-read %d\n", r);
+  r = memcmp(h->ar_fmag, "`\n", 2);
+  printf("fmag %d %d %d\n", (int)h->ar_fmag[0], (int)h->ar_fmag[1], r);
+  p = h->ar_name;
+  e = p + sizeof h->ar_name;
+  while (e > p && e[-1] == 32) e = e - 1;
+  *e = 0;
+  printf("name [%s] cmp %d\n", p, strcmp(p, "/"));
+  h->ar_size[sizeof h->ar_size - 1] = 0;
+  size = (int)strtol(h->ar_size, 0, 0);
+  printf("size %d\n", size);
+  close(fd);
+  return 0;
+}
+PREOF
+    # **64 ビットの値を int の仮引数へ渡す形を当たる。**
+    # tccelf.c は off (unsigned long long) を read_ar_header(int offset)
+    # へ渡す。我々の規約は引数をデータスタックへ積むので，型どおりに
+    # 1 語へ縮めずに 2 語積むと**以降の引数が全部ずれる**。
+    # 静かに誤る形なので，翻訳が通ったことでは判らない
+    cat > "$root/pr2.c" <<'P2EOF'
+#include <stdio.h>
+/* tccelf.c 3595 行の写し。コンマ演算子も込みで写す */
+unsigned long long get_be(unsigned char *b, int n) {
+  unsigned long long ret = 0;
+  while (n)
+    ret = (ret << 8) | *b++, --n;
+  return ret;
+}
+int three(int a, int b, char *p) { return a + b + (p != 0); }
+int main(int argc, char **argv) {
+  unsigned char x[4];
+  unsigned long long v;
+  int n;
+  char c;
+  x[0] = 0;
+  x[1] = 0;
+  x[2] = 0;
+  x[3] = 116;
+  v = get_be(x, 4);
+  n = (int)v;
+  printf("gb1 %d\n", n);
+  x[2] = 10;
+  x[3] = 144;
+  v = get_be(x, 4);
+  n = (int)v;
+  printf("gb2 %d\n", n);
+  printf("arg32 %d\n", three(1, n, &c));
+  v = 5;
+  printf("arg64 %d\n", three(1, v, &c));
+  /* **文字列リテラルの sizeof。** tccelf.c 3681 行は
+   *   file_offset = sizeof ARMAG - 1;    ARMAG = "!<arch>\\n"
+   * と書く。C では char[9] なので 8 でなければならない */
+  printf("szstr %d\n", (int)sizeof "!<arch>\n");
+  printf("szstr2 %d\n", (int)sizeof("abc"));
+  return 0;
+}
+P2EOF
+    # **tcc_load_alacarte の前半をそのまま写して当たる (31.3)。**
+    # ここまでの測りは部品を 1 つずつ見てきたが，どれも通った。
+    # 通らないのは組み合わせなので，**同じ順で同じことをする**手を書く
+    cat > "$root/pr3.c" <<'P3EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+int sys_ecall(int n, int a, int b, int c);
+unsigned long long get_be(unsigned char *b, int n) {
+  unsigned long long ret = 0;
+  while (n)
+    ret = (ret << 8) | *b++, --n;
+  return ret;
+}
+/* tccelf.c 3225 行の full_read の写し */
+int fread_all(int fd, void *buf, int count) {
+  char *cbuf = buf;
+  int rnum = 0;
+  int num;
+  while (1) {
+    num = read(fd, cbuf, count - rnum);
+    if (num < 0) return num;
+    if (num == 0) return rnum;
+    rnum = rnum + num;
+    cbuf = cbuf + num;
+  }
+}
+int main(int argc, char **argv) {
+  int fd;
+  int size;
+  int nsyms;
+  int i;
+  int bad;
+  int len;
+  unsigned long long off;
+  unsigned char *data;
+  unsigned char *ar_index;
+  char *ar_names;
+  char *p;
+  char h[64];
+  fd = open("usr/lib/libtcc1.a", 0, 0);
+  sys_ecall(62, fd, 8, 0);
+  len = fread_all(fd, h, 60);
+  h[57] = 0;
+  size = (int)strtol(h + 48, 0, 0);
+  printf("a-size %d %d\n", size, len);
+  data = (unsigned char *)malloc(size);
+  printf("a-malloc %d\n", data != 0);
+  len = fread_all(fd, data, size);
+  printf("a-idx %d\n", len);
+  nsyms = (int)get_be(data, 4);
+  printf("a-nsyms %d\n", nsyms);
+  ar_index = data + 4;
+  ar_names = (char *)ar_index + nsyms * 4;
+  bad = 0;
+  p = ar_names;
+  for (i = 0; i < nsyms; i++) {
+    off = get_be(ar_index + i * 4, 4);
+    sys_ecall(62, fd, (int)off, 0);
+    if (fread_all(fd, h, 60) != 60) bad = bad + 1;
+    else if (h[58] != 96 || h[59] != 10) bad = bad + 1;
+    p = p + strlen(p) + 1;
+  }
+  printf("a-bad %d\n", bad);
+  printf("a-first [%s]\n", ar_names);
+  printf("a-end %d\n", (int)(p - (char *)data));
+  free(data);
+  close(fd);
+  return 0;
+}
+P3EOF
+    # printf / malloc / strlen / fopen を 1 本で当たる。
+    # 返り値は strlen("hello") = 5。argv[0] は "./q" で呼ぶので "./q"
+    cat > "$root/q.c" <<'CEOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int main(int argc, char **argv) {
+  char *p;
+  char b[16];
+  FILE *f;
+  int n;
+  p = malloc(64);
+  strcpy(p, "hello");
+  n = strlen(p);
+  printf("q1 %s %d\n", p, n);
+  printf("q2 %d %s\n", argc, argv[0]);
+  free(p);
+  f = fopen("q.txt", "w");
+  if (f == 0) return 91;
+  fprintf(f, "abc\n");
+  fclose(f);
+  f = fopen("q.txt", "r");
+  if (f == 0) return 92;
+  b[0] = 0;
+  fgets(b, 16, f);
+  fclose(f);
+  printf("q3 %s", b);
+  return n;
+}
+CEOF
+    _objs=
+    {
+        # **1 本ずつ数える。** どの単位が通らないかが判らないと
+        # 「libc が組めない」で終わってしまう
+        for u in $OSLIBC_UNITS; do
+            n=${u#*:}
+            printf 'tcc -c libc/%s.c -o libc/%s.o -B/tccb\necho "u-%s $?"\n' "$n" "$n" "$n"
+        done
+        printf 'tcc -c libc/syscall.S -o libc/syscall.o -B/tccb\necho "u-syscall $?"\n'
+        printf 'tcc -c libc/crt1c.c -o libc/crt1c.o -B/tccb\necho "u-crt1c $?"\n'
+        printf 'tcc -c crt1.S -o usr/lib/crt1.o -B/tccb\necho "u-crt1 $?"\n'
+        printf 'tcc -c empty.S -o usr/lib/crti.o -B/tccb\necho "u-crti $?"\n'
+        printf 'tcc -c empty.S -o usr/lib/crtn.o -B/tccb\necho "u-crtn $?"\n'
+        printf 'tcc -ar rcs usr/lib/libc.a'
+        for u in $OSLIBC_UNITS; do
+            printf ' libc/%s.o' "${u#*:}"
+        done
+        printf ' libc/syscall.o libc/crt1c.o\necho "ar $?"\n'
+        # **書庫として読めるか。** ファイルが出たことは成功ではない
+        # (28 章)。我々自身の ar17 で読み直す
+        printf 'echo "---- ar t ----"\nt/ar t usr/lib/libc.a\necho "arlist $?"\n'
+        # 書庫の読みの切り分け (31.3)。55 なら全部通っている
+        printf 'tcc -static -o v v.c -B/tccb -nostdlib -Wl,-Ttext=0x86000000'
+        printf ' usr/lib/crt1.o libc/crt1c.o libc/syscall.o\necho "v-ld $?"\n'
+        printf './v\necho "v $?"\n'
+        printf 'cc19 -c pr.c -o pr.o\necho "pr-cc $?"\n'
+        printf 'cc19 -o pr pr.o\necho "pr-ld $?"\n./pr\necho "pr $?"\n'
+        printf 'cc19 -c pr2.c -o pr2.o\necho "pr2-cc $?"\n'
+        printf 'cc19 -o pr2 pr2.o\necho "pr2-ld $?"\n./pr2\necho "pr2 $?"\n'
+        printf 'cc19 -c pr3.c -o pr3.o\necho "pr3-cc $?"\n'
+        printf 'cc19 -o pr3 pr3.o\necho "pr3-ld $?"\n./pr3\necho "pr3 $?"\n'
+        printf 'tcc -static -o q q.c -B/tccb -Wl,-Ttext=0x86000000\necho "link-q $?"\n'
+        printf 'echo "---- run ----"\n./q\necho "q $?"\necho "---- end ----"\n'
+    } > "$root/go.sh"
+    printf 'sh2 go.sh\n' > "$root/boot"
+    sh tools/sfs3.sh pack "$root" "$out/fs.img" 33554432 1024 > /dev/null
+    rm -f "$out/ram"
+    dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-3600} \
+        STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$out/oslibc.log" 2>&1 || true
+    cat "$out/oslibc.log"
+    dd if="$out/ram" of="$out/back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$out/back"
+    sh tools/sfs3.sh unpack "$out/back.img" "$out/back" > /dev/null 2>&1 || true
+    sed -n '/^---- run ----$/,/^---- end ----$/p' "$out/oslibc.log" \
+        | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/oslibc-run.txt"
+    sed -n '/^---- ar t ----$/,/^arlist /p' "$out/oslibc.log" \
+        | sed -e '1d' -e '$d' -e '/^[[:space:]]*$/d' > "$out/libc.list"
+    if [ ! -s "$out/back/usr/lib/libc.a" ]; then
+        echo "FAIL: libc.a ができていない ($out/oslibc.log)" >&2
+        return 1
+    fi
+    cp "$out/back/usr/lib/libc.a" "$out/libc.a"
+    if ! grep -q '^arlist 0$' "$out/oslibc.log" || [ ! -s "$out/libc.list" ]; then
+        echo "FAIL: libc.a を ar17 が読めない (書庫として壊れている。$out/oslibc.log)" >&2
+        return 1
+    fi
+    if [ "$(cat "$out/oslibc-run.txt")" != "$OSLIBC_EXPECT" ]; then
+        echo "FAIL: libc.a で組んだ像の走りが期待と違う ($out/oslibc.log)" >&2
+        echo "--- 実測:" >&2; cat "$out/oslibc-run.txt" >&2
+        echo "--- 期待:" >&2; printf '%s\n' "$OSLIBC_EXPECT" >&2
+        return 1
+    fi
+    echo "tcc の世界の libc ができた ($(wc -c < "$out/libc.a") バイト / \
+$(grep -c . "$out/libc.list") 員)。-nostdlib 無しで printf が使える" >&2
+}
+
 # **libtcc1.a を我々の OS の上で作る** (第 3 部の 3 の 3)。
 #
 # ここで使う翻訳器は cc19 ではなく **我々が作った tcc 自身**である
@@ -562,6 +961,7 @@ root) do_root ;;
 mk) do_mk ;;
 lib) do_lib ;;
 crt) do_crt ;;
+oslibc) do_oslibc ;;
 link) do_link ;;
 check) do_check ;;
 unit) do_unit "${2:?usage: tcc17.sh unit <名前>}" ;;
@@ -573,5 +973,5 @@ all)
     echo "---- $(ls "$out/obj" 2>/dev/null | wc -l) / $(echo $UNITS | wc -w) 本" >&2
     [ "$fail" -eq 0 ]
     ;;
-*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|crt|clean]" >&2; exit 2 ;;
+*) echo "usage: tcc17.sh [root|unit <名前>|all|link|check|mk|lib|crt|oslibc|clean]" >&2; exit 2 ;;
 esac
