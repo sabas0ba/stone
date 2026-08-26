@@ -531,6 +531,7 @@ OSLIBC_SRC=stage017/libc21
 OSLIBC_EXPECT='q1 hello 5
 q2 1 ./q
 q3 abc
+q4 ABCD
 q 5'
 
 # 測り手の答 (31.3)。**印刷するだけでは検査にならない**ので突き合わせる。
@@ -834,6 +835,22 @@ int main(int argc, char **argv) {
   fgets(b, 16, f);
   fclose(f);
   printf("q3 %s", b);
+  /* **追記が本当に末尾へ書くか** (32 章)。第 20 世代までの fopen は
+     "a" でも先頭から上書きしていた。ABCD にならなければ壊れている */
+  f = fopen("q4.txt", "w");
+  if (f == 0) return 93;
+  fputs("AB", f);
+  fclose(f);
+  f = fopen("q4.txt", "a");
+  if (f == 0) return 94;
+  fputs("CD", f);
+  fclose(f);
+  f = fopen("q4.txt", "r");
+  if (f == 0) return 95;
+  b[0] = 0;
+  fgets(b, 16, f);
+  fclose(f);
+  printf("q4 %s\n", b);
   return n;
 }
 CEOF

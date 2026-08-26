@@ -27,6 +27,7 @@ FILE *__stdfile(int i) {
     for (k = 0; k < NFILE; k++) {
       files[k].fd = -1;
       files[k].back = -1;
+      files[k].app = 0;
     }
     files[0].fd = 0;
     files[1].fd = 1;
@@ -35,16 +36,36 @@ FILE *__stdfile(int i) {
   return &files[i];
 }
 
+/* 追記の流れは**書く前に必ず末尾へ寄せる** (第 21 世代)。
+ *
+ * カーネルに O_APPEND が無いので libc の側でやる。単一の走行なので
+ * (spawn は子の終わりを待つ)，これで POSIX の O_APPEND と同じ意味に
+ * なる。**寄せられなければ書かない** —— 書くと先頭を潰すからである
+ * (docs/stage017-cc.md 32 章)。
+ */
+static int wr(FILE *f, void *buf, int n) {
+  if (f->app && lseek(f->fd, 0, SEEK_END) < 0) {
+    f->err = 1;
+    return -1;
+  }
+  return write(f->fd, buf, n);
+}
+
 FILE *fopen(char *path, char *mode) {
   FILE *f;
   int k;
   int fd;
   int flags;
+  int app;
 
   __stdfile(0);                         /* 表の初期化を済ませる */
+  app = 0;
   if (mode[0] == 'r') flags = O_RDONLY;
   else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
-  else if (mode[0] == 'a') flags = O_WRONLY | O_CREAT;
+  /* **O_APPEND は渡さない。** カーネルが知らない旗を黙って捨てるので，
+   * 渡しても効かない —— そして open() はそれを拒む (fcntl.h の註)。
+   * 追記はここ (libc) で実装する。印だけ立てて，書く前に末尾へ寄せる */
+  else if (mode[0] == 'a') { flags = O_WRONLY | O_CREAT; app = 1; }
   else return NULL;
   fd = open(path, flags);
   if (fd < 0) return NULL;
@@ -55,6 +76,7 @@ FILE *fopen(char *path, char *mode) {
       f->back = -1;
       f->eof = 0;
       f->err = 0;
+      f->app = app;
       return f;
     }
   }
@@ -88,7 +110,7 @@ int fgetc(FILE *f) {
 int fputc(int c, FILE *f) {
   char b;
   b = c;
-  if (write(f->fd, &b, 1) != 1) { f->err = 1; return EOF; }
+  if (wr(f, &b, 1) != 1) { f->err = 1; return EOF; }
   return c & 255;
 }
 
@@ -123,7 +145,7 @@ size_t fwrite(void *buf, size_t size, size_t n, FILE *f) {
 
   tot = size * n;
   if (tot == 0) return 0;
-  w = write(f->fd, buf, tot);
+  w = wr(f, buf, tot);
   if (w < 0) { f->err = 1; return 0; }
   if (size == 0) return 0;
   return (size_t)w / size;
@@ -153,7 +175,7 @@ int fputs(char *s, FILE *f) {
   n = 0;
   while (s[n]) n = n + 1;
   if (n == 0) return 0;
-  if (write(f->fd, s, n) != n) { f->err = 1; return EOF; }
+  if (wr(f, s, n) != n) { f->err = 1; return EOF; }
   return n;
 }
 
@@ -457,7 +479,9 @@ int printf(char *fmt, ...) {
 
 /* ---- 第 4 部: 位置つきの入出力 ---- */
 
-long lseek(int fd, long off, int whence);
+/* lseek の宣言はここに置いていたが，**どのヘッダにも無かった**ので
+ * 読む側 (zlib) が暗黙の int 宣言になっていた。第 21 世代で unistd.h に
+ * 移した (docs/stage017-cc.md 32.3) */
 
 long ftell(FILE *f)
 {
@@ -495,6 +519,10 @@ FILE *fdopen(int fd, char *mode)
             files[k].back = -1;
             files[k].eof = 0;
             files[k].err = 0;
+            /* **印を落とす。** fclose は fd を -1 にするだけなので，
+             * 追記の流れが閉じた枠には app = 1 が残る。落とさないと
+             * 次にこの枠を取った流れが末尾へ寄せてしまう (第 21 世代) */
+            files[k].app = 0;
             return &files[k];
         }
     }

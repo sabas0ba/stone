@@ -31,6 +31,29 @@
 | `include/string.h` に `memchr` / `strerror` の宣言 | zlib の `gzread.c` / `gzwrite.c` |
 | `include/unistd.h` に `lseek` の宣言 | zlib の `gzlib.c` 242 行 |
 | `include/time.h` / `include/unistd.h` に型の見張り | `sys/types.h` と二重定義になるため |
+| `posix/stdio.c` の `fopen(path, "a")` が**本当に追記する** | 下の 3.1 |
+
+### 3.1 追記 ("a") が直った
+
+第 20 世代までの `fopen(path, "a")` は `O_WRONLY | O_CREAT` で開くだけ
+だった。カーネルは記述子の位置を 0 から始めるので，**既存のファイルの
+先頭から上書きしていた**。[stage014/libc.md](../stage014/libc.md) の
+「制限」にそう書いてあり，そこには
+
+> 追記が要るなら `fopen` の前に長さを調べて自前で位置を進める，という
+> 逃げ道も無い——**seek 系の syscall がそもそも無い**
+
+ともあった。**その前提はもう成り立たない。** `lseek` (62) が入っている
+(docs/stage017-cc.md 11 章)。
+
+そこで `FILE` に `app` を足し，**書く前に必ず末尾へ寄せる**形で追記を
+libc の側に実装した。我々は単一の走行なので (spawn は子の終わりを待つ)，
+これで POSIX の `O_APPEND` と同じ意味になる —— 途中で `fseek` しても，
+次に書くのは末尾である。
+
+**生の `O_APPEND` は `open()` が拒むままにする。** カーネルが知らない旗を
+黙って捨てるためで，そちらは実装していない。`fopen` は `O_APPEND` を
+渡さず，印だけ立てる。
 
 ## 3. 実装しないものの扱い
 
