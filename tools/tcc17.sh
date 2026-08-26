@@ -408,6 +408,20 @@ do_mk() {
 #
 # 完了条件は**終了コード**で見る。tcc が組んだ像が走り，main の返り値が
 # 終了コードになり，argc / argv が届いていること。
+#
+# **ここは -nostdlib で、crt1.o と crt1c.o を手で並べる。** この時点では
+# tcc の世界の libc がまだ無く (30.6)、我々の l20_*.o は呼出し規約が
+# 違うので繋げないためである。したがってこの作業が測るのは
+# 「入口が正しく書けているか」までで、**駆動役が自分で crt を拾う道は
+# 測っていない** —— crti.o / crtn.o も並ぶだけで効いていない。
+#
+# その道は do_oslibc が測る (31 章)。crt1c.o を libc.a の員に入れて
+# あるので、
+#
+#     tcc -static -o q q.c -B/tccb -Wl,-Ttext=0x86000000
+#
+# と打つだけで crt1.o / crti.o / crtn.o は CRTPREFIX (/usr/lib) から、
+# __start_c は -lc から自動で拾われる。**そちらが本番である。**
 CRTPROG_EXPECT='p1 7
 p2 1
 p3 9'
