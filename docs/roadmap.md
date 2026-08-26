@@ -129,7 +129,7 @@ stone の世代成果物 (実行環境を含む) に混ぜないことを優先�
 
 | Stage | 成果物 | 完了条件 |
 |---|---|---|
-| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ)・第 2 部 (複数の翻訳単位と書庫)・第 3 部 (make。tcc の `Makefile` を我々の OS の上で回し，`libtcc1.a` まで作る)・第 4 部 (時刻と差分ビルド)・第 5 部の 1 と 2 (**我々の OS の `cc` を tcc にする** —— tcc が結合まで担い，tcc の世界の `libc.a` も揃った。`tcc -static -o q q.c` だけで `printf` が使える) は完了 ([stage017-cc.md](stage017-cc.md) 30〜31 章)。**2.1 の判断の材料は [stage017-gcc.md](stage017-gcc.md) に並べた** |
+| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ)・第 2 部 (複数の翻訳単位と書庫)・第 3 部 (make。tcc の `Makefile` を我々の OS の上で回し，`libtcc1.a` まで作る)・第 4 部 (時刻と差分ビルド)・第 5 部の 1 と 2 (**我々の OS の `cc` を tcc にする** —— tcc が結合まで担い，tcc の世界の `libc.a` も揃った。`tcc -static -o q q.c` だけで `printf` が使える) ・5.2 (**zlib を tcc で組んで走らせる** —— 自己検査が通る。libbz2 も Stage 14 と同じ答) は完了 ([stage017-cc.md](stage017-cc.md) 30〜32 章)。**2.1 の判断の材料は [stage017-gcc.md](stage017-gcc.md) に並べた** |
 | 18 | GNU C 拡張の実装 | inline asm, `__attribute__`, statement expression, builtin 群など，カーネルが要求する拡張に対応する |
 | 19 | Linux カーネルのビルド | カーネルをビルドし，QEMU 上で起動する (**L2**) |
 
