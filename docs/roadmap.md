@@ -129,7 +129,7 @@ stone の世代成果物 (実行環境を含む) に混ぜないことを優先�
 
 | Stage | 成果物 | 完了条件 |
 |---|---|---|
-| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ)・第 2 部 (複数の翻訳単位と書庫)・第 3 部 (make。tcc の `Makefile` を我々の OS の上で回し，`libtcc1.a` まで作る)・第 4 部 (時刻と差分ビルド) は完了 ([stage017-cc.md](stage017-cc.md))。**2.1 の判断の材料は [stage017-gcc.md](stage017-gcc.md) に並べた** |
+| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ)・第 2 部 (複数の翻訳単位と書庫)・第 3 部 (make。tcc の `Makefile` を我々の OS の上で回し，`libtcc1.a` まで作る)・第 4 部 (時刻と差分ビルド)・第 5 部の 1 と 2 (**我々の OS の `cc` を tcc にする** —— tcc が結合まで担い，tcc の世界の `libc.a` も揃った。`tcc -static -o q q.c` だけで `printf` が使える) は完了 ([stage017-cc.md](stage017-cc.md) 30〜31 章)。**2.1 の判断の材料は [stage017-gcc.md](stage017-gcc.md) に並べた** |
 | 18 | GNU C 拡張の実装 | inline asm, `__attribute__`, statement expression, builtin 群など，カーネルが要求する拡張に対応する |
 | 19 | Linux カーネルのビルド | カーネルをビルドし，QEMU 上で起動する (**L2**) |
 
@@ -171,7 +171,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 12 | **完了** (第 1〜4 部すべて。共有領域と sfs・ld12 とカーネル・libc 環境部・stdio) (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
 | 13 | **完了** (第 1〜4 部すべて。spawn とシェル・ed・cc / ld / pp の移住・mk とゲスト内再生成)。**Phase B が終わった** | [stage013-tools.md](stage013-tools.md) |
 | 14 | **完了** (第 1〜9 部)。適合台帳・言語の拡幅 cc14a〜cc14g・libc 第 14 世代・ld14 / pp14。無改変の bzip2 (libbz2 1.0.8) と zlib 1.3.1 をビルドし，自作 OS 上で圧縮・伸長の往復一致とホスト側実装との相互運用を確認 | [stage014-external.md](stage014-external.md) |
-| 15 | **完了** (第 1〜6 部)。cc15a〜cc15p (64 bit 整数・浮動小数点・言語の穴)・pp15 / pp16・ld15 / ld16・libc15・kernel15 / kernel16，tcc への RV32 backend (riscv32.patch)。**T2 == T3 == tccH** —— 我々の鎖が作った tcc が自作 OS の上で自分自身を作り，その出力がさらに自分自身を作れる (固定点)。しかもそれは参照実装 (ホストの gcc が作った交差 tcc) が作る tcc と**バイト一致**する | [stage015-tcc.md](stage015-tcc.md) / [stage015-riscv32.md](stage015-riscv32.md) |
+| 15 | **完了** (第 1〜6 部)。cc15a〜cc15p (64 bit 整数・浮動小数点・言語の穴。Stage 17 でさらに cc15q / cc15r —— どちらも「文字列リテラルが配列であること」を型として持っていなかった誤りの直しである)・pp15 / pp16・ld15 / ld16・libc15・kernel15 / kernel16，tcc への RV32 backend (riscv32.patch)。**T2 == T3 == tccH** —— 我々の鎖が作った tcc が自作 OS の上で自分自身を作り，その出力がさらに自分自身を作れる (固定点)。しかもそれは参照実装 (ホストの gcc が作った交差 tcc) が作る tcc と**バイト一致**する | [stage015-tcc.md](stage015-tcc.md) / [stage015-riscv32.md](stage015-riscv32.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言

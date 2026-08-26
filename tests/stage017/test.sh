@@ -1002,4 +1002,40 @@ else
     report $? "crt: crt1.o が我々の OS の上で組まれた ELF である"
 fi
 
+section "第 5 部の 2: tcc の世界の libc (手元でのみ走る)"
+
+# **-nostdlib が要らなくなること**がここの眼目である
+# (docs/stage017-cc.md 31 章)。libc20 のソースを tcc で訳し直し、
+# 標準 RISC-V ABI の sys_* スタブ (stage017/syscall.S) と合わせて
+# /usr/lib/libc.a にする。
+#
+#   sh tools/tcc17.sh oslibc
+#
+# 見るのは printf / malloc / strlen / fopen が**実際に働くこと**である。
+OSLIBC_EXP='q1 hello 5
+q2 1 ./q
+q3 abc
+q 5'
+# 測り手 (31.3)。szstr は文字列リテラルの sizeof で、これが 4 に戻ると
+# tcc は書庫を読めなくなる
+PROBE_EXP='v 55
+szstr 9
+a-bad 0'
+
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
+    echo "   **第 5 部の 2 の完了条件はこの節である。CI では走らない**"
+elif [ ! -s tmp/s17/oslibc-run.txt ]; then
+    echo "   skip: tmp/s17 の材料が揃っていない"
+    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link && sh tools/tcc17.sh lib && sh tools/tcc17.sh oslibc"
+else
+    [ "$(cat tmp/s17/oslibc-run.txt)" = "$OSLIBC_EXP" ]
+    report $? "oslibc: -nostdlib 無しで繋いだ像が走り、printf / malloc / strlen / fopen が働く"
+    # 書庫として読めること。ファイルが出たことを完了条件にしない (28 章)
+    [ -s tmp/s17/libc.list ] && [ "$(grep -c . tmp/s17/libc.list)" = 11 ]
+    report $? "oslibc: tcc -ar が作った libc.a を ar17 が読め、員が 11 本そろっている"
+    [ "$(cat tmp/s17/oslibc-probe.txt 2> /dev/null)" = "$PROBE_EXP" ]
+    report $? "oslibc: 測り手が通る (書庫の読み / 文字列リテラルの sizeof が 9)"
+fi
+
 summary

@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15q.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15r.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe

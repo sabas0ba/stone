@@ -507,6 +507,12 @@ q2 1 ./q
 q3 abc
 q 5'
 
+# 測り手の答 (31.3)。**印刷するだけでは検査にならない**ので突き合わせる。
+# ここが動いたら書庫が読めなくなるはずなので、退行の網でもある
+OSLIBC_PROBE='v 55
+szstr 9
+a-bad 0'
+
 do_oslibc() {
     # **mk_scaffold が先。** 中で do_root が走り，root を作り直す。
     # 後から呼ぶと下でここへ置いたものが全部消える。ar17 (t/ar) が要る
@@ -864,6 +870,14 @@ CEOF
     cp "$out/back/usr/lib/libc.a" "$out/libc.a"
     if ! grep -q '^arlist 0$' "$out/oslibc.log" || [ ! -s "$out/libc.list" ]; then
         echo "FAIL: libc.a を ar17 が読めない (書庫として壊れている。$out/oslibc.log)" >&2
+        return 1
+    fi
+    # 測り手の答を取り分けて突き合わせる (31.3)
+    grep -E '^(v|szstr|a-bad) ' "$out/oslibc.log" > "$out/oslibc-probe.txt"
+    if [ "$(cat "$out/oslibc-probe.txt")" != "$OSLIBC_PROBE" ]; then
+        echo "FAIL: 測り手の答が期待と違う ($out/oslibc.log)" >&2
+        echo "--- 実測:" >&2; cat "$out/oslibc-probe.txt" >&2
+        echo "--- 期待:" >&2; printf '%s\n' "$OSLIBC_PROBE" >&2
         return 1
     fi
     if [ "$(cat "$out/oslibc-run.txt")" != "$OSLIBC_EXPECT" ]; then
