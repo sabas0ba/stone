@@ -3,7 +3,7 @@
 # (docs/stage017-gcc.md 5.1)。
 #
 # Stage 14 はこの 2 つを**ホストの鎖**で訳した (tests/stage014 第 8〜9 部)。
-# ここは **自作 OS の上で自作の器 (cc19 + cc15t) が**訳す。それが一段先の
+# ここは **自作 OS の上で自作の器 (cc19 + cc15u) が**訳す。それが一段先の
 # 指標になる。
 #
 # **外部の器は使わない。** 一度 tcc に組ませたが，それでは tcc の成熟度を
@@ -45,7 +45,7 @@ need() {
 }
 
 do_root() {
-    for f in pp16cmd pp17 cc15tcmd ld17cmd sh2.bin cc19 ar17 kernel24.bin; do
+    for f in pp16cmd pp17 cc15ucmd ld17cmd sh2.bin cc19 ar17 kernel24.bin; do
         need "tmp/build/$f" "sh tools/build.sh stage017"
     done
     need docs/external/zlib  "sh tools/fetch.sh zlib"
@@ -55,8 +55,8 @@ do_root() {
     cp tmp/build/pp16cmd  "$root/bin/pp16"
     cp tmp/build/pp17     "$root/bin/pp17"
     # cc19 は器の位置を "/bin/cc15p" と焼き込んでいる (cc19.c 53 行)。
-    # 凍結世代なので名前は変えられない。中身は最前線の cc15t を置く
-    cp tmp/build/cc15tcmd "$root/bin/cc15p"
+    # 凍結世代なので名前は変えられない。中身は最前線の cc15u を置く
+    cp tmp/build/cc15ucmd "$root/bin/cc15p"
     # cc19 は "/bin/ld16" と焼き込んでいる。中身は**名前を言う** ld17 を
     # 置く —— 落ちたときに「どれかが足りない」で終わらせない (5.1)
     cp tmp/build/ld17cmd  "$root/bin/ld16"
@@ -176,6 +176,21 @@ do_run() {
     done
     grep -q '^z ok$' "$out/run.log" || { echo "FAIL: zlib の往復" >&2; _rc=1; }
     grep -q '^bz ok ' "$out/run.log" || { echo "FAIL: bzip2 の往復" >&2; _rc=1; }
+    # **往復するだけでは足りない。** 我々の誤りが往路と復路で打ち消し
+    # 合えば，中身が違っても元に戻る。**外の物差しと値を突き合わせる**。
+    #
+    # 期待値の出どころは 2 つ (同じ値になることを確かめてある) ——
+    #   - ホストの gcc に**同じソースと同じ駆動**を組ませたもの
+    #   - Python の zlib (別実装) に同じバイト列を食わせたもの
+    #
+    # これを入れる前は adler32 が誤っていたのに "z ok" が出ていた
+    # (docs/stage017-gcc.md 5.1。cc15u で直した)
+    for w in 'crc32 282d245a' 'adler32 459e7153' \
+             'level 1 ok 3042' 'level 5 ok 1537' 'level 9 ok 1537' \
+             'bz ok 927'; do
+        grep -q "^$w\$" "$out/run.log" \
+            || { echo "FAIL: 値が合わない ($w)" >&2; _rc=1; }
+    done
     [ "$_rc" -eq 0 ] && echo "---- zlib / bzip2 が我々の器で組めて走った ----" >&2
     return $_rc
 }

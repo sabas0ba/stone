@@ -41,6 +41,13 @@ build_stage015b() {
     # 抜けてしまっていた。zlib を我々の器で訳して出た穴
     # (docs/stage017-gcc.md 5.1)
     ccgen cc15t cc15s stage015/cc15t.sc
+    # 第 21 世代。複合代入が符号を見ていなかった —— a op= b は
+    # a = a op b と同じ意味なのに，除算・剰余・右シフトの命令を
+    # トークンの並び (符号つき側) のまま選んでいた。zlib の adler32 が
+    # 誤った値を返す形で表に出た (docs/stage017-gcc.md 5.1)。
+    # **鎖の成果物は変わらない** —— 我々のソースは >>= / /= / %= を
+    # 1 つも使っていない。だから自分自身を組む限り表に出ない誤りだった
+    ccgen cc15u cc15t stage015/cc15u.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -60,11 +67,12 @@ do_stage015b() {
         cc15m0.bin cc15m.bin cc15n0.bin cc15n.bin cc15o0.bin cc15o.bin \
         cc15p0.bin cc15p.bin cc15q0.bin cc15q.bin \
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
-        cc15t0.bin cc15t.bin \
+        cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
+           stage015/cc15u.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
