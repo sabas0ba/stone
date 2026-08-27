@@ -42,6 +42,10 @@ build_stage017() {
     # **最前線を 2 つに分けない** —— 台帳を測る器と tcc を組む器は
     # 同じものにする
     cmdlink cc15scmd cc15s
+    # 第 20 世代。宣言指定子の途中に来る型修飾子 (unsigned const char)。
+    # zlib を我々の器で訳して出た穴で，これが最前線である
+    # (docs/stage017-gcc.md 5.1)
+    cmdlink cc15tcmd cc15t
     cmdlink ld16cmd ld16
 
     step cc17 cc17 \
@@ -269,7 +273,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \

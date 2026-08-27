@@ -62,3 +62,11 @@ staticstr3   gap   6
 # 上の staticstr と**同じ根**で，あちらは初期化子の側，こちらは式の側
 # である (docs/stage017-cc.md 31.4)。
 strsizeof    ok   y\n
+
+# ---- 5.1 (zlib / bzip2 を我々の器で訳す) で見つけた穴 (cc15t で直した) ----
+#
+# 型修飾子が宣言指定子の列の**途中**に来る形 (unsigned const char)。
+# C89 6.5 は順序を縛らないが，ptype() は列の先頭と末尾でしか
+# const / volatile を読んでいなかった。**拒む**ので bad ではないが，
+# C89 が許す形を拒むのは穴である (docs/stage017-gcc.md 5.1)。
+qualorder    ok   y\n
