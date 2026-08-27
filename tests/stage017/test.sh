@@ -983,6 +983,37 @@ section "第 5 部 (撤回): tcc の生成物を我々の OS に置く道は落�
 # staticstr2 / staticstr3 / strsizeof) と libc21 である。あれは
 # 「外部のソースを入力として読む」範囲の成果で、方針どおりである。
 echo "   note: 30〜32 章の道は撤回した (34 章)。的を道具に使わない"
-echo "   note: 実物を組む指標は**我々の cc19 + cc15s で**測り直す"
+
+section "第 5 部 (測り直し): 実物を我々の器で組んで走らせる (5.1)"
+
+# **我々の OS の上で我々の器が** zlib / bzip2 を訳し，我々の ar が書庫に
+# まとめ，我々の ld が繋ぎ，走らせて往復する (docs/stage017-gcc.md 5.1)。
+#
+#   sh tools/ext17.sh run
+#
+# QEMU の中で 22 単位を訳すので 10 分を超える。**CI では走らせない** ——
+# ここは出来た記録を見るだけにする。
+if [ ! -s tmp/e17/run.log ]; then
+    echo "   skip: tmp/e17/run.log が無い"
+    echo "   **5.1 の完了条件はこの節である。CI では走らない**"
+    echo "   手元では sh tools/ext17.sh run を走らせること"
+else
+    ok=0
+    for k in arz arbz arzt arbzt linkz linkbz runz runbz; do
+        grep -q "^$k 0\$" tmp/e17/run.log || ok=1
+    done
+    [ "$ok" -eq 0 ]
+    report $? "ext: 22 単位を訳し，我々の ar で書庫にし，我々の ld で繋いで走った"
+
+    # **往復するだけでは足りない。** 往路と復路で誤りが打ち消し合えば
+    # 中身が違っても元に戻る。実際 adler32 が誤ったまま "z ok" が出て
+    # いた (cc15u で直した)。**外の物差しと値を突き合わせる**
+    ok=0
+    for w in 'crc32 282d245a' 'adler32 459e7153'              'level 1 ok 3042' 'level 5 ok 1537' 'level 9 ok 1537'              'bz ok 927'; do
+        grep -q "^$w\$" tmp/e17/run.log || ok=1
+    done
+    [ "$ok" -eq 0 ]
+    report $? "ext: 値がホストの gcc / Python の zlib と一致する (往復だけで済ませない)"
+fi
 
 summary
