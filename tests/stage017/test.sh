@@ -999,7 +999,7 @@ if [ ! -s tmp/e17/run.log ]; then
     echo "   手元では sh tools/ext17.sh run を走らせること"
 else
     ok=0
-    for k in arz arbz arzt arbzt linkz linkbz runz runbz; do
+    for k in arz arbz arzt arbzt linkz linkbz linkzex runz runbz runzex; do
         grep -q "^$k 0\$" tmp/e17/run.log || ok=1
     done
     [ "$ok" -eq 0 ]
@@ -1014,6 +1014,21 @@ else
     done
     [ "$ok" -eq 0 ]
     report $? "ext: 値がホストの gcc / Python の zlib と一致する (往復だけで済ませない)"
+
+    # **zlib 自身の検査も通す。** 我々が書いた駆動は我々が思いついた道しか
+    # 通らない。example.c は gzopen / gzprintf / gzseek / gzgets /
+    # gzungetc / inflateSync / 辞書つき伸長まで通し，**libc のファイル層
+    # まで一緒に測る**。出力はホストで組んだものと 1 行ずつ一致すること
+    # (版と compile flags の行だけは語長で必ず違うので外す)
+    ok=0
+    for w in 'uncompress(): hello, hello!' 'gzread(): hello, hello!' \
+             'gzgets() after gzseek:  hello!' 'inflate(): hello, hello!' \
+             'large_inflate(): OK' 'after inflateSync(): hello, hello!' \
+             'inflate with dictionary: hello, hello!'; do
+        grep -qF "$w" tmp/e17/run.log || ok=1
+    done
+    [ "$ok" -eq 0 ]
+    report $? "ext: zlib 自身の検査 (test/example.c) の出力がホストと一致する"
 fi
 
 summary

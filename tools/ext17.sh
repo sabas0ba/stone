@@ -12,6 +12,7 @@
 #
 #   sh tools/ext17.sh probe   1 単位ずつ訳して，通らなかったものを数える
 #   sh tools/ext17.sh run     書庫にまとめ，駆動を繋いで**実際に走らせる**
+#                             (我々が書いた駆動と，**zlib 自身の検査**の両方)
 #   sh tools/ext17.sh clean
 #
 # **訳せることと動くことは別である。** 22/22 訳せても，それは「構文を
@@ -88,6 +89,11 @@ do_root() {
     # ソースは素材であって，測るのは我々の器と我々の OS である
     cp tests/stage017/ext/zt.c  "$root/z/"
     cp tests/stage017/ext/bzt.c "$root/bz/"
+    # **zlib 自身の検査も入力として読む。** 我々が書いた駆動 (zt.c) は
+    # 我々が思いついた道しか通らない。example.c は gzopen / gzprintf /
+    # gzseek / gzgets / gzungetc / inflateSync / 辞書つき伸長まで通すので，
+    # **libc のファイル層まで一緒に測れる** (docs/stage017-gcc.md 5.1)
+    cp docs/external/zlib/test/example.c "$root/z/"
     echo "root: $(find "$root" -type f | wc -l) ファイル" >&2
 }
 
@@ -162,16 +168,19 @@ do_run() {
         # 診断が出る —— 検査は行の有無で見る
         printf 'cc19 -o zt z/zt.c z/libz.a -I z && echo "linkz 0" || cat zt\n'
         printf 'cc19 -o bzt bz/bzt.c bz/libbz2.a -I bz && echo "linkbz 0" || cat bzt\n'
+        printf 'cc19 -o zex z/example.c z/libz.a -I z && echo "linkzex 0" || cat zex\n'
         printf 'echo "---- run ----"\n'
         printf 'zt\necho "runz $?"\n'
         printf 'bzt\necho "runbz $?"\n'
+        printf 'echo "---- zex ----"\n'
+        printf 'zex\necho "runzex $?"\n'
         printf 'echo "---- end ----"\n'
     } > "$root/go.sh"
     printf 'sh2 go.sh\n' > "$root/boot"
     boot_img run.log
     cat "$out/run.log"
     _rc=0
-    for k in arz arbz arzt arbzt linkz linkbz runz runbz; do
+    for k in arz arbz arzt arbzt linkz linkbz linkzex runz runbz runzex; do
         grep -q "^$k 0\$" "$out/run.log" || { echo "FAIL: $k" >&2; _rc=1; }
     done
     grep -q '^z ok$' "$out/run.log" || { echo "FAIL: zlib の往復" >&2; _rc=1; }
@@ -190,6 +199,21 @@ do_run() {
              'bz ok 927'; do
         grep -q "^$w\$" "$out/run.log" \
             || { echo "FAIL: 値が合わない ($w)" >&2; _rc=1; }
+    done
+    # **zlib 自身の検査の出力を，ホストで組んだものと 1 行ずつ突き合わせる。**
+    #
+    # 版と compile flags の行だけは外す —— flags は uInt / uLong /
+    # voidpf / z_off_t の大きさを畳んだ値なので，RV32 (0x55) と
+    # x86-64 (0xa9) で必ず違う。**それ以外は 1 文字も違ってはいけない**
+    for w in 'uncompress(): hello, hello!' \
+             'gzread(): hello, hello!' \
+             'gzgets() after gzseek:  hello!' \
+             'inflate(): hello, hello!' \
+             'large_inflate(): OK' \
+             'after inflateSync(): hello, hello!' \
+             'inflate with dictionary: hello, hello!'; do
+        grep -qF "$w" "$out/run.log" \
+            || { echo "FAIL: example の出力が合わない ($w)" >&2; _rc=1; }
     done
     [ "$_rc" -eq 0 ] && echo "---- zlib / bzip2 が我々の器で組めて走った ----" >&2
     return $_rc

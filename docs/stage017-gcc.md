@@ -173,6 +173,33 @@ zt                                          我々の kernel24 の上で走る
 `compress2` / `uncompress` / `crc32` / `adler32` と
 `BZ2_bzBuffToBuffCompress` / `Decompress` を呼び，元に戻ることを見る。
 
+#### zlib 自身の検査も通した
+
+**我々が書いた駆動は，我々が思いついた道しか通らない。** `zlib` は
+自分の検査 (`test/example.c`) を持っているので，それも**入力として
+読ませ**，我々の器で組んで走らせた。
+
+`gzopen` / `gzputs` / `gzprintf` / `gzread` / `gzseek` / `gztell` /
+`gzgetc` / `gzungetc` / `gzgets` / `deflateSetDictionary` /
+`inflateSync` / 辞書つき伸長まで通る。**`gz*` の系統はファイルを開いて
+読み書きするので，`libc` のファイル層まで一緒に測れる。**
+
+```
+zlib version 1.3.1 = 0x1310, compile flags = 0x55   ← 我々 (RV32)
+uncompress(): hello, hello!
+gzread(): hello, hello!
+gzgets() after gzseek:  hello!
+inflate(): hello, hello!
+large_inflate(): OK
+after inflateSync(): hello, hello!
+inflate with dictionary: hello, hello!
+```
+
+**ホストで同じソースを組んだものと，1 行ずつ一致した。** 唯一違うのは
+`compile flags` で，これは `uInt` / `uLong` / `voidpf` / `z_off_t` の
+大きさを畳んだ値なので RV32 (`0x55`) と x86-64 (`0xa9`) で必ず違う ——
+**違ってよい理由が言える 1 行だけが違う**。
+
 #### 出た表
 
 | 出たもの | 中身 | 直し |
