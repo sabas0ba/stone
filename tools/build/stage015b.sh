@@ -48,6 +48,11 @@ build_stage015b() {
     # **鎖の成果物は変わらない** —— 我々のソースは >>= / /= / %= を
     # 1 つも使っていない。だから自分自身を組む限り表に出ない誤りだった
     ccgen cc15u cc15t stage015/cc15u.sc
+    # 第 22 世代。スカラの初期化子を波括弧で囲んだときに中身が 2 つ以上
+    # あるのは制約違反 (C89 6.5.7) なのに，黙って隣の要素へ溢れさせて
+    # いた。差分試験 (tools/diff17.sh) がホストとの食い違いで見つけた。
+    # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い
+    ccgen cc15v cc15u stage015/cc15v.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -68,11 +73,12 @@ do_stage015b() {
         cc15p0.bin cc15p.bin cc15q0.bin cc15q.bin \
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
+        cc15v0.bin cc15v.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
-           stage015/cc15u.sc \
+           stage015/cc15u.sc stage015/cc15v.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh

@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15u.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15v.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -60,7 +60,7 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15o.bin:stage015/cc15o.md cc15p.bin:stage015/cc15p.md \
         cc15q.bin:stage015/cc15q.md cc15r.bin:stage015/cc15r.md \
         cc15s.bin:stage015/cc15s.md cc15t.bin:stage015/cc15t.md \
-        cc15u.bin:stage015/cc15u.md \
+        cc15u.bin:stage015/cc15u.md cc15v.bin:stage015/cc15v.md \
         pp15.bin:stage015/pp15.md \
         pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md \
         ld17.bin:stage015/ld17.md; do
@@ -69,7 +69,7 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15u と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15v と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
@@ -123,6 +123,15 @@ fp15ugen() {
 stable_cmp "fixpoint(cc15u)" fp15ugen tmp/build/cc15u.bin
 report $? "fixpoint: cc15u が自分自身を再生成する (B2 == B3)"
 
+fp15vgen() {
+    { cat stage015/cc15v.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15v.bin > tmp/s15/b3v.o \
+        && { cat tmp/s15/b3v.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15v)" fp15vgen tmp/build/cc15v.bin
+report $? "fixpoint: cc15v が自分自身を再生成する (B2 == B3)"
+
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
 for n in sh ed mk; do
@@ -132,12 +141,12 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15u が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15v が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 # **ld17 は診断だけを足したもの。** 通る道が 1 ビットも変わっていない
 # ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる
 ok=0
-for o in ld16 pp16 cc15u; do
+for o in ld16 pp16 cc15v; do
     { printf 'F'; cat "tmp/build/$o.o"; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld16.bin > "tmp/s15/l16_$o.bin" 2> /dev/null \
         && { printf 'F'; cat "tmp/build/$o.o"; printf '\0'; } \
@@ -160,7 +169,7 @@ int main() {
 }
 UNDEF
 { cat tmp/s15/undef.sc; printf '\004'; } \
-    | sh tools/env.sh qemu tmp/build/cc15u.bin > tmp/s15/undef.o 2> /dev/null
+    | sh tools/env.sh qemu tmp/build/cc15v.bin > tmp/s15/undef.o 2> /dev/null
 { printf 'F'; cat tmp/s15/undef.o; printf '\0'; } \
     | sh tools/env.sh qemu tmp/build/ld17.bin > tmp/s15/undef.out 2> /dev/null
 [ $? -eq 2 ] \
@@ -168,6 +177,25 @@ UNDEF
         > tmp/s15/undef.want \
     && cmp -s tmp/s15/undef.out tmp/s15/undef.want
 report $? "diag: ld17 が未定義シンボルの名前を全部並べる (同じ名前は 1 度だけ)"
+
+section "差分試験 (我々の鎖とホストの処理系で値を突き合わせる)"
+
+# **台帳の期待値は我々が書いている。** だから我々が「正しい」と思った値が
+# そのまま期待値になる。cc15u (複合代入の符号) も cc15v (スカラの初期化子の
+# 溢れ) も，**固定点・再現性・バイト一致・往復検査のどれにも捕まらず**，
+# 我々が書いていない物差しと突き合わせて初めて出た
+# (docs/stage017-gcc.md 5.2)。
+#
+# 走行は 90 秒ほど。飛ばすものは名前と理由を tools/diff17.sh が必ず出す
+if ! command -v "${CC:-gcc}" > /dev/null 2>&1; then
+    echo "   skip: ホストに ${CC:-gcc} が無い (突き合わせる相手がいない)"
+else
+    sh tools/diff17.sh > tmp/s15/diff17.log 2>&1
+    r=$?
+    sed 's/^/   /' tmp/s15/diff17.log
+    [ "$r" -eq 0 ]
+    report $? "diff: プローブの値が我々の鎖とホストの処理系で一致する"
+fi
 
 section "適合台帳の照合 (64 bit の土台)"
 

@@ -49,12 +49,16 @@ const unsigned char retq2(void) { return 250; }
 unsigned char const retq3(void) { return 250; }
 
 int f(void) {
-  unsigned const char a[3];
+  /* **const の付いたものは初期化子で値を入れる。** 代入は C89 6.3.16 の
+   * 制約違反であって，本処理系が修飾子を検査に使わないから通っている
+   * だけである。**それを書くと，ホストの処理系と同じソースで比べられ
+   * なくなる** (tools/diff17.sh がこの誤りを見つけた) */
+  unsigned const char a[3] = { 1, 2, 250 };
+  short const int sc = -3;
+  const short cs = -4;
+  unsigned const long ul = 4000000000u;
   volatile unsigned int vu;
   unsigned volatile int uv;
-  short const int sc;
-  const short cs;
-  unsigned const long ul;
 
   /* 大域 */
   if (g_uc != 200) return 'n';
@@ -69,15 +73,15 @@ int f(void) {
   if (retq2() != 250) return 'n';
   if (retq3() != 250) return 'n';
 
-  /* 局所。const と書いてあっても本処理系は検査に使わないので書ける */
-  a[0] = 1; a[1] = 2; a[2] = 250;
+  /* 局所 */
   if (sum(a, 3) != 253) return 'n';
+  if (sc != -3) return 'n';
+  if (cs != -4) return 'n';
+  if (ul / 2 != 2000000000u) return 'n';
 
+  /* volatile は修飾子だけで型が変わらない。読み書きできる */
   vu = 3000000000u; if (vu / 2 != 1500000000u) return 'n';
   uv = 3000000000u; if (uv / 2 != 1500000000u) return 'n';
-  sc = -3; if (sc != -3) return 'n';
-  cs = -4; if (cs != -4) return 'n';
-  ul = 4000000000u; if (ul / 2 != 2000000000u) return 'n';
 
   /* 幅も変わらない */
   if (sizeof(unsigned const char) != 1) return 'n';

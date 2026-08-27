@@ -48,6 +48,8 @@ build_stage017() {
     cmdlink cc15tcmd cc15t
     # 第 21 世代。複合代入の符号 (5.1)。これが最前線である
     cmdlink cc15ucmd cc15u
+    # 第 22 世代。スカラの初期化子の溢れ (5.2)。これが最前線である
+    cmdlink cc15vcmd cc15v
     cmdlink ld16cmd ld16
     # 未定義シンボルの名前を言うリンカ (5.1)。cc19 は器の位置を
     # "/bin/ld16" と焼き込んでいるので、置くときは名前を ld16 にする
@@ -312,7 +314,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
