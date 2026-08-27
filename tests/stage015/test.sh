@@ -61,13 +61,14 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15q.bin:stage015/cc15q.md cc15r.bin:stage015/cc15r.md \
         cc15s.bin:stage015/cc15s.md cc15t.bin:stage015/cc15t.md \
         pp15.bin:stage015/pp15.md \
-        pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md; do
+        pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md \
+        ld17.bin:stage015/ld17.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15t と pp15 / pp16 / ld16 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15t と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
@@ -122,6 +123,41 @@ for n in sh ed mk; do
 done
 [ "$ok" -eq 0 ]
 report $? "regress: cc15t が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+
+# **ld17 は診断だけを足したもの。** 通る道が 1 ビットも変わっていない
+# ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる
+ok=0
+for o in ld16 pp16 cc15t; do
+    { printf 'F'; cat "tmp/build/$o.o"; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "tmp/s15/l16_$o.bin" 2> /dev/null \
+        && { printf 'F'; cat "tmp/build/$o.o"; printf '\0'; } \
+            | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/s15/l17_$o.bin" 2> /dev/null \
+        && cmp -s "tmp/s15/l16_$o.bin" "tmp/s15/l17_$o.bin" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "regress: ld17 が ld16 と同じ像を出す (診断を足しただけ)"
+
+# **落ちる道では名前を言うこと。** ld16 は黙って exit(2) するので，
+# 呼ぶ側には "link failed" しか出ない。5.1 でこれが行き止まりになった
+cat > tmp/s15/undef.sc <<'UNDEF'
+int nosuchfunc(int a);
+int alsomissing();
+int main() {
+  nosuchfunc(1);
+  nosuchfunc(2);
+  alsomissing();
+  return 0;
+}
+UNDEF
+{ cat tmp/s15/undef.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc15t.bin > tmp/s15/undef.o 2> /dev/null
+{ printf 'F'; cat tmp/s15/undef.o; printf '\0'; } \
+    | sh tools/env.sh qemu tmp/build/ld17.bin > tmp/s15/undef.out 2> /dev/null
+[ $? -eq 2 ] \
+    && printf 'ld: undefined symbol: nosuchfunc\nld: undefined symbol: alsomissing\n' \
+        > tmp/s15/undef.want \
+    && cmp -s tmp/s15/undef.out tmp/s15/undef.want
+report $? "diag: ld17 が未定義シンボルの名前を全部並べる (同じ名前は 1 度だけ)"
 
 section "適合台帳の照合 (64 bit の土台)"
 

@@ -49,6 +49,10 @@ build_stage015b() {
     tool1 ld15 cc15p stage015/ld15.sc
     # U モードで浮動小数点を使えるようにしたリンカ (12.24)
     tool1 ld16 cc15p stage015/ld16.sc
+    # 未定義シンボルの**名前を言う**リンカ (docs/stage017-gcc.md 5.1)。
+    # ld16 は exit(2) で拒むだけなので、呼ぶ側に出るのは
+    # "cc: link failed" だけだった。通る道のバイト列は変わらない
+    tool1 ld17 cc15p stage015/ld17.sc
 }
 
 do_stage015b() {
@@ -57,11 +61,11 @@ do_stage015b() {
         cc15p0.bin cc15p.bin cc15q0.bin cc15q.bin \
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         cc15t0.bin cc15t.bin \
-        pp15.bin pp16.bin ld15.bin ld16.bin \
+        pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
-           stage015/ld16.sc \
+           stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
 }

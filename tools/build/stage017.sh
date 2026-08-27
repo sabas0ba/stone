@@ -47,6 +47,9 @@ build_stage017() {
     # (docs/stage017-gcc.md 5.1)
     cmdlink cc15tcmd cc15t
     cmdlink ld16cmd ld16
+    # 未定義シンボルの名前を言うリンカ (5.1)。cc19 は器の位置を
+    # "/bin/ld16" と焼き込んでいるので、置くときは名前を ld16 にする
+    cmdlink ld17cmd ld17
 
     step cc17 cc17 \
         -- stage017/cc17.c tmp/build/cc15p.bin tmp/build/pp16.bin \
@@ -120,6 +123,28 @@ build_stage017() {
             -- libc20_run "$f" "$n"
     done
 
+    # libc の第 21 世代 (5.1)。libc20 との差は，実物 (zlib / bzip2) の
+    # ソースを読んで判った穴 —— sys/types.h・signal.h・memchr・strerror・
+    # lseek の宣言，そして **fopen(path, "a") が末尾から書くこと**
+    # (Stage 14 から残っていた誤り)。
+    #
+    # **ここまで .o にしていなかった。** ヘッダだけ足して満足していたので，
+    # 新しく実装したもの (signal / memchr / strerror) はどこにも無かった。
+    # 5.1 の結合で「宣言はあるのに実体が無い」で落ちて判った
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal; do
+        n=$(echo "$f" | tr / _)
+        step "l21_$n" "l21_$n.o" \
+            -- "stage017/libc21/$f.c" \
+               stage017/libc21/include/*.h \
+               stage017/libc21/include/sys/time.h \
+               stage017/libc21/include/sys/stat.h \
+               stage017/libc21/include/sys/types.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- libc21_run "$f" "$n"
+    done
+
     # 前処理器の第 17 世代 (第 3 部の 3 の 2)。-I を探す道として持つ。
     # **libc を繋がない** —— sys_* は 'E' 前置部のものを直に呼ぶ
     # (docs/stage017-cc.md 17 章)
@@ -168,6 +193,18 @@ kern17() {
     { printf 'K'; cat "tmp/build/${1}.o"; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld16.bin > "tmp/build/${1}.bin"
     echo "built tmp/build/${1}.bin" >&2
+}
+
+libc21_run() {
+    sh tools/bundle.sh stage017/libc21/include/*.h \
+        "sys/time.h=stage017/libc21/include/sys/time.h" \
+        "sys/stat.h=stage017/libc21/include/sys/stat.h" \
+        "sys/types.h=stage017/libc21/include/sys/types.h" \
+        "stage017/libc21/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l21_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l21_$2.i" \
+        > "tmp/build/l21_$2.o"
+    echo "built tmp/build/l21_$2.o" >&2
 }
 
 libc20_run() {
@@ -273,7 +310,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd ld16cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -283,6 +320,10 @@ do_stage017() {
         l20_src_morecore.o l20_src_misc15.o \
         l20_posix_sys.o l20_posix_morecore.o l20_posix_stdio.o \
         l20_posix_assert.o l20_posix_dir.o \
+        l21_src_string.o l21_src_ctype.o l21_src_stdlib.o \
+        l21_src_morecore.o l21_src_misc15.o \
+        l21_posix_sys.o l21_posix_morecore.o l21_posix_stdio.o \
+        l21_posix_assert.o l21_posix_dir.o l21_posix_signal.o \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
@@ -293,6 +334,8 @@ do_stage017() {
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \
            stage017/libc20/include/*.h stage017/libc20/include/sys/*.h \
            stage017/libc20/src/*.c stage017/libc20/posix/*.c \
+           stage017/libc21/include/*.h stage017/libc21/include/sys/*.h \
+           stage017/libc21/src/*.c stage017/libc21/posix/*.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh
