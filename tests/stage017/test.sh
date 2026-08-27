@@ -970,114 +970,19 @@ else
     report $? "lib: lib/Makefile が最後まで通る (mk -C t/lib が rc 0)"
 fi
 
-section "第 5 部の 1: tcc が組んだ実行形式が走る (手元でのみ走る)"
+section "第 5 部 (撤回): tcc の生成物を我々の OS に置く道は落とした"
 
-# **tcc に結合まで任せる。** ここまで tcc は -c までしか使っていない。
-# 結合まで任せるには 3 つ要る (docs/stage017-cc.md 30 章)。
+# **30〜32 章でやったことは方針に反していた** (docs/stage017-cc.md 34 章)。
+# tcc・GCC・Linux は我々の器の成熟度を測る**的**であって道具ではない
+# (roadmap.md 71 行 / artifacts.md 3 章)。
 #
-#   crt1.o / crti.o / crtn.o        stage017/crt1.S + crt1c.c
-#   -Wl,-Ttext=0x86000000           我々の UBASE
-#   -static                         動的リンクだと INTERP を頼って止まる
+#   crt1.S / crt1c.c / syscall.S      落とした
+#   tcc17.sh の crt / oslibc / ext    落とした
 #
-#   sh tools/tcc17.sh crt
-#
-# 見るのは**終了コード**である。像ができたことではなく，走って正しい
-# 値を返したことを見る (28 章の「ファイルが出たことを完了条件にしては
-# いけない」と同じ)。
-CRT_EXPECT='p1 7
-p2 1
-p3 9'
-
-if [ ! -d docs/external/tcc ]; then
-    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
-    echo "   **第 5 部の 1 の完了条件はこの節である。CI では走らない**"
-elif [ ! -s tmp/s17/crt-run.txt ]; then
-    echo "   skip: tmp/s17 の材料が揃っていない"
-    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link && sh tools/tcc17.sh crt"
-else
-    [ "$(cat tmp/s17/crt-run.txt)" = "$CRT_EXPECT" ]
-    report $? "crt: tcc が組んだ像が走り，返り値・argc・argv が届く (p1=7 p2=argc p3=argv)"
-    # 入口そのものも我々の OS の上で tcc が組んだものであること
-    head -c 4 tmp/s17/crt1.o 2> /dev/null | grep -q 'ELF'
-    report $? "crt: crt1.o が我々の OS の上で組まれた ELF である"
-fi
-
-section "第 5 部の 2: tcc の世界の libc (手元でのみ走る)"
-
-# **-nostdlib が要らなくなること**がここの眼目である
-# (docs/stage017-cc.md 31 章)。libc20 のソースを tcc で訳し直し、
-# 標準 RISC-V ABI の sys_* スタブ (stage017/syscall.S) と合わせて
-# /usr/lib/libc.a にする。
-#
-#   sh tools/tcc17.sh oslibc
-#
-# 見るのは printf / malloc / strlen / fopen が**実際に働くこと**である。
-OSLIBC_EXP='q1 hello 5
-q2 1 ./q
-q3 abc
-q4 ABCD
-q5 ABCDEF
-q 5'
-# 測り手 (31.3)。szstr は文字列リテラルの sizeof で、これが 4 に戻ると
-# tcc は書庫を読めなくなる
-PROBE_EXP='v 55
-szstr 9
-a-bad 0'
-
-if [ ! -d docs/external/tcc ]; then
-    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc で取得できる)"
-    echo "   **第 5 部の 2 の完了条件はこの節である。CI では走らない**"
-elif [ ! -s tmp/s17/oslibc-run.txt ]; then
-    echo "   skip: tmp/s17 の材料が揃っていない"
-    echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link && sh tools/tcc17.sh lib && sh tools/tcc17.sh oslibc"
-else
-    [ "$(cat tmp/s17/oslibc-run.txt)" = "$OSLIBC_EXP" ]
-    report $? "oslibc: -nostdlib 無しで繋いだ像が走り、printf / malloc / strlen / fopen / 追記 (fopen と fdopen) が働く"
-    # 書庫として読めること。ファイルが出たことを完了条件にしない (28 章)
-    [ -s tmp/s17/libc.list ] && [ "$(grep -c . tmp/s17/libc.list)" = 12 ]
-    report $? "oslibc: tcc -ar が作った libc.a を ar17 が読め、員が 12 本そろっている"
-    [ "$(cat tmp/s17/oslibc-probe.txt 2> /dev/null)" = "$PROBE_EXP" ]
-    report $? "oslibc: 測り手が通る (書庫の読み / 文字列リテラルの sizeof が 9)"
-fi
-
-section "5.2: zlib / bzip2 を tcc で組む (手元でのみ走る)"
-
-# **tcc より一段大きい実物**を我々の OS の上で tcc に組ませる
-# (docs/stage017-gcc.md 5.2 / stage017-cc.md 32 章)。
-#
-#   sh tools/tcc17.sh ext
-#
-# Stage 14 は同じ 2 つを**ホストの鎖**で訳した (tests/stage014 第 8〜9 部)。
-# ここは我々の OS の上で tcc が訳す。往復の答が同じなら退行の検査になる。
-EXT_EXP='compress: 4096 -> 2555 sum=59847
-roundtrip ok
-bz-rt 0
-zex 0'
-
-if [ ! -d docs/external/zlib ] || [ ! -d docs/external/bzip2 ]; then
-    echo "   skip: docs/external の素材が無い (sh tools/fetch.sh zlib / bzip2)"
-    echo "   **5.2 の完了条件はこの節である。CI では走らない**"
-elif [ ! -s tmp/s17/ext-run.txt ]; then
-    echo "   skip: tmp/s17 の材料が揃っていない (sh tools/tcc17.sh ext)"
-else
-    [ "$(cat tmp/s17/ext-run.txt)" = "$EXT_EXP" ]
-    report $? "ext: zlib の自己検査が通り、libbz2 が Stage 14 と同じ答を出す"
-    # zlib の自己検査が**何を確かめたか**。終了コードだけだと
-    # 「走ったが何もしなかった」と区別が付かない
-    grep -q '^zlib version 1\.3\.1 ' tmp/s17/zex.out 2> /dev/null \
-        && grep -q '^large_inflate(): OK$' tmp/s17/zex.out \
-        && grep -q '^inflate with dictionary: hello, hello!$' tmp/s17/zex.out
-    report $? "ext: zex が gzread / gzseek / inflateSync / 辞書つき伸長まで通す"
-    [ -s tmp/s17/libz.a ] && [ -s tmp/s17/libbz2.a ]
-    report $? "ext: libz.a と libbz2.a が我々の OS の上に出来ている"
-    # **まだ通らないものを黙らせない。** bzip2 の命令そのものは
-    # utime / fchmod / fileno / getenv / isatty / perror が要る (32.4)
-    if grep -q '^bz-prog 0$' tmp/s17/ext.log 2> /dev/null; then
-        echo "   note: bzip2 の命令が通るようになった。32.4 の表を直すこと"
-    else
-        echo "   gap:  bzip2 の命令はまだ組めない —— 壁は libc ではなく"
-        echo "         struct stat の線である (許可・所有者・参照数が sfs に無い。32.4)"
-    fi
-fi
+# **測って判った我々の側の直しは残る** —— cc15r / cc15s (tests/stage015 の
+# staticstr2 / staticstr3 / strsizeof) と libc21 である。あれは
+# 「外部のソースを入力として読む」範囲の成果で、方針どおりである。
+echo "   note: 30〜32 章の道は撤回した (34 章)。的を道具に使わない"
+echo "   note: 実物を組む指標は**我々の cc19 + cc15s で**測り直す"
 
 summary
