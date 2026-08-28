@@ -548,6 +548,32 @@ sh tools/sfs3.sh pack "$s3" "$out/rt.img" 262144 32 > /dev/null 2>&1 \
 r2=$?
 [ "$r2" -eq 0 ] && diff -r "$s3" "$s3.back" > /dev/null 2>&1
 report $? "roundtrip: sfs3 に詰めて展開すると中身が元と一致する"
+
+# **実物の木が丸ごと載るか。** GCC を載せる前に，いま手元にある実物
+# (tcc のソース。546 ファイル・深さ 6・4.5 MB) で確かめる
+# (docs/stage017-gcc.md 6.2)
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc)"
+else
+    rm -rf "$out/big" "$out/big.back"
+    mkdir -p "$out/big"
+    ( cd docs/external/tcc \
+      && find . -path ./.git -prune -o -type f -print | tar -cf - -T - ) \
+        | tar -xf - -C "$out/big" 2> /dev/null
+    sh tools/sfs3.sh pack "$out/big" "$out/big.img" 16777216 1024 > /dev/null 2>&1 \
+        && sh tools/sfs3.sh unpack "$out/big.img" "$out/big.back" > /dev/null 2>&1 \
+        && diff -r "$out/big" "$out/big.back" > /dev/null 2>&1
+    report $? "cap: 実物の木 (tcc のソース 546 ファイル) が sfs3 に載って戻る"
+fi
+
+# **長すぎる名前は黙って切らずに拒む。** 切ると同名衝突が起きて，
+# 別のファイルが上書きされる。「無いものは無いと言う」(artifacts.md)
+rm -rf "$out/nm"
+mkdir -p "$out/nm"
+: > "$out/nm/$(printf 'b%.0s' $(seq 1 48))"
+sh tools/sfs3.sh pack "$out/nm" "$out/nm.img" 65536 8 > "$out/nm.log" 2>&1
+[ $? -ne 0 ] && grep -q 'name too long' "$out/nm.log"
+report $? "cap: 47 文字を超える名前は pack が名指しで拒む (黙って切らない)"
 ok=0
 for f in f1 sub/f2 sub; do
     [ "$(stat -c '%.9Y' "$s3/$f" 2> /dev/null)" \
