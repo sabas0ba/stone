@@ -1,0 +1,80 @@
+// 実行時支援 rtfp.c を我々の処理系でコンパイルして走らせる (第 3 部)。
+// 期待値はホストの double から作った表と突き合わせる。
+// rtfp.c は浮動小数点の型を使わないので，第 2 部までの cc で通る。
+
+// 64 bit を 32 bit 2 語 (下位, 上位) の並びで持つ。
+// 64 bit の配列の静的初期化が下位語しか書かない不備を避けるため
+static unsigned int tc[] = {
+  0x00000000U, 0x3ff00000U, 0x00000000U, 0x3ff00000U, 0x00000000U, 0x40000000U, 0x00000000U, 0x00000000U, 0x00000000U, 0x3ff00000U, 0x00000000U, 0x3ff00000U,
+  0x00000000U, 0x3ff00000U, 0x56000000U, 0x419d6f34U, 0x5a000000U, 0x419d6f34U, 0x52000000U, 0xc19d6f34U, 0x56000000U, 0x419d6f34U, 0xa953ce44U, 0x3e416505U,
+  0x00000000U, 0xbff00000U, 0x00000000U, 0x3fe00000U, 0x00000000U, 0xbfe00000U, 0x00000000U, 0xbff80000U, 0x00000000U, 0xbfe00000U, 0x00000000U, 0xc0000000U,
+  0x00000000U, 0xbff00000U, 0x00000001U, 0x00000000U, 0x00000000U, 0xbff00000U, 0x00000000U, 0xbff00000U, 0x00000001U, 0x80000000U, 0x00000000U, 0xfff00000U,
+  0x00000000U, 0x3fe00000U, 0x9999999aU, 0x3fb99999U, 0x33333333U, 0x3fe33333U, 0x9999999aU, 0x3fd99999U, 0x9999999aU, 0x3fa99999U, 0x00000000U, 0x40140000U,
+  0x00000000U, 0x3fe00000U, 0x00000000U, 0x80000000U, 0x00000000U, 0x3fe00000U, 0x00000000U, 0x3fe00000U, 0x00000000U, 0x80000000U, 0x00000000U, 0xfff00000U,
+  0x00000000U, 0x40080000U, 0xc2f8f359U, 0x01a56e1fU, 0x00000000U, 0x40080000U, 0x00000000U, 0x40080000U, 0xd23ab683U, 0x01c01297U, 0x66005835U, 0x7e51eb2dU,
+  0x9999999aU, 0x3fb99999U, 0x00000000U, 0xbff00000U, 0xcccccccdU, 0xbfecccccU, 0x9999999aU, 0x3ff19999U, 0x9999999aU, 0xbfb99999U, 0x9999999aU, 0xbfb99999U,
+  0x9999999aU, 0x3fb99999U, 0x00000000U, 0x00100000U, 0x9999999aU, 0x3fb99999U, 0x9999999aU, 0x3fb99999U, 0x9999999aU, 0x00019999U, 0x9999999aU, 0x7f999999U,
+  0x8800759cU, 0x7e37e43cU, 0x00000000U, 0x40080000U, 0x8800759cU, 0x7e37e43cU, 0x8800759cU, 0x7e37e43cU, 0x66005835U, 0x7e51eb2dU, 0x60009cd0U, 0x7e1fdafbU,
+  0x8800759cU, 0x7e37e43cU, 0x00000000U, 0x00000000U, 0x8800759cU, 0x7e37e43cU, 0x8800759cU, 0x7e37e43cU, 0x00000000U, 0x00000000U, 0x00000000U, 0x7ff00000U,
+  0xc2f8f359U, 0x01a56e1fU, 0x8800759cU, 0x7e37e43cU, 0x8800759cU, 0x7e37e43cU, 0x8800759cU, 0xfe37e43cU, 0x00000000U, 0x3ff00000U, 0x00000000U, 0x00000000U,
+  0x56000000U, 0x419d6f34U, 0x00000000U, 0x3ff00000U, 0x5a000000U, 0x419d6f34U, 0x52000000U, 0x419d6f34U, 0x56000000U, 0x419d6f34U, 0x56000000U, 0x419d6f34U,
+  0x56000000U, 0x419d6f34U, 0x56000000U, 0x419d6f34U, 0x56000000U, 0x41ad6f34U, 0x00000000U, 0x00000000U, 0x4f4a3867U, 0x434b1311U, 0x00000000U, 0x3ff00000U,
+  0x00000000U, 0x00100000U, 0x00000000U, 0x3fe00000U, 0x00000000U, 0x3fe00000U, 0x00000000U, 0xbfe00000U, 0x00000000U, 0x00080000U, 0x00000000U, 0x00200000U,
+  0x00000000U, 0x00100000U, 0x00000001U, 0x00000000U, 0x00000001U, 0x00100000U, 0xffffffffU, 0x000fffffU, 0x00000000U, 0x00000000U, 0x00000000U, 0x43300000U,
+  0x00000001U, 0x00000000U, 0x9999999aU, 0x3fb99999U, 0x9999999aU, 0x3fb99999U, 0x9999999aU, 0xbfb99999U, 0x00000000U, 0x00000000U, 0x0000000aU, 0x00000000U,
+  0x00000001U, 0x00000000U, 0x00000000U, 0x80000000U, 0x00000001U, 0x00000000U, 0x00000001U, 0x00000000U, 0x00000000U, 0x80000000U, 0x00000000U, 0xfff00000U,
+  0x00000000U, 0x00000000U, 0xc2f8f359U, 0x01a56e1fU, 0xc2f8f359U, 0x01a56e1fU, 0xc2f8f359U, 0x81a56e1fU, 0x00000000U, 0x00000000U, 0x00000000U, 0x00000000U,
+  0x00000000U, 0x80000000U, 0x00000000U, 0xbff00000U, 0x00000000U, 0xbff00000U, 0x00000000U, 0x3ff00000U, 0x00000000U, 0x00000000U, 0x00000000U, 0x00000000U,
+  0x00000000U, 0x80000000U, 0x00000000U, 0x00100000U, 0x00000000U, 0x00100000U, 0x00000000U, 0x80100000U, 0x00000000U, 0x80000000U, 0x00000000U, 0x80000000U,
+};
+#define NTC 21
+
+unsigned long long __dadd(unsigned long long a, unsigned long long b);
+unsigned long long __dsub(unsigned long long a, unsigned long long b);
+unsigned long long __dmul(unsigned long long a, unsigned long long b);
+unsigned long long __ddiv(unsigned long long a, unsigned long long b);
+
+// 表から k 番目の 64 bit を組み立てる
+unsigned long long g(int i, int k) {
+  unsigned long long lo; unsigned long long hi;
+  lo = (unsigned long long)tc[(i * 6 + k) * 2];
+  hi = (unsigned long long)tc[(i * 6 + k) * 2 + 1];
+  return lo | (hi << 32);
+}
+
+void ph(unsigned long long v) {
+  int i; int d;
+  i = 60;
+  while (i >= 0) {
+    d = (int)((v >> i) & 15);
+    if (d < 10) putc('0' + d); else putc('a' + d - 10);
+    i = i - 4;
+  }
+}
+
+int chk(unsigned long long got, unsigned long long want, char *nm) {
+  if (got == want) return 0;
+  putc('N'); putc('G'); putc(' ');
+  while (*nm) { putc(*nm); nm = nm + 1; }
+  putc(' '); ph(got); putc(' '); ph(want); putc(10);
+  return 1;
+}
+
+int main(void) {
+  int i; int bad;
+  unsigned long long a; unsigned long long b;
+  bad = 0;
+  i = 0;
+  while (i < NTC) {
+    a = g(i, 0);
+    b = g(i, 1);
+    bad = bad + chk(__dadd(a, b), g(i, 2), "add");
+    bad = bad + chk(__dsub(a, b), g(i, 3), "sub");
+    bad = bad + chk(__dmul(a, b), g(i, 4), "mul");
+    bad = bad + chk(__ddiv(a, b), g(i, 5), "div");
+    i = i + 1;
+  }
+  if (bad == 0) { putc('o'); putc('k'); putc(10); }
+  else { putc('b'); putc('a'); putc('d'); putc(10); }
+  return bad != 0;
+}
