@@ -325,7 +325,7 @@ sh tools/diff17.sh <名前>   1 つだけ
 
 1. ~~GCC 4.7.4を固定付きで取得する。~~ 完了。
 2. ~~配布木をsfs3/kernel24の上限と比較する。~~ 完了。現在の構成には収まらない。
-3. sfsの名前長とkernelのmemory mapを更新し、GCCの測定用source treeを配置できるようにする。
+3. ~~sfsの名前長とkernelのmemory mapを更新し、GCCの測定用source treeを配置できるようにする。~~ 完了。sfs4/kernel25を7章に記録した。
 4. GCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。
 5. GCC 7のbuildに必要なC++ subsetとruntime symbolを静的に測定し、案Aの実装範囲を決める。
 
@@ -336,3 +336,64 @@ sh tools/diff17.sh <名前>   1 つだけ
 一方、前版の「項目数とimage sizeは`pack`の引数なので拡張できる」という記述は不正確だった。host側の`pack`は値を受け取れるが、kernel24がsfsに割り当てるaddress spaceは`0x84000000`から`0x86000000`までの32 MiBに限られる。GCC 4.7.4の配布木が必要とする最小imageは473,459,336 bytesであり、`pack`の引数だけでは解決しない。
 
 したがって、差分build機能を作り直す必要はないが、GCCのbuildに進む前にsfs formatとkernel memory mapの世代更新が必要である。少なくともcomponentを50 bytes以上保持し、測定用source treeとbuild outputを同時に置ける容量を定義する。
+
+## 7. sfs4とkernel25 — GCCのsource treeを載せる
+
+### 7.1 sfs3とkernel24を変更しない
+
+既存のstageを再現できるように`sfs3`と`kernel24`は残し、新しい`tools/sfs4.sh`と`stage017/kernel25.c`を追加した。user programのload address (`UBASE=0x86000000`)、heap上限、stack、spawn退避領域も変更しない。`UBASE`を動かすとlinkerの既定と既存ELFを同時に更新する必要があるためである。
+
+### 7.2 sfs4のentry
+
+GCC 4.7.4の最長componentは92 bytesである。sfs4はname fieldを128 bytes、上限を127 bytesへ広げる。mtimeとflagsの意味はsfs3と同じである。
+
+```
+superblock (32 bytes):
+  0    'sfs4'
+  4    u32 total
+  8    u32 table offset
+  12   u32 table entries
+  16   u32 data cursor
+
+entry (152 bytes):
+  0    name[128]
+  128  u32 parent
+  132  u32 data offset
+  136  u32 length
+  140  u32 flags
+  144  u32 mtime low
+  148  u32 mtime high
+```
+
+上限はGCCの実測値に対して35 bytesの余裕を持つ。128 bytes以上のcomponentは黙って切らずに拒む。また、symbolic linkなどsfs4が表現しないentry typeも`pack`が名指しで拒む。
+
+### 7.3 memory map
+
+kernel24までが使う下位512 MiBはそのまま残し、その直後に1 GiBのsfs4領域を置く。kernel25を走らせる側だけがQEMU RAMを1536 MiBにする。
+
+| range | 用途 |
+|---|---|
+| `0x80000000`–`0xa0000000` | kernel、user image、255 MiB heap、stack、spawn退避領域。kernel24から変更なし |
+| `0xa0000000`–`0xe0000000` | sfs4。1,073,741,824 bytes |
+
+sfs3の領域を上へ延ばすと`UBASE=0x86000000`と衝突する。下へ延ばしても空きは39 MiBしかない。高位へ分離すれば、既存のlinkerとartifactを変更せずにsfsだけを拡張できる。
+
+### 7.4 GCC 4.7.4を当てた結果
+
+source treeだけでtableを使い切らないよう、workspace imageは131,072 entriesを予約する。
+
+| 項目 | sfs3/kernel24 | sfs4/kernel25 |
+|---|---:|---:|
+| name上限 | 47 bytes | 127 bytes |
+| GCCの上限超過 | 248 | 0 |
+| entry size | 72 bytes | 152 bytes |
+| GCC treeの最小使用量 | 473,459,336 bytes | 479,967,816 bytes |
+| workspaceのentry容量 | — | 131,072 |
+| source配置後の空きentry | — | 49,716 |
+| source配置後のdata領域余裕 | — | 586,217,176 bytes |
+| kernelのsfs領域 | 33,554,432 bytes | 1,073,741,824 bytes |
+| 収容可否 | no | yes |
+
+`sh tools/gcc17.sh measure`がこの表の値を再計算する。`sh tools/gcc17.sh pack`は固定済みのGCC 4.7.4全配布木を`tmp/g17/gcc47.sfs4`へ実際に詰め、sourceの全pathを処理したentry数とdata cursorが測定値に一致することを確認する。小さいtreeの完全roundtrip、92-byte名のkernel上でのread/write、writebackは`tests/stage017/test.sh`で検査する。
+
+この段階で確認したのはsource treeを配置できることと、約559 MiBのdata領域および49,716 entriesをbuild output用に確保できることである。GCC build全体がこの範囲へ収まることはまだ示していない。次のtranslation unit測定で生成量も記録し、不足する場合はsfsのallocationとlookupを含めて次世代を検討する。

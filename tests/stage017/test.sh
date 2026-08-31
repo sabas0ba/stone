@@ -566,7 +566,7 @@ else
     report $? "cap: 実物の木 (tcc のソース 546 ファイル) が sfs3 に載って戻る"
 fi
 
-# GCC 4.7.4 の全配布木を，現在の sfs3 と kernel24 の実際の上限に当てる。
+# GCC 4.7.4 の全配布木を sfs3/kernel24 と sfs4/kernel25 の上限に当てる。
 # size と maxent は pack の引数だが，ゲストでは SFSA から UBASE までの
 # 32 MiB を超えられない。libstdc++ の header だけでも名前上限を超える。
 # sfs3 が表現しない symbolic link その他の entry も同時に数え、0件である
@@ -577,7 +577,7 @@ else
     sh tools/gcc17.sh measure > "$out/gcc47-tree.out"
     diff -u tests/stage017/expected/gcc47-tree.txt "$out/gcc47-tree.out" \
         > "$out/gcc47-tree.diff"
-    report $? "cap: GCC 4.7.4 の木を実測し，sfs3/kernel24 の上限と比較する"
+    report $? "cap: GCC 4.7.4 の木を実測し，新旧sfs/kernelの上限と比較する"
     [ -s "$out/gcc47-tree.diff" ] && sed -n '4,$p' "$out/gcc47-tree.diff"
 fi
 
@@ -1071,5 +1071,98 @@ else
     [ "$ok" -eq 0 ]
     report $? "ext: zlib 自身の検査 (test/example.c) の出力がホストと一致する"
 fi
+
+section "第 5 部: sfs4 と kernel25 に GCC の木を載せる (docs/stage017-gcc.md 7 章)"
+
+# GCC 4.7.4 で実測した最長 component は 92 バイトである。境界値だけを
+# 作った検査ではなく，その実測値を持つ名前を host と kernel の両方へ通す。
+s4=$out/s4root
+s4back=$out/s4back
+rm -rf "$s4" "$s4back"
+mkdir -p "$s4/sub"
+gccmax=$(printf 'g%.0s' $(seq 1 92))
+printf 'before\n' > "$s4/sub/$gccmax"
+touch -d '@1234567890.123456789' "$s4/sub/$gccmax"
+touch -d '@1111111111.987654321' "$s4/sub"
+sh tools/sfs4.sh pack "$s4" "$out/s4.img" 4194304 32 > /dev/null 2>&1 \
+    && sh tools/sfs4.sh unpack "$out/s4.img" "$s4back" > /dev/null 2>&1 \
+    && diff -r "$s4" "$s4back" > /dev/null 2>&1
+report $? "roundtrip: sfs4 が GCC 実測最大の 92-byte component と時刻を保持する"
+
+ok=0
+for f in "sub/$gccmax" sub; do
+    [ "$(stat -c '%.9Y' "$s4/$f" 2> /dev/null)" \
+      = "$(stat -c '%.9Y' "$s4back/$f" 2> /dev/null)" ] || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "roundtrip: sfs4 の時刻がナノ秒まで一致する"
+
+# 127 バイトは通り，128 バイトは黙って切らずに拒む。
+rm -rf "$out/s4name"
+mkdir -p "$out/s4name"
+: > "$out/s4name/$(printf 'a%.0s' $(seq 1 127))"
+sh tools/sfs4.sh pack "$out/s4name" "$out/s4name.img" 65536 8 \
+    > /dev/null 2>&1
+r127=$?
+: > "$out/s4name/$(printf 'b%.0s' $(seq 1 128))"
+sh tools/sfs4.sh pack "$out/s4name" "$out/s4name.img" 65536 8 \
+    > "$out/s4name.log" 2>&1
+r128=$?
+[ "$r127" -eq 0 ] && [ "$r128" -ne 0 ] \
+    && grep -q 'name too long' "$out/s4name.log"
+report $? "cap: sfs4 は127-byte名を保持し，128-byte名を名指しで拒む"
+
+# sfs4 が表現しない型を黙って落とさない。GCC 4.7.4 には無いが，source
+# pin を変えたときも「全部載った」と誤認しないための形式側の検査である。
+rm -rf "$out/s4type"
+mkdir -p "$out/s4type"
+printf 'target\n' > "$out/s4type/target"
+ln -s target "$out/s4type/link"
+sh tools/sfs4.sh pack "$out/s4type" "$out/s4type.img" 65536 8 \
+    > "$out/s4type.log" 2>&1
+[ $? -ne 0 ] && grep -q 'unsupported entry type' "$out/s4type.log"
+report $? "type: sfs4 は未対応entryを黙って欠落させず拒む"
+
+# kernel25 は sfs4 を既存の 512 MiB memory map の後ろへ置く。RAM fileは
+# 1.5 GiBの疎ファイルであり，実際に書くのは小さい検査imageだけである。
+r4=$out/k25root
+rm -rf "$r4" "$out/k25back"
+mkdir -p "$r4/sub"
+cp tmp/build/sh2.bin "$r4/sh2"
+printf 'before\n' > "$r4/sub/$gccmax"
+cat > "$r4/go.sh" <<EOF
+cat sub/$gccmax
+echo "read \$?"
+echo after > sub/$gccmax
+echo "write \$?"
+cat sub/$gccmax
+EOF
+printf 'sh2 go.sh\n' > "$r4/boot"
+sh tools/sfs4.sh pack "$r4" "$out/k25.img" 4194304 128 > /dev/null 2>&1 \
+    && rm -f "$out/k25.ram" \
+    && dd if=/dev/null of="$out/k25.ram" bs=1 seek=1610612736 2> /dev/null \
+    && dd if="$out/k25.img" of="$out/k25.ram" bs=64K oflag=seek_bytes \
+        seek=536870912 conv=notrunc 2> /dev/null \
+    && STONE_QEMU_RAMFILE="$out/k25.ram" STONE_QEMU_RAM=1536M \
+        sh tools/env.sh qemu tmp/build/kernel25.bin < /dev/null \
+        > "$out/k25.out" 2>&1
+k25rc=$?
+cat > "$out/k25.want" <<'EOF'
+before
+read 0
+write 0
+after
+EOF
+[ "$k25rc" -eq 0 ] && diff -u "$out/k25.want" "$out/k25.out" \
+    > "$out/k25.diff"
+report $? "run: kernel25 が92-byte名のfileを読み書きする"
+[ -s "$out/k25.diff" ] && sed -n '4,$p' "$out/k25.diff"
+
+dd if="$out/k25.ram" of="$out/k25.after" bs=64K \
+    iflag=skip_bytes,count_bytes skip=536870912 count=4194304 2> /dev/null \
+    && sh tools/sfs4.sh unpack "$out/k25.after" "$out/k25back" \
+        > /dev/null 2>&1 \
+    && [ "$(cat "$out/k25back/sub/$gccmax" 2> /dev/null)" = after ]
+report $? "writeback: kernel25が更新したsfs4をhostで回収できる"
 
 summary
