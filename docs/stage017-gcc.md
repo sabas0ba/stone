@@ -18,8 +18,7 @@ roadmap 2.1 は 3 案の判断を「tcc の `Makefile` を我々の OS の上で
 回せるようになるまで」保留すると書いていた。その条件は満たされた
 ([stage017-cc.md](stage017-cc.md) 21 章・29 章)。
 
-**本書は決めない。** 決めるのは持ち主である。本書がするのは
-「何が測れていて，何がまだ測れていないか」を分けて置くことだけである。
+2026-08-28に案Aを選択した。本書は、選択前の比較材料と、案Aを進めるための測定結果を記録する。
 
 ## 2. 測れていること —— **すべて我々の器の話である**
 
@@ -88,9 +87,9 @@ GCC 7 を訳せば案 A の目的に C++ 処理系を自作せずに届く」と
 
 2 は案 A を採っても消えない，3 案に共通の未測項である。
 
-## 4. まだ測れていないこと
+## 4. 案Aを進めるために測ること
 
-**この 4 つを測るまで，どの案も選べない。**
+案Aの選択後も、GCC規模のsource tree、build system、C++ runtimeに対する未測定項目が残っている。4.5の取得と容量測定は完了した。
 
 ### 4.1 我々の器が GCC 4.7 の C を訳せるか
 
@@ -131,25 +130,27 @@ tcc の `configure` は通ったが，GCC の `configure` は桁が違う。我�
 書かれているので `libsupc++` の一部で足りる見込みはあるが，
 **見込みは測りではない**。
 
-### 4.5 いまこの環境では素材が取れない
+### 4.5 GCC 4.7.4の取得と容量測定 — 完了
 
-**GCC の素材が取れない。** この作業環境の網は `ftp.gnu.org` を
-policy で拒む。
+GNU公式配布元の`https://ftp.gnu.org/gnu/gcc/gcc-4.7.4/gcc-4.7.4.tar.bz2`を取得し、SHA-256 `92e61c6dc3a0a449e62d72a38185fda550168a86702dea07125ebd3ec3996282`で固定した。取得と照合は`sh tools/fetch.sh gcc47`、容量測定は`sh tools/gcc17.sh measure`で再現できる。
 
-```
-$ curl -fsSI https://ftp.gnu.org/gnu/gcc/gcc-4.7.4/gcc-4.7.4.tar.bz2
-curl: (22) The requested URL returned error: 403
-    "gateway answered 403 to CONNECT (policy denial or upstream failure)"
-```
+| 測定項目 | 結果 |
+|---|---:|
+| file | 76,693 |
+| directory | 4,663 (rootを含む) |
+| symbolic link | 0 |
+| その他のsfs3未対応entry | 0 |
+| hard linkを持つfile path | 0 |
+| file内容の合計 | 467,486,875 bytes |
+| sfs3のtableと4-byte alignmentを含む最小image | 473,459,336 bytes |
+| 最長のcomponent | 92 bytes |
+| sfs3の47-byte上限を超えるcomponent | 248 |
+| 最深path | 12 components |
+| kernel24のsfs領域 (`SFSA`から`UBASE`) | 33,554,432 bytes |
 
-`zlib.net` でも同じことが起きた。そちらは `madler/zlib` の release に
-ある書庫が**記録した SHA-256 とバイト単位で同じ**だったので，
-`tools/fetch.sh` の manifest に写しを足して解けた。**印が記録であって
-URL は記録ではない** (32.1)。
+`sfs3.sh pack`が表現できないsymbolic linkその他のentryは、公式archiveと展開後のtreeのどちらにも無かった。hard linkも無い。`gcc17.sh measure`はこれらを明示的に数え、未対応entryが1つでもあれば最小image容量とkernel24への収容可否を`unknown`とする。したがって、黙って欠落させたtreeの容量を全treeの容量として扱うことはない。
 
-**GCC では同じ手が使えない。** 我々はまだ GCC の印を持っていないので
-「どこから取っても印が合えば同じ」が成り立たず，**最初の 1 回だけは
-取得先そのものを信用する**ことになる。
+全配布木は現在のsfs3/kernel24に収まらない。さらに`libstdc++-v3/include`だけを見ても50-byteのcomponentがあり、3 headerが現在の47-byte上限を超える。documentation、testsuite、Java frontendを除外するだけでは名前長の問題は解消しない。
 
 ## 5. どの案でも等しく要るもの
 
@@ -312,52 +313,26 @@ sh tools/diff17.sh <名前>   1 つだけ
 
 いまは 22 一致 / 0 食い違い / 7 飛ばし。走行は 90 秒ほどである。
 
-## 6. 決まったこと
-
-持ち主の判断 (2026-08-28)。
+## 6. 決定と次の作業
 
 | | 決定 |
 |---|---|
-| 軸 | **案 A。C++ の部分集合を訳せる器を我々が作る** |
-| GCC の素材 | `ftp.gnu.org` (公式)。`gcc-4.7.4.tar.bz2` |
-| 5.1 | 済 (上の 5.1) |
+| 軸 | 案A。stone toolchainにC++ subsetを実装する |
+| GCC 4.7.4 | GNU公式配布元から取得し、SHA-256で固定済み |
+| filesystem | GCCのbuildに着手する前にsfsとkernelの更新が必要 |
 
-### 6.1 案 A で次にやること
+### 6.1 作業順序
 
-順に並べる。**どれも主語は我々の器である。**
+1. ~~GCC 4.7.4を固定付きで取得する。~~ 完了。
+2. ~~配布木をsfs3/kernel24の上限と比較する。~~ 完了。現在の構成には収まらない。
+3. sfsの名前長とkernelのmemory mapを更新し、GCCの測定用source treeを配置できるようにする。
+4. GCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。
+5. GCC 7のbuildに必要なC++ subsetとruntime symbolを静的に測定し、案Aの実装範囲を決める。
 
-1. **素材を取る。** `tools/fetch.sh` に `gcc` を足す。印は初回に計算して
-   manifest に記録し，以後それと照合する (zlib / bzip2 / tcc と同じ)
-2. **数える。** GCC 4.7 の木が我々の OS に載るかを先に見る ——
-   ファイル数・名前の長さ (sfs3 の上限は 47 文字)・経路の深さ・全体の
-   大きさ。超えていれば sfs の世代を先に刻む
-3. **C++ の部分集合を測る。** GCC 4.7 の `cc1plus` ではなく，
-   **GCC 4.7 をビルドするのに要る C++ がどれだけか**を数える ——
-   4.7 の本体は C なので，要るのは `libstdc++` と configure まわりに
-   限られるはずである。ここは推測なので**数えてから書く**
-4. **我々の器の C 適合を埋め続ける** (5.2)。GCC の C を読ませれば
-   `cc15t` / `cc15u` / `cc15v` と同じように出る
+### 6.2 sfsと差分build
 
-### 6.2 sfs と差分ビルドについて (持ち主の問い)
+`sfs3`はmtimeをnanosecond単位で保持し、`mk20`はその値からdependencyの更新を判定できる。この機能は既存testで確認済みであり、差分buildの判定ロジック自体に変更は不要である。
 
-**差分ビルドは既に動いている。** sfs3 が更新時刻をナノ秒で持ち，`mk20`
-はそれで古さを判定する (`tests/stage017` の
-「2 度目は作らず，触った依存に繋がる分だけ作り直す」が通っている)。
+一方、前版の「項目数とimage sizeは`pack`の引数なので拡張できる」という記述は不正確だった。host側の`pack`は値を受け取れるが、kernel24がsfsに割り当てるaddress spaceは`0x84000000`から`0x86000000`までの32 MiBに限られる。GCC 4.7.4の配布木が必要とする最小imageは473,459,336 bytesであり、`pack`の引数だけでは解決しない。
 
-sfs に無いのは許可・所有者・参照数・参照時刻である。`bzip2` の
-コマンド版が読むもので，差分ビルドは使わない。
-
-したがって sfs が差分ビルドを壊すわけではない。**当たるとしたら容量の
-側である。** そこで手元の実物で測った。
-
-| 測ったもの | 結果 |
-|---|---|
-| tcc のソース (546 ファイル・18 ディレクトリ・深さ 6・4.5 MB) | 詰めて展開すると**中身が一致する** |
-| 名前の上限 | 47 バイト。48 バイトの名前は `pack` が**名指しで拒む** (黙って切らない) |
-| 項目数・像の大きさ | 形式の上限ではなく `pack` の引数。広げられる |
-
-黙って切られるのがいちばん困る —— 名前が衝突して別のファイルを上書き
-する。そこは拒む側になっている。検査は `tests/stage017` に入れた。
-
-**GCC 4.7 はまだ測っていない** (素材が無いため)。6.1 の 2 で数える。
-47 文字を超える名前があれば sfs の世代を先に刻む。
+したがって、差分build機能を作り直す必要はないが、GCCのbuildに進む前にsfs formatとkernel memory mapの世代更新が必要である。少なくともcomponentを50 bytes以上保持し、測定用source treeとbuild outputを同時に置ける容量を定義する。

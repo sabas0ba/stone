@@ -18,10 +18,9 @@
 | bzip2 | bzip2 1.0.8 (最初の 1 本の候補) | https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz | ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269 |
 | zlib | zlib 1.3.1 (候補) | https://www.zlib.net/fossils/zlib-1.3.1.tar.gz | 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23 |
 | tcc | Tiny C Compiler (Stage 15 の対象)。開発枝 mob を commit で固定 | https://github.com/TinyCC/tinycc | commit 2ba12e83b3599ca8f5d50c179fe5138fe956f0c9 |
+| gcc47 | GCC 4.7.4 (Stage 17 の測定対象) | https://ftp.gnu.org/gnu/gcc/gcc-4.7.4/gcc-4.7.4.tar.bz2 | 92e61c6dc3a0a449e62d72a38185fda550168a86702dea07125ebd3ec3996282 |
 
-SHA-256 は公開されている配布告知の値を記録し，**最初の取得で照合が
-成立することをもって確定とする** (fetch.sh は不一致なら取得物を消して
-失敗する)。bzip2 と zlib は 2026-08-10 の取得で確定した。
+bzip2とzlibのSHA-256は公開済みの値を使用し、2026-08-10の取得時に照合した。GCC 4.7.4は事前に使用可能なSHA-256を記録していなかったため、GNU公式配布元をtrust bootstrapとして2026-08-31に初回取得し、そのSHA-256を固定した。以後、`fetch.sh`は記録値と一致しない取得物を削除して失敗する。
 
 **tcc だけは書庫ではなく git で取る。** savannah の配布ファイルは要求ごとに
 別のミラーへ転送し，転送先が一定しないため取得元を固定できない。git なら
@@ -32,4 +31,3 @@ SHA-256 より印としては弱い (docs/stage015-tcc.md 3 章)。
 zlib の取得元は当初 www.zlib.net/zlib-1.3.1.tar.gz だったが，zlib.net は
 新版が出ると旧版を fossils/ へ移す (404 になる) ため恒久 URL の方を
 記録している。
-

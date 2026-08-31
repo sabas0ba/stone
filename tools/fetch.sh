@@ -37,6 +37,7 @@ manifest() {
 bzip2 https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
 zlib https://www.zlib.net/fossils/zlib-1.3.1.tar.gz|https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
 tcc https://github.com/TinyCC/tinycc mob:2ba12e83b3599ca8f5d50c179fe5138fe956f0c9
+gcc47 https://ftp.gnu.org/gnu/gcc/gcc-4.7.4/gcc-4.7.4.tar.bz2 92e61c6dc3a0a449e62d72a38185fda550168a86702dea07125ebd3ec3996282
 EOF
 }
 
@@ -124,5 +125,7 @@ if [ "$got" != "$want" ]; then
 fi
 rm -rf "$ext/$name"
 mkdir -p "$ext/$name"
-tar "$taropt" "$tarball" -C "$ext/$name" --strip-components=1
+# 書庫内の uid/gid は配布側の作業環境に依存する。復元すると user namespace
+# 内や非 root 環境で展開に失敗するため，内容と mode だけを取り出す。
+tar --no-same-owner "$taropt" "$tarball" -C "$ext/$name" --strip-components=1
 echo "fetched: $ext/$name (SHA-256 照合済み)" >&2
