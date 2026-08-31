@@ -44,12 +44,9 @@ L1 に到達するには次のいずれかを選ぶ必要がある。
 | B | x86-64 バックエンドを追加し，GCC 4.7 → 新しい GCC と登る | 大 | 実績のある経路。ただし RISC-V が主対象でなくなる |
 | C | GCC 4.7 に RISC-V バックエンドを自作して載せる | 大 | GCC 本体の fork を保守することになる |
 
-**この判断は Stage 16 (実行環境の拡張) の後まで保留する。** Stage 8〜13 で行う
-作業 (リンカ・プリプロセッサ・C 言語完成・libc・実行環境) はどの案でも
-等しく必要であり，クリティカルパスは共通だからである。Stage 15 の後で評価し直した結果は
-[stage016-os.md](stage016-os.md) にある。**tcc が鎖の成果物になった
-ことで 3 案のコンパイラ側の負担は大幅に軽くなったが，律速は OS へ
-移った**ので，判断はさらに 1 段先へ持ち越した。
+**2026-08-28 に案 A を選択した。** RISC-V を主対象として維持し、stone toolchain に C++ subset を実装して GCC 7 系のbuildを目指す。判断を保留していた条件は、tccの`Makefile`をstone OS上で実行し、`libtcc1.a`を生成できた時点で満たされた ([stage017-cc.md](stage017-cc.md) 21章・29章)。
+
+GCC 4.7.4は、GCC規模のC sourceとbuild systemを測るbenchmarkとしてGNU公式配布元から取得し、SHA-256で固定した。配布木を測定した結果、現在のsfs3/kernel24には収まらないため、次はfilesystemの名前長とaddress spaceを更新する。測定値と手順は[stage017-gcc.md](stage017-gcc.md) 6章に記録している。
 
 ### 2.2 実行環境をどうするか
 
@@ -123,7 +120,7 @@ stone の世代成果物 (実行環境を含む) に混ぜないことを優先�
 
 | Stage | 成果物 | 完了条件 |
 |---|---|---|
-| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ。[stage017-cc.md](stage017-cc.md)) は完了 |
+| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ)・第 2 部 (複数の翻訳単位と書庫)・第 3 部 (make。tcc の `Makefile` を我々の OS の上で回し，`libtcc1.a` まで作る)・第 4 部 (時刻と差分ビルド) は完了 ([stage017-cc.md](stage017-cc.md))。**第 5 部は一度方針を誤り，撤回した** —— tcc の生成物を我々の OS に入れる道を採ってしまった (同 34 章)。的を道具に使わない ([artifacts.md](artifacts.md) 3 章)。**2.1 の判断は案 A に決まった** (2.1。次の手は [stage017-gcc.md](stage017-gcc.md) 6.1) |
 | 18 | GNU C 拡張の実装 | inline asm, `__attribute__`, statement expression, builtin 群など，カーネルが要求する拡張に対応する |
 | 19 | Linux カーネルのビルド | カーネルをビルドし，QEMU 上で起動する (**L2**) |
 
@@ -165,7 +162,7 @@ L1 (GCC) と L2 (Linux) は，ここから見れば遠い。しかし途中の�
 | 12 | **完了** (第 1〜4 部すべて。共有領域と sfs・ld12 とカーネル・libc 環境部・stdio) (案 Y = 自作の簡易 OS + POSIX 風環境) | [stage012-os.md](stage012-os.md) |
 | 13 | **完了** (第 1〜4 部すべて。spawn とシェル・ed・cc / ld / pp の移住・mk とゲスト内再生成)。**Phase B が終わった** | [stage013-tools.md](stage013-tools.md) |
 | 14 | **完了** (第 1〜9 部)。適合台帳・言語の拡幅 cc14a〜cc14g・libc 第 14 世代・ld14 / pp14。無改変の bzip2 (libbz2 1.0.8) と zlib 1.3.1 をビルドし，自作 OS 上で圧縮・伸長の往復一致とホスト側実装との相互運用を確認 | [stage014-external.md](stage014-external.md) |
-| 15 | **完了** (第 1〜6 部)。cc15a〜cc15p (64 bit 整数・浮動小数点・言語の穴)・pp15 / pp16・ld15 / ld16・libc15・kernel15 / kernel16，tcc への RV32 backend (riscv32.patch)。**T2 == T3 == tccH** —— 我々の鎖が作った tcc が自作 OS の上で自分自身を作り，その出力がさらに自分自身を作れる (固定点)。しかもそれは参照実装 (ホストの gcc が作った交差 tcc) が作る tcc と**バイト一致**する | [stage015-tcc.md](stage015-tcc.md) / [stage015-riscv32.md](stage015-riscv32.md) |
+| 15 | **完了** (第 1〜6 部)。cc15a〜cc15p (64 bit 整数・浮動小数点・言語の穴。Stage 17 でさらに cc15q / cc15r / cc15s —— 3 つとも「文字列リテラルが配列であること」を型として持っていなかった誤りの直しである。**tcc を的として読ませたから出た**もので，ベンチマークの本来の働きにあたる。続けて zlib / bzip2 を的にして cc15t (宣言指定子の途中の型修飾子) と **cc15u (複合代入が符号を見ていなかった。`unsigned` の `%=` が符号つき剰余になる)**。cc15u は**我々のソースが >>= / /= / %= を 1 つも使っていないため，自分自身を組む限り永久に表に出ない誤り**だった —— 固定点も再現性もバイト一致も捕まえない。外を的として読ませる以外に見つける道が無いことの実例である)・pp15 / pp16・ld15 / ld16・libc15・kernel15 / kernel16，tcc への RV32 backend (riscv32.patch)。**T2 == T3 == tccH** —— 我々の鎖が作った tcc が自作 OS の上で自分自身を作り，その出力がさらに自分自身を作れる (固定点)。しかもそれは参照実装 (ホストの gcc が作った交差 tcc) が作る tcc と**バイト一致**する | [stage015-tcc.md](stage015-tcc.md) / [stage015-riscv32.md](stage015-riscv32.md) |
 
 Stage 10 は 7 つに分ける。第 1 部が文と式，第 2 部の 1 が型
 (`typedef` / `enum` / `union` / `const` / `void`)，第 2 部の 2 が宣言

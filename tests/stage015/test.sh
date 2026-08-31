@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15q.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15v.bin   # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -58,15 +58,18 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15k.bin:stage015/cc15k.md cc15l.bin:stage015/cc15l.md \
         cc15m.bin:stage015/cc15m.md cc15n.bin:stage015/cc15n.md \
         cc15o.bin:stage015/cc15o.md cc15p.bin:stage015/cc15p.md \
-        cc15q.bin:stage015/cc15q.md \
+        cc15q.bin:stage015/cc15q.md cc15r.bin:stage015/cc15r.md \
+        cc15s.bin:stage015/cc15s.md cc15t.bin:stage015/cc15t.md \
+        cc15u.bin:stage015/cc15u.md cc15v.bin:stage015/cc15v.md \
         pp15.bin:stage015/pp15.md \
-        pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md; do
+        pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md \
+        ld17.bin:stage015/ld17.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15q と pp15 / pp16 / ld16 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15v と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
@@ -79,6 +82,56 @@ fp15gen() {
 stable_cmp "fixpoint(cc15q)" fp15gen tmp/build/cc15q.bin
 report $? "fixpoint: cc15q が自分自身を再生成する (B2 == B3)"
 
+# **最前線の世代も同じ検査を通す。** cc15r はコード生成を変えている
+# (文字列リテラルの sizeof) ので，roadmap 4 章の「コード生成を変える
+# たびに B2 == B3 を確認する」がそのまま当たる。
+# cc15q のときと同じ形で書く —— 世代を足して検査を足さないと、
+# **足した世代だけ誰も見ていないことになる**
+fp15rgen() {
+    { cat stage015/cc15r.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15r.bin > tmp/s15/b3r.o \
+        && { cat tmp/s15/b3r.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15r)" fp15rgen tmp/build/cc15r.bin
+report $? "fixpoint: cc15r が自分自身を再生成する (B2 == B3)"
+
+fp15sgen() {
+    { cat stage015/cc15s.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15s.bin > tmp/s15/b3s.o \
+        && { cat tmp/s15/b3s.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15s)" fp15sgen tmp/build/cc15s.bin
+report $? "fixpoint: cc15s が自分自身を再生成する (B2 == B3)"
+
+fp15tgen() {
+    { cat stage015/cc15t.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15t.bin > tmp/s15/b3t.o \
+        && { cat tmp/s15/b3t.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15t)" fp15tgen tmp/build/cc15t.bin
+report $? "fixpoint: cc15t が自分自身を再生成する (B2 == B3)"
+
+fp15ugen() {
+    { cat stage015/cc15u.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15u.bin > tmp/s15/b3u.o \
+        && { cat tmp/s15/b3u.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15u)" fp15ugen tmp/build/cc15u.bin
+report $? "fixpoint: cc15u が自分自身を再生成する (B2 == B3)"
+
+fp15vgen() {
+    { cat stage015/cc15v.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15v.bin > tmp/s15/b3v.o \
+        && { cat tmp/s15/b3v.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15v)" fp15vgen tmp/build/cc15v.bin
+report $? "fixpoint: cc15v が自分自身を再生成する (B2 == B3)"
+
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
 for n in sh ed mk; do
@@ -88,7 +141,61 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15q が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15v が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+
+# **ld17 は診断だけを足したもの。** 通る道が 1 ビットも変わっていない
+# ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる
+ok=0
+for o in ld16 pp16 cc15v; do
+    { printf 'F'; cat "tmp/build/$o.o"; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > "tmp/s15/l16_$o.bin" 2> /dev/null \
+        && { printf 'F'; cat "tmp/build/$o.o"; printf '\0'; } \
+            | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/s15/l17_$o.bin" 2> /dev/null \
+        && cmp -s "tmp/s15/l16_$o.bin" "tmp/s15/l17_$o.bin" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "regress: ld17 が ld16 と同じ像を出す (診断を足しただけ)"
+
+# **落ちる道では名前を言うこと。** ld16 は黙って exit(2) するので，
+# 呼ぶ側には "link failed" しか出ない。5.1 でこれが行き止まりになった
+cat > tmp/s15/undef.sc <<'UNDEF'
+int nosuchfunc(int a);
+int alsomissing();
+int main() {
+  nosuchfunc(1);
+  nosuchfunc(2);
+  alsomissing();
+  return 0;
+}
+UNDEF
+{ cat tmp/s15/undef.sc; printf '\004'; } \
+    | sh tools/env.sh qemu tmp/build/cc15v.bin > tmp/s15/undef.o 2> /dev/null
+{ printf 'F'; cat tmp/s15/undef.o; printf '\0'; } \
+    | sh tools/env.sh qemu tmp/build/ld17.bin > tmp/s15/undef.out 2> /dev/null
+[ $? -eq 2 ] \
+    && printf 'ld: undefined symbol: nosuchfunc\nld: undefined symbol: alsomissing\n' \
+        > tmp/s15/undef.want \
+    && cmp -s tmp/s15/undef.out tmp/s15/undef.want
+report $? "diag: ld17 が未定義シンボルの名前を全部並べる (同じ名前は 1 度だけ)"
+
+section "差分試験 (我々の鎖とホストの処理系で値を突き合わせる)"
+
+# **台帳の期待値は我々が書いている。** だから我々が「正しい」と思った値が
+# そのまま期待値になる。cc15u (複合代入の符号) も cc15v (スカラの初期化子の
+# 溢れ) も，**固定点・再現性・バイト一致・往復検査のどれにも捕まらず**，
+# 我々が書いていない物差しと突き合わせて初めて出た
+# (docs/stage017-gcc.md 5.2)。
+#
+# 走行は 90 秒ほど。飛ばすものは名前と理由を tools/diff17.sh が必ず出す
+if ! command -v "${CC:-gcc}" > /dev/null 2>&1; then
+    echo "   skip: ホストに ${CC:-gcc} が無い (突き合わせる相手がいない)"
+else
+    sh tools/diff17.sh > tmp/s15/diff17.log 2>&1
+    r=$?
+    sed 's/^/   /' tmp/s15/diff17.log
+    [ "$r" -eq 0 ]
+    report $? "diff: プローブの値が我々の鎖とホストの処理系で一致する"
+fi
 
 section "適合台帳の照合 (64 bit の土台)"
 

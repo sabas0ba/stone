@@ -325,7 +325,7 @@ libc15 の `open` は**先頭の `/` の並びを全部剥がしていた**。
 
 ### 7.5 世代
 
-[artifacts.md](artifacts.md) 4 章の手順どおり，直前の世代を全文複製して
+[artifacts.md](artifacts.md) 5 章の手順どおり，直前の世代を全文複製して
 から編集する。
 
 | 新しい世代 | 複製元 | 変えるところ |
@@ -459,7 +459,7 @@ UBRKMAX - UBASE = 0x86e0_0000 - 0x8600_0000 = 14 MB
 
 ### 8.5 世代
 
-カーネルだけが変わる。[artifacts.md](artifacts.md) 4 章のとおり
+カーネルだけが変わる。[artifacts.md](artifacts.md) 5 章のとおり
 `stage016/kernel18.c` を全文複製して `stage016/kernel19.c` を作り，
 `#define` の 4 つを変える。**リンカも libc も変えない。**
 

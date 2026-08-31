@@ -548,6 +548,47 @@ sh tools/sfs3.sh pack "$s3" "$out/rt.img" 262144 32 > /dev/null 2>&1 \
 r2=$?
 [ "$r2" -eq 0 ] && diff -r "$s3" "$s3.back" > /dev/null 2>&1
 report $? "roundtrip: sfs3 に詰めて展開すると中身が元と一致する"
+
+# **実物の木が丸ごと載るか。** GCC を載せる前に，いま手元にある実物
+# (tcc のソース。546 ファイル・深さ 6・4.5 MB) で確かめる
+# (docs/stage017-gcc.md 6.2)
+if [ ! -d docs/external/tcc ]; then
+    echo "   skip: docs/external/tcc が無い (sh tools/fetch.sh tcc)"
+else
+    rm -rf "$out/big" "$out/big.back"
+    mkdir -p "$out/big"
+    ( cd docs/external/tcc \
+      && find . -path ./.git -prune -o -type f -print | tar -cf - -T - ) \
+        | tar -xf - -C "$out/big" 2> /dev/null
+    sh tools/sfs3.sh pack "$out/big" "$out/big.img" 16777216 1024 > /dev/null 2>&1 \
+        && sh tools/sfs3.sh unpack "$out/big.img" "$out/big.back" > /dev/null 2>&1 \
+        && diff -r "$out/big" "$out/big.back" > /dev/null 2>&1
+    report $? "cap: 実物の木 (tcc のソース 546 ファイル) が sfs3 に載って戻る"
+fi
+
+# GCC 4.7.4 の全配布木を，現在の sfs3 と kernel24 の実際の上限に当てる。
+# size と maxent は pack の引数だが，ゲストでは SFSA から UBASE までの
+# 32 MiB を超えられない。libstdc++ の header だけでも名前上限を超える。
+# sfs3 が表現しない symbolic link その他の entry も同時に数え、0件である
+# ことを期待値で固定する。
+if [ ! -d docs/external/gcc47 ]; then
+    echo "   skip: docs/external/gcc47 が無い (sh tools/fetch.sh gcc47)"
+else
+    sh tools/gcc17.sh measure > "$out/gcc47-tree.out"
+    diff -u tests/stage017/expected/gcc47-tree.txt "$out/gcc47-tree.out" \
+        > "$out/gcc47-tree.diff"
+    report $? "cap: GCC 4.7.4 の木を実測し，sfs3/kernel24 の上限と比較する"
+    [ -s "$out/gcc47-tree.diff" ] && sed -n '4,$p' "$out/gcc47-tree.diff"
+fi
+
+# **長すぎる名前は黙って切らずに拒む。** 切ると同名衝突が起きて，
+# 別のファイルが上書きされる。「無いものは無いと言う」(artifacts.md)
+rm -rf "$out/nm"
+mkdir -p "$out/nm"
+: > "$out/nm/$(printf 'b%.0s' $(seq 1 48))"
+sh tools/sfs3.sh pack "$out/nm" "$out/nm.img" 65536 8 > "$out/nm.log" 2>&1
+[ $? -ne 0 ] && grep -q 'name too long' "$out/nm.log"
+report $? "cap: 47 文字を超える名前は pack が名指しで拒む (黙って切らない)"
 ok=0
 for f in f1 sub/f2 sub; do
     [ "$(stat -c '%.9Y' "$s3/$f" 2> /dev/null)" \
@@ -968,6 +1009,67 @@ else
     # 逆進 (backtrace) を切る前は bt-exe.c で止まっていた (29 章)
     grep -q '^lib 0$' tmp/s17/lib.log
     report $? "lib: lib/Makefile が最後まで通る (mk -C t/lib が rc 0)"
+fi
+
+section "第 5 部 (撤回): tcc の生成物を我々の OS に置く道は落とした"
+
+# **30〜32 章でやったことは方針に反していた** (docs/stage017-cc.md 34 章)。
+# tcc・GCC・Linux は我々の器の成熟度を測る**的**であって道具ではない
+# (roadmap.md 71 行 / artifacts.md 3 章)。
+#
+#   crt1.S / crt1c.c / syscall.S      落とした
+#   tcc17.sh の crt / oslibc / ext    落とした
+#
+# **測って判った我々の側の直しは残る** —— cc15r / cc15s (tests/stage015 の
+# staticstr2 / staticstr3 / strsizeof) と libc21 である。あれは
+# 「外部のソースを入力として読む」範囲の成果で、方針どおりである。
+echo "   note: 30〜32 章の道は撤回した (34 章)。的を道具に使わない"
+
+section "第 5 部 (測り直し): 実物を我々の器で組んで走らせる (5.1)"
+
+# **我々の OS の上で我々の器が** zlib / bzip2 を訳し，我々の ar が書庫に
+# まとめ，我々の ld が繋ぎ，走らせて往復する (docs/stage017-gcc.md 5.1)。
+#
+#   sh tools/ext17.sh run
+#
+# QEMU の中で 22 単位を訳すので 10 分を超える。**CI では走らせない** ——
+# ここは出来た記録を見るだけにする。
+if [ ! -s tmp/e17/run.log ]; then
+    echo "   skip: tmp/e17/run.log が無い"
+    echo "   **5.1 の完了条件はこの節である。CI では走らない**"
+    echo "   手元では sh tools/ext17.sh run を走らせること"
+else
+    ok=0
+    for k in arz arbz arzt arbzt linkz linkbz linkzex runz runbz runzex; do
+        grep -q "^$k 0\$" tmp/e17/run.log || ok=1
+    done
+    [ "$ok" -eq 0 ]
+    report $? "ext: 22 単位を訳し，我々の ar で書庫にし，我々の ld で繋いで走った"
+
+    # **往復するだけでは足りない。** 往路と復路で誤りが打ち消し合えば
+    # 中身が違っても元に戻る。実際 adler32 が誤ったまま "z ok" が出て
+    # いた (cc15u で直した)。**外の物差しと値を突き合わせる**
+    ok=0
+    for w in 'crc32 282d245a' 'adler32 459e7153'              'level 1 ok 3042' 'level 5 ok 1537' 'level 9 ok 1537'              'bz ok 927'; do
+        grep -q "^$w\$" tmp/e17/run.log || ok=1
+    done
+    [ "$ok" -eq 0 ]
+    report $? "ext: 値がホストの gcc / Python の zlib と一致する (往復だけで済ませない)"
+
+    # **zlib 自身の検査も通す。** 我々が書いた駆動は我々が思いついた道しか
+    # 通らない。example.c は gzopen / gzprintf / gzseek / gzgets /
+    # gzungetc / inflateSync / 辞書つき伸長まで通し，**libc のファイル層
+    # まで一緒に測る**。出力はホストで組んだものと 1 行ずつ一致すること
+    # (版と compile flags の行だけは語長で必ず違うので外す)
+    ok=0
+    for w in 'uncompress(): hello, hello!' 'gzread(): hello, hello!' \
+             'gzgets() after gzseek:  hello!' 'inflate(): hello, hello!' \
+             'large_inflate(): OK' 'after inflateSync(): hello, hello!' \
+             'inflate with dictionary: hello, hello!'; do
+        grep -qF "$w" tmp/e17/run.log || ok=1
+    done
+    [ "$ok" -eq 0 ]
+    report $? "ext: zlib 自身の検査 (test/example.c) の出力がホストと一致する"
 fi
 
 summary
