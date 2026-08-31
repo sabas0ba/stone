@@ -138,12 +138,17 @@ GNU公式配布元の`https://ftp.gnu.org/gnu/gcc/gcc-4.7.4/gcc-4.7.4.tar.bz2`�
 |---|---:|
 | file | 76,693 |
 | directory | 4,663 (rootを含む) |
+| symbolic link | 0 |
+| その他のsfs3未対応entry | 0 |
+| hard linkを持つfile path | 0 |
 | file内容の合計 | 467,486,875 bytes |
 | sfs3のtableと4-byte alignmentを含む最小image | 473,459,336 bytes |
 | 最長のcomponent | 92 bytes |
 | sfs3の47-byte上限を超えるcomponent | 248 |
 | 最深path | 12 components |
 | kernel24のsfs領域 (`SFSA`から`UBASE`) | 33,554,432 bytes |
+
+`sfs3.sh pack`が表現できないsymbolic linkその他のentryは、公式archiveと展開後のtreeのどちらにも無かった。hard linkも無い。`gcc17.sh measure`はこれらを明示的に数え、未対応entryが1つでもあれば最小image容量とkernel24への収容可否を`unknown`とする。したがって、黙って欠落させたtreeの容量を全treeの容量として扱うことはない。
 
 全配布木は現在のsfs3/kernel24に収まらない。さらに`libstdc++-v3/include`だけを見ても50-byteのcomponentがあり、3 headerが現在の47-byte上限を超える。documentation、testsuite、Java frontendを除外するだけでは名前長の問題は解消しない。
 

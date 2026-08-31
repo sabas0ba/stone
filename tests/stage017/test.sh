@@ -569,6 +569,8 @@ fi
 # GCC 4.7.4 の全配布木を，現在の sfs3 と kernel24 の実際の上限に当てる。
 # size と maxent は pack の引数だが，ゲストでは SFSA から UBASE までの
 # 32 MiB を超えられない。libstdc++ の header だけでも名前上限を超える。
+# sfs3 が表現しない symbolic link その他の entry も同時に数え、0件である
+# ことを期待値で固定する。
 if [ ! -d docs/external/gcc47 ]; then
     echo "   skip: docs/external/gcc47 が無い (sh tools/fetch.sh gcc47)"
 else

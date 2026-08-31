@@ -1,6 +1,9 @@
 source=gcc-4.7.4
 files=76693
 directories=4663
+symbolic-links=0
+other-unsupported-entries=0
+hard-linked-files=0
 entries=81355
 file-bytes=467486875
 padded-file-bytes=467601672
@@ -15,5 +18,6 @@ sfs3-table-entries=81356
 sfs3-table-bytes=5857664
 sfs3-minimum-image-bytes=473459336
 kernel24-sfs-window-bytes=33554432
+fits-entry-types=yes
 fits-name-limit=no
 fits-kernel24-window=no

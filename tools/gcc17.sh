@@ -27,7 +27,13 @@ measure() {
 
     files=$(find "$src" -type f -printf '.\n' | wc -l | tr -d ' ')
     directories=$(find "$src" -type d -printf '.\n' | wc -l | tr -d ' ')
-    entries=$((files + directories - 1))
+    symbolic_links=$(find "$src" -type l -printf '.\n' | wc -l | tr -d ' ')
+    other_unsupported_entries=$(find "$src" ! -type f ! -type d ! -type l \
+        -printf '.\n' | wc -l | tr -d ' ')
+    unsupported_entries=$((symbolic_links + other_unsupported_entries))
+    hard_linked_files=$(find "$src" -type f -links +1 -printf '.\n' \
+        | wc -l | tr -d ' ')
+    entries=$((files + directories + unsupported_entries - 1))
 
     size_stats=$(find "$src" -type f -printf '%s\n' | awk '
         {
@@ -69,7 +75,11 @@ measure() {
             END { print count + 0 }
         ')
 
-    table_entries=$((entries + 1))
+    # sfs3 pack が表へ載せるのは regular file と directory だけである。
+    # hard link は各 path の内容を regular file として materialize するが、
+    # symbolic link その他の型は表現できない。後者があれば容量の下限を
+    # 数字だけ出すと「全treeを収容できる」と誤読できるため unknown とする。
+    table_entries=$((files + directories))
     table_bytes=$((table_offset + table_entries * entry_size))
     minimum_image_bytes=$((table_bytes + padded_file_bytes))
 
@@ -81,13 +91,23 @@ measure() {
 
     fits_name_limit=yes
     [ "$names_over_limit" -eq 0 ] || fits_name_limit=no
+    fits_entry_types=yes
     fits_window=yes
-    [ "$minimum_image_bytes" -le "$sfs_window_bytes" ] || fits_window=no
+    if [ "$unsupported_entries" -ne 0 ]; then
+        minimum_image_bytes=unknown
+        fits_entry_types=no
+        fits_window=unknown
+    elif [ "$minimum_image_bytes" -gt "$sfs_window_bytes" ]; then
+        fits_window=no
+    fi
 
     cat <<EOF
 source=gcc-4.7.4
 files=$files
 directories=$directories
+symbolic-links=$symbolic_links
+other-unsupported-entries=$other_unsupported_entries
+hard-linked-files=$hard_linked_files
 entries=$entries
 file-bytes=$file_bytes
 padded-file-bytes=$padded_file_bytes
@@ -102,6 +122,7 @@ sfs3-table-entries=$table_entries
 sfs3-table-bytes=$table_bytes
 sfs3-minimum-image-bytes=$minimum_image_bytes
 kernel24-sfs-window-bytes=$sfs_window_bytes
+fits-entry-types=$fits_entry_types
 fits-name-limit=$fits_name_limit
 fits-kernel24-window=$fits_window
 EOF
