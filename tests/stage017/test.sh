@@ -566,6 +566,19 @@ else
     report $? "cap: 実物の木 (tcc のソース 546 ファイル) が sfs3 に載って戻る"
 fi
 
+# GCC 4.7.4 の全配布木を，現在の sfs3 と kernel24 の実際の上限に当てる。
+# size と maxent は pack の引数だが，ゲストでは SFSA から UBASE までの
+# 32 MiB を超えられない。libstdc++ の header だけでも名前上限を超える。
+if [ ! -d docs/external/gcc47 ]; then
+    echo "   skip: docs/external/gcc47 が無い (sh tools/fetch.sh gcc47)"
+else
+    sh tools/gcc17.sh measure > "$out/gcc47-tree.out"
+    diff -u tests/stage017/expected/gcc47-tree.txt "$out/gcc47-tree.out" \
+        > "$out/gcc47-tree.diff"
+    report $? "cap: GCC 4.7.4 の木を実測し，sfs3/kernel24 の上限と比較する"
+    [ -s "$out/gcc47-tree.diff" ] && sed -n '4,$p' "$out/gcc47-tree.diff"
+fi
+
 # **長すぎる名前は黙って切らずに拒む。** 切ると同名衝突が起きて，
 # 別のファイルが上書きされる。「無いものは無いと言う」(artifacts.md)
 rm -rf "$out/nm"
