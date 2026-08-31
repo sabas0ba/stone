@@ -46,7 +46,7 @@ L1 に到達するには次のいずれかを選ぶ必要がある。
 
 **2026-08-28 に案 A を選択した。** RISC-V を主対象として維持し、stone toolchain に C++ subset を実装して GCC 7 系のbuildを目指す。判断を保留していた条件は、tccの`Makefile`をstone OS上で実行し、`libtcc1.a`を生成できた時点で満たされた ([stage017-cc.md](stage017-cc.md) 21章・29章)。
 
-GCC 4.7.4は、GCC規模のC sourceとbuild systemを測るbenchmarkとしてGNU公式配布元から取得し、SHA-256で固定した。配布木を測定した結果、現在のsfs3/kernel24には収まらないため、次はfilesystemの名前長とaddress spaceを更新する。測定値と手順は[stage017-gcc.md](stage017-gcc.md) 6章に記録している。
+GCC 4.7.4は、GCC規模のC sourceとbuild systemを測るbenchmarkとしてGNU公式配布元から取得し、SHA-256で固定した。配布木の測定結果に基づき、127-byte componentと1 GiB imageを持つsfs4/kernel25を追加した。これにより全source treeとbuild用の空き領域を同時に配置できる。次はGCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。測定値と手順は[stage017-gcc.md](stage017-gcc.md) 6〜7章に記録している。
 
 ### 2.2 実行環境をどうするか
 
