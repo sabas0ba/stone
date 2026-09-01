@@ -46,7 +46,7 @@ L1 に到達するには次のいずれかを選ぶ必要がある。
 
 **2026-08-28 に案 A を選択した。** RISC-V を主対象として維持し、stone toolchain に C++ subset を実装して GCC 7 系のbuildを目指す。判断を保留していた条件は、tccの`Makefile`をstone OS上で実行し、`libtcc1.a`を生成できた時点で満たされた ([stage017-cc.md](stage017-cc.md) 21章・29章)。
 
-GCC 4.7.4は、GCC規模のC sourceとbuild systemを測るbenchmarkとしてGNU公式配布元から取得し、SHA-256で固定した。配布木を測定した結果、現在のsfs3/kernel24には収まらないため、次はfilesystemの名前長とaddress spaceを更新する。測定値と手順は[stage017-gcc.md](stage017-gcc.md) 6章に記録している。
+GCC 4.7.4は、GCC規模のC sourceとbuild systemを測るbenchmarkとしてGNU公式配布元から取得し、SHA-256で固定した。配布木を測定した結果sfs3/kernel24には収まらなかったので、sfs4 (名前103 bytes) とkernel25 (窓512 MiB) を刻んだ。全配布木は収まる。測定値と手順は[stage017-gcc.md](stage017-gcc.md) 4.5・6章・7章に記録している。
 
 ### 2.2 実行環境をどうするか
 
@@ -120,7 +120,7 @@ stone の世代成果物 (実行環境を含む) に混ぜないことを優先�
 
 | Stage | 成果物 | 完了条件 |
 |---|---|---|
-| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ)・第 2 部 (複数の翻訳単位と書庫)・第 3 部 (make。tcc の `Makefile` を我々の OS の上で回し，`libtcc1.a` まで作る)・第 4 部 (時刻と差分ビルド) は完了 ([stage017-cc.md](stage017-cc.md))。**第 5 部は一度方針を誤り，撤回した** —— tcc の生成物を我々の OS に入れる道を採ってしまった (同 34 章)。的を道具に使わない ([artifacts.md](artifacts.md) 3 章)。**2.1 の判断は案 A に決まった** (2.1。次の手は [stage017-gcc.md](stage017-gcc.md) 6.1) |
+| 17 | GCC | 2.1 の案を決定・実行し，GCC をビルドする (**L1**)。第 1 部 (コンパイラをコマンドとして持つ)・第 2 部 (複数の翻訳単位と書庫)・第 3 部 (make。tcc の `Makefile` を我々の OS の上で回し，`libtcc1.a` まで作る)・第 4 部 (時刻と差分ビルド) は完了 ([stage017-cc.md](stage017-cc.md))。**第 5 部は一度方針を誤り，撤回した** —— tcc の生成物を我々の OS に入れる道を採ってしまった (同 34 章)。的を道具に使わない ([artifacts.md](artifacts.md) 3 章)。**2.1 の判断は案 A に決まった** (2.1)。第 5 部で **sfs4 (名前 47 -> 103 バイト) と kernel25 (sfs の窓 32 MiB -> 512 MiB)** を刻み，GCC 4.7.4 の全配布木が窓に収まるようにした (同 7 章)。次の手は同 6.1 の 4 |
 | 18 | GNU C 拡張の実装 | inline asm, `__attribute__`, statement expression, builtin 群など，カーネルが要求する拡張に対応する |
 | 19 | Linux カーネルのビルド | カーネルをビルドし，QEMU 上で起動する (**L2**) |
 

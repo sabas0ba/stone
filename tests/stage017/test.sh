@@ -566,18 +566,43 @@ else
     report $? "cap: 実物の木 (tcc のソース 546 ファイル) が sfs3 に載って戻る"
 fi
 
-# GCC 4.7.4 の全配布木を，現在の sfs3 と kernel24 の実際の上限に当てる。
-# size と maxent は pack の引数だが，ゲストでは SFSA から UBASE までの
-# 32 MiB を超えられない。libstdc++ の header だけでも名前上限を超える。
-# sfs3 が表現しない symbolic link その他の entry も同時に数え、0件である
-# ことを期待値で固定する。
+# GCC 4.7.4 の全配布木を，現在の sfs4 と kernel25 の実際の上限に当てる。
+# size と maxent は pack の引数だが，ゲストでは SFSA から SFSTOP までを
+# 超えられない。sfs4 が表現しない symbolic link その他の entry も同時に
+# 数え、0件であることを期待値で固定する。
+#
+# **木が無くても算術は検査する。** 上限の側 (名前・項目幅・窓) は
+# tools/sfs4.sh と stage017/kernel25.c から読んでいるので，世代を刻んだ
+# ときに式が置き去りになりうる。答の判っている小さな木で先に確かめる
+rm -rf "$out/mt"; mkdir -p "$out/mt/d1/d2"
+printf '12345' > "$out/mt/a"            # 5 バイト -> 詰めて 8
+printf '1234'  > "$out/mt/d1/b"         # 4 バイト -> 詰めて 4
+: > "$out/mt/d1/d2/c"                   # 0 バイト
+{
+    printf 'source=mt\nfiles=3\ndirectories=3\nsymbolic-links=0\n'
+    printf 'other-unsupported-entries=0\nhard-linked-files=0\nentries=5\n'
+    printf 'file-bytes=9\npadded-file-bytes=12\n'
+    printf 'max-name-bytes=2\nmax-path-bytes=7\nmax-depth=3\n'
+    printf 'sfs4-name-limit=103\nnames-over-limit=0\n'
+    printf 'libstdcxx-header-max-name-bytes=0\nlibstdcxx-headers-over-limit=0\n'
+    printf 'sfs4-table-entries=6\n'     # 3 ファイル + 3 ディレクトリ
+    printf 'sfs4-table-bytes=800\n'     # 32 + 6 * 128
+    printf 'sfs4-minimum-image-bytes=812\n'         # 800 + 12
+    printf 'kernel25-sfs-window-bytes=536870912\n'  # 0xc000_0000 - 0xa000_0000
+    printf 'fits-entry-types=yes\nfits-name-limit=yes\nfits-kernel25-window=yes\n'
+} > "$out/mt.want"
+STONE_GCC47_SRC="$PWD/$out/mt" sh tools/gcc17.sh measure > "$out/mt.out" 2>&1
+diff -u "$out/mt.want" "$out/mt.out" > "$out/mt.diff"
+report $? "cap: 容量の式が sfs4 / kernel25 の実際の値を読んでいる"
+[ -s "$out/mt.diff" ] && sed -n '4,$p' "$out/mt.diff"
+
 if [ ! -d docs/external/gcc47 ]; then
     echo "   skip: docs/external/gcc47 が無い (sh tools/fetch.sh gcc47)"
 else
     sh tools/gcc17.sh measure > "$out/gcc47-tree.out"
     diff -u tests/stage017/expected/gcc47-tree.txt "$out/gcc47-tree.out" \
         > "$out/gcc47-tree.diff"
-    report $? "cap: GCC 4.7.4 の木を実測し，sfs3/kernel24 の上限と比較する"
+    report $? "cap: GCC 4.7.4 の木を実測し，sfs4/kernel25 の上限と比較する"
     [ -s "$out/gcc47-tree.diff" ] && sed -n '4,$p' "$out/gcc47-tree.diff"
 fi
 
@@ -1071,5 +1096,157 @@ else
     [ "$ok" -eq 0 ]
     report $? "ext: zlib 自身の検査 (test/example.c) の出力がホストと一致する"
 fi
+
+section "第 5 部: 長い名前と広い窓 (sfs4 / kernel25。docs/stage017-gcc.md 7 章)"
+
+# **なぜ世代を刻んだか。** GCC 4.7.4 の配布木は名前の最長が 92 バイト
+# あり，最小のイメージが 473,459,336 バイト要る
+# (tests/stage017/expected/gcc47-tree.txt)。sfs3 は名前が 47 バイトまで，
+# kernel24 の窓は SFSA から UBASE までの 32 MiB までである。どちらも
+# 届かない。
+#
+# sfs4 は**名前の枠を広げただけ**である (72 -> 128 バイト，名前は
+# 48 -> 104)。kernel25 は**sfs4 を読み，像を退避領域より上へ移しただけ**
+# である (SFSA 0x8400_0000 -> 0xa000_0000。窓 32 MiB -> 512 MiB)。
+
+G92=$(printf 'g%.0s' $(seq 1 92))       # GCC の木の最長と同じ長さ
+
+# ホスト側の往復。中身も時刻もナノ秒まで一致すること
+s4=$out/s4rt
+rm -rf "$s4" "$s4.back"
+mkdir -p "$s4/sub"
+printf 'x\n' > "$s4/f1"; printf 'yy\n' > "$s4/sub/f2"
+printf 'long\n' > "$s4/sub/$G92"
+touch -d '@1234567890.111111111' "$s4/f1"
+touch -d '@1111111111.222222222' "$s4/sub/f2"
+touch -d '@1333333333.444444444' "$s4/sub/$G92"
+touch -d '@1000000000.333333333' "$s4/sub"
+sh tools/sfs4.sh pack "$s4" "$out/rt4.img" 262144 32 > /dev/null 2>&1 \
+    && sh tools/sfs4.sh unpack "$out/rt4.img" "$s4.back" > /dev/null 2>&1
+r4=$?
+[ "$r4" -eq 0 ] && diff -r "$s4" "$s4.back" > /dev/null 2>&1
+report $? "roundtrip: sfs4 に詰めて展開すると中身が元と一致する (92 バイトの名前を含む)"
+
+ok=0
+for f in f1 sub/f2 "sub/$G92" sub; do
+    [ "$(stat -c '%.9Y' "$s4/$f" 2> /dev/null)" \
+      = "$(stat -c '%.9Y' "$s4.back/$f" 2> /dev/null)" ] || ok=1
+done
+[ "$r4" -eq 0 ] && [ "$ok" -eq 0 ]
+report $? "roundtrip: sfs4 の時刻もナノ秒まで一致する (ディレクトリを含む)"
+
+# **同じ木を sfs3 は拒む。** 世代を刻んだ理由がここにある。
+# 通ってしまうなら sfs4 は要らなかったことになる
+sh tools/sfs3.sh pack "$s4" "$out/rt3.img" 262144 32 > "$out/rt3.log" 2>&1
+[ $? -ne 0 ] && grep -q 'name too long' "$out/rt3.log"
+report $? "cap: 同じ木を sfs3 は名指しで拒む (だから世代を刻んだ)"
+
+# 上限は 103 バイト。104 バイトは黙って切らずに拒む
+rm -rf "$out/nm4"; mkdir -p "$out/nm4"
+: > "$out/nm4/$(printf 'c%.0s' $(seq 1 103))"
+sh tools/sfs4.sh pack "$out/nm4" "$out/nm4.img" 65536 8 > /dev/null 2>&1
+report $? "cap: 103 バイトの名前は sfs4 に載る"
+rm -rf "$out/nm4"; mkdir -p "$out/nm4"
+: > "$out/nm4/$(printf 'c%.0s' $(seq 1 104))"
+sh tools/sfs4.sh pack "$out/nm4" "$out/nm4.img" 65536 8 > "$out/nm4.log" 2>&1
+[ $? -ne 0 ] && grep -q 'name too long' "$out/nm4.log"
+report $? "cap: 104 バイトの名前は sfs4 が名指しで拒む (黙って切らない)"
+
+# 根を sfs4 で詰めて kernel25 で走らせる。$1=根 $2=出力 $3=大きさ $4=件数
+#
+# **記憶は 1G でなければならない。** kernel25 は sfs の像を
+# SFSA = 0xa000_0000 に置く。512M (0x8000_0000〜0xa000_0000) では
+# 像の置き場そのものが無く，何も出さずに落ちる。
+# 像は記憶の 0x2000_0000 (536870912) から先に置く
+runroot4() {
+    sh tools/sfs4.sh pack "$1" "$out/i4" "${3:-4194304}" "${4:-128}" \
+            > /dev/null \
+        && rm -f "$out/r4" \
+        && dd if=/dev/null of="$out/r4" bs=1 seek=1073741824 2> /dev/null \
+        && dd if="$out/i4" of="$out/r4" bs=64K oflag=seek_bytes \
+            seek=536870912 conv=notrunc 2> /dev/null \
+        && STONE_QEMU_RAMFILE="$out/r4" STONE_QEMU_RAM=1G \
+            sh tools/env.sh qemu tmp/build/kernel25.bin < /dev/null \
+            > "$2" 2>&1
+}
+
+# **第 5 部の完了条件の 1 つめ。** 長い名前が OS の側でも通ること。
+# ホストで詰められても，カーネルが引けなければ意味がない
+r=$out/n4root
+rm -rf "$r"; mkdir -p "$r/bin"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+printf 'ninety-two\n' > "$r/$G92"
+cat > "$r/go.sh" <<EOF
+cat $G92
+echo "cat \$?"
+cp $G92 copy.txt
+cat copy.txt
+echo "cp \$?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+{ printf 'ninety-two\ncat 0\nninety-two\ncp 0\n'; } > "$out/n4.want"
+runroot4 "$r" "$out/n4.out"
+rc=$?
+[ "$rc" -eq 0 ] && diff -u "$out/n4.want" "$out/n4.out" > "$out/n4.diff"
+report $? "run: kernel25 が 92 バイトの名前を引き，読み，写す"
+[ -s "$out/n4.diff" ] && sed -n '4,$p' "$out/n4.diff"
+
+# **第 5 部の完了条件の 2 つめ。** 旧世代の窓 (32 MiB) の外に置いた
+# 中身が読めること。
+#
+# kernel24 では SFSA + 32 MiB が UBASE である。そこから先へ像を伸ばすと，
+# 詰めた中身がユーザ像のロード先と重なる。40 MiB の像の，34 MiB を
+# 過ぎた位置にあるファイルが読めれば，窓が本当に広がっている
+r=$out/farroot
+rm -rf "$r"; mkdir -p "$r/bin"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+dd if=/dev/zero of="$r/00filler" bs=1M count=34 2> /dev/null
+printf 'beyond the old window\n' > "$r/zz-far.txt"
+printf 'sh2 go.sh\n' > "$r/boot"
+printf 'cat zz-far.txt\necho "far $?"\n' > "$r/go.sh"
+printf 'beyond the old window\nfar 0\n' > "$out/far.want"
+runroot4 "$r" "$out/far.out" 41943040 128
+rc=$?
+[ "$rc" -eq 0 ] && diff -u "$out/far.want" "$out/far.out" > "$out/far.diff"
+report $? "run: 旧世代の窓 (32 MiB) の外に置いた中身が読める"
+[ -s "$out/far.diff" ] && sed -n '4,$p' "$out/far.diff"
+
+# **形の違うものは黙って動かない。** sfs3 の像を kernel25 に食わせても，
+# 項目の幅が違うので名前も親も別の場所を指す。読めたつもりで壊すより，
+# magic を見て止まるほうがよい
+rm -rf "$out/mixroot"; mkdir -p "$out/mixroot/bin"
+cp tmp/build/sh2.bin "$out/mixroot/bin/sh2"
+cp tmp/build/sh2.bin "$out/mixroot/sh2"
+printf 'sh2 go.sh\n' > "$out/mixroot/boot"
+printf 'echo alive\n' > "$out/mixroot/go.sh"
+sh tools/sfs3.sh pack "$out/mixroot" "$out/mix.img" 4194304 128 > /dev/null 2>&1
+rm -f "$out/rmix"
+dd if=/dev/null of="$out/rmix" bs=1 seek=1073741824 2> /dev/null
+dd if="$out/mix.img" of="$out/rmix" bs=64K oflag=seek_bytes \
+    seek=536870912 conv=notrunc 2> /dev/null
+STONE_QEMU_RAMFILE="$out/rmix" STONE_QEMU_RAM=1G \
+    sh tools/env.sh qemu tmp/build/kernel25.bin < /dev/null \
+    > "$out/mix.out" 2>&1 || true
+grep -qx '?' "$out/mix.out"
+report $? "run: sfs3 の像は kernel25 が '?' で拒む (読めたつもりにならない)"
+
+# **窓に入らない像は載せない。** はみ出した先は何も無い番地なので，
+# 書いた中身が黙って消える。頭の大きさの欄だけを窓より大きく書き換え，
+# 中身は正しいままにして，カーネルが大きさを見ているかを確かめる
+sh tools/sfs4.sh pack "$out/s4rt" "$out/big4.img" 262144 32 > /dev/null 2>&1
+# 頭の +4 が大きさの欄。0x20000001 = 窓 (512 MiB) より 1 バイト大きい
+printf '\001\000\000\040' \
+    | dd of="$out/big4.img" bs=1 seek=4 conv=notrunc 2> /dev/null
+rm -f "$out/rbig"
+dd if=/dev/null of="$out/rbig" bs=1 seek=1073741824 2> /dev/null
+dd if="$out/big4.img" of="$out/rbig" bs=64K oflag=seek_bytes \
+    seek=536870912 conv=notrunc 2> /dev/null
+STONE_QEMU_RAMFILE="$out/rbig" STONE_QEMU_RAM=1G \
+    sh tools/env.sh qemu tmp/build/kernel25.bin < /dev/null \
+    > "$out/big4.out" 2>&1 || true
+grep -qx 'S' "$out/big4.out"
+report $? "run: 窓を超える大きさの像は kernel25 が 'S' で拒む"
 
 summary
