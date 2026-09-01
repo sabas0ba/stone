@@ -1152,6 +1152,21 @@ sh tools/sfs4.sh pack "$out/nm4" "$out/nm4.img" 65536 8 > "$out/nm4.log" 2>&1
 [ $? -ne 0 ] && grep -q 'name too long' "$out/nm4.log"
 report $? "cap: 104 バイトの名前は sfs4 が名指しで拒む (黙って切らない)"
 
+# **深さ 12 の木が載ること。** GCC 4.7.4 の木は深さ 12 である。
+# pack はディレクトリを浅い順に並べてから作るが，深さの印を 0 詰めせずに
+# 並べると文字列として比べられ，"10" が "2" より前に来る。親より先に子が
+# 出て "parent not found" で落ちる。tcc の木は深さ 6 だったので，
+# これまで表に出ていなかった
+rm -rf "$out/dp" "$out/dp.back"
+DEEP=aaaaaaaaaa/bbbbbbbbbb/cccccccccc/dddddddddd/eeeeeeeeee/ffffffffff/gggggggggg/hhhhhhhhhh/iiiiiiiiii/jjjjjjjjjj/kkkkkkkkkk/target.txt
+mkdir -p "$out/dp/${DEEP%/*}"
+printf 'deep file\n' > "$out/dp/$DEEP"
+sh tools/sfs4.sh pack "$out/dp" "$out/dp.img" 262144 32 > "$out/dp.log" 2>&1 \
+    && sh tools/sfs4.sh unpack "$out/dp.img" "$out/dp.back" > /dev/null 2>&1 \
+    && diff -r "$out/dp" "$out/dp.back" > /dev/null 2>&1
+report $? "cap: 深さ 12 の木 (経路 131 バイト) が sfs4 に載って戻る"
+[ -s "$out/dp.log" ] && sed -n '1,2p' "$out/dp.log"
+
 # 根を sfs4 で詰めて kernel25 で走らせる。$1=根 $2=出力 $3=大きさ $4=件数
 #
 # **記憶は 1G でなければならない。** kernel25 は sfs の像を
@@ -1177,20 +1192,39 @@ r=$out/n4root
 rm -rf "$r"; mkdir -p "$r/bin"
 cp tmp/build/sh2.bin "$r/bin/sh2"
 cp tmp/build/sh2.bin "$r/sh2"
+cp tmp/build/stamp "$r/stamp"
 printf 'ninety-two\n' > "$r/$G92"
+mkdir -p "$r/${DEEP%/*}"
+printf 'deep file\n' > "$r/$DEEP"
+touch -d '@1700000001.222222222' "$r/$G92"
+touch -d '@1700000002.333333333' "$r/$DEEP"
+
+# **名前を広げただけでは足りない。** 名前 1 段が 103 バイト持てても，
+# 経路を受ける器が 63 バイトなら，92 バイトの名前は根に置いても stat
+# できない。open は経路をそのまま辿るので cat だけでは表に出ない
 cat > "$r/go.sh" <<EOF
 cat $G92
 echo "cat \$?"
 cp $G92 $G92B
 echo "cp \$?"
 cat $G92B
+stamp $G92
+echo "name-stat \$?"
+stamp $DEEP
+echo "deep-stat \$?"
 EOF
 printf 'sh2 go.sh\n' > "$r/boot"
-printf 'ninety-two\ncat 0\ncp 0\nninety-two\n' > "$out/n4.want"
+{
+    printf 'ninety-two\ncat 0\ncp 0\nninety-two\n'
+    printf 'f 11 %s %s\n' "$(hilo "$r/$G92")" "$G92"
+    printf 'name-stat 0\n'
+    printf 'f 10 %s %s\n' "$(hilo "$r/$DEEP")" "$DEEP"
+    printf 'deep-stat 0\n'
+} > "$out/n4.want"
 runroot4 "$r" "$out/n4.out"
 rc=$?
 [ "$rc" -eq 0 ] && diff -u "$out/n4.want" "$out/n4.out" > "$out/n4.diff"
-report $? "run: kernel25 が 92 バイトの名前を引き，読み，同じ長さの名前で作る"
+report $? "run: 92 バイトの名前と 131 バイトの経路を，引き・読み・作り・stat する"
 [ -s "$out/n4.diff" ] && sed -n '4,$p' "$out/n4.diff"
 
 # **走った後の像をホスト側で開く。** 「cat できた」だけでは，カーネルが

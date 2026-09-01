@@ -1,13 +1,19 @@
 /* kernel25.c --- 簡易 OS のカーネル (Stage 17 第 5 部の世代)
  *
- * kernel24 の写しに**sfs4 と新しい配置**を入れたものである
- * (docs/stage017-gcc.md 7 章)。変えたのは #define の 9 つと，
- * 起動時に読む magic と，イメージの大きさの検査だけである。
+ * kernel24 の写しに**sfs4 と新しい配置と広い経路**を入れたものである
+ * (docs/stage017-gcc.md 7 章)。変えたのは #define と，起動時に読む
+ * magic と，イメージの大きさの検査だけである。
  *
  *   sfs4      表項目が 72 -> 128 バイトになり，名前の枠が 48 -> 104
  *             バイト (終端を除いて 103) に広がった。名前より後ろの
  *             6 語の並びは sfs3 と同じで，頭の 32 バイトも同じ
  *   SFSA      0x8400_0000 -> 0xa000_0000。窓が 32 MiB -> 512 MiB
+ *   PATHMAX   経路を受ける器が 63 -> 255 バイト (statat / spawn)
+ *
+ * **名前を広げただけでは足りない。** 名前 1 段が 103 バイト持てても，
+ * 経路を受ける器が 63 バイトなら，92 バイトの名前は根に置いても
+ * stat できない。GCC 4.7.4 の木は最長の経路が 131 バイト・深さ 12
+ * なので，そこに余りを足して 255 にした。
  *
  * **なぜ広げたか。** GCC 4.7.4 の配布木を測ると，名前の最長が 92
  * バイト，47 バイトを超えるものが 248 個あり，最小のイメージが
@@ -219,6 +225,13 @@ int urun(void);
 #define SAVETOP 0xa0000000      /* 退避領域の上限 (= RAM の終わり) */
 #define SFSA    0xa0000000      /* 共有領域 (sfs イメージ) */
 #define SFSTOP  0xc0000000      /* その上端 (= RAM の終わり) */
+
+/* 経路の上限 (終端を除く)。**名前の上限より深い理由がある。**
+ * 名前 1 段が 103 バイト持てても，経路を受ける器が 63 バイトしか
+ * 無ければ，その名前は stat も spawn もできない。GCC 4.7.4 の木は
+ * 最長の経路が 131 バイト・深さ 12 なので，そこに余りを足して 255 と
+ * した (器は 256 バイト。カーネルスタックは 0x8380_0000 にある) */
+#define PATHMAX 255
 #define UBASE   0x86000000      /* ユーザ像のロード位置 */
 #define USP     0x97000000      /* ユーザのフレームスタック上端 */
 #define UBRKMAX 0x96000000      /* brk の上限 */
@@ -765,11 +778,11 @@ int sys_chdir(unsigned path) {
  * **許可・所有者は返さない。** 持っていない欄を 0 で埋めて名前だけ
  * 揃えると，呼び手が「見た」つもりになる。無いものは無いままにする */
 int sys_statat(int dirfd, unsigned path, unsigned out) {
-  char p[64];
+  char p[PATHMAX + 1];
   int i;
   unsigned e;
   (void)dirfd;                          /* 常に AT_FDCWD 相当 */
-  if (cpystr(p, path, 63) < 0) return 0 - E2BIG;
+  if (cpystr(p, path, PATHMAX) < 0) return 0 - E2BIG;
   i = sfsfind(p);
   if (i < 0) return 0 - ENOENT;
   e = ent(i);
@@ -1097,8 +1110,8 @@ static int spawnerr;
 
 int sys_spawn(unsigned sa) {
   unsigned *tf;
-  char path[64];
-  char name[64];
+  char path[PATHMAX + 1];
+  char name[PATHMAX + 1];
   unsigned argvp;
   unsigned p;
   int ci;
@@ -1116,7 +1129,7 @@ int sys_spawn(unsigned sa) {
 
   tf = (unsigned *)TFA;
   if (depth >= MAXDEP) return 0 - ENOMEM;
-  if (cpystr(path, ld4(sa), 63) < 0) return 0 - E2BIG;
+  if (cpystr(path, ld4(sa), PATHMAX) < 0) return 0 - E2BIG;
   ci = sfsfind(path);
   if (ci < 0) return 0 - ENOENT;
   /* 親を壊す前に，載せられる ELF であることを確かめる。elfok が通れば
@@ -1162,7 +1175,7 @@ int sys_spawn(unsigned sa) {
   ipos = fd0pos;
   p = ld4(sa + 8);
   if (p != 0) {
-    if (cpystr(name, p, 63) < 0) return 0 - E2BIG;
+    if (cpystr(name, p, PATHMAX) < 0) return 0 - E2BIG;
     ie = sfsfind(name);
     if (ie < 0) return 0 - ENOENT;
     ipos = 0;
@@ -1171,7 +1184,7 @@ int sys_spawn(unsigned sa) {
   opos = fd1pos;
   p = ld4(sa + 12);
   if (p != 0) {
-    if (cpystr(name, p, 63) < 0) return 0 - E2BIG;
+    if (cpystr(name, p, PATHMAX) < 0) return 0 - E2BIG;
     oe = sfsfind(name);
     if (oe < 0) {
       oe = sfsnew(name);
@@ -1227,7 +1240,7 @@ int sys_spawn(unsigned sa) {
     unsigned pe;
     pe = ld4(sa + 16);
     if (pe != 0) {
-      if (cpystr(name, pe, 63) >= 0) {
+      if (cpystr(name, pe, PATHMAX) >= 0) {
         int ee;
         ee = sfsfind(name);
         if (ee < 0) {

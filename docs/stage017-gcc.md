@@ -367,9 +367,17 @@ magicは`sfs4`。道具は[tools/sfs4.sh](../tools/sfs4.sh)で、`pack` / `unpac
 **長すぎる名前は黙って切らずに拒む。** 切ると同名衝突が起き、別のfileを
 上書きする。104 bytesのcomponentは`name too long`で名指しで落とす。
 
+**深さ10以上でpackが落ちていたのを直した。** `pack`はdirectoryを浅い順に
+並べてから作るが、深さの印を0詰めせずに並べると文字列として比べられ、
+`"10"`が`"2"`より前に来る。親より先に子が出て`parent not found`で落ちる。
+tccの木は深さ6だったので表に出ていなかったが、GCC 4.7.4は深さ12なので
+1 fileも載らなかった。`tools/sfs2.sh` / `sfs3.sh`にも同じ誤りがあったので
+同時に直した。深さ9までの木では並び順が変わらないので、既存のimageは
+1 byteも変わらない。
+
 ### 7.2 kernel25
 
-kernel24の写しに`#define`9つと起動時の検査を入れただけである。
+kernel24の写しに`#define`と起動時の検査を入れただけである。
 
 ```
                 kernel24        kernel25
@@ -377,7 +385,14 @@ kernel24の写しに`#define`9つと起動時の検査を入れただけであ�
   窓の上端      0x8600_0000     0xc000_0000     (SFSTOPを新設)
   窓の大きさ    33,554,432   -> 536,870,912 bytes
   RAM           512 MiB      -> 1 GiB
+  PATHMAX       63           -> 255 bytes         (statat / spawn)
 ```
+
+**名前を広げただけでは足りない。** 名前1段が103 bytes持てても、経路を受ける
+器が63 bytesなら、92 bytesの名前は**rootに置いてもstatできない**。`open`は
+経路をそのまま辿るので`cat`だけでは表に出ず、`stat`で初めて出る。GCC 4.7.4の
+木は最長の経路が131 bytes・深さ12なので、余りを足して255にした。`mk20`の差分
+buildは`statat`を使うので、ここが塞がっていると測定用treeを置いてもbuildできない。
 
 **なぜ上へ移したか。** `0x8600_0000`より下は1 byteも動かせない。trap frame
 (`0x8370_0000`)・kernel stack (`0x8380_0000`)・user像のload先
@@ -421,7 +436,8 @@ linkerの世代が要る。kernel19が記憶域を広げたときと同じ制約
 | cap (対照) | 同じ木をsfs3は名指しで拒む —— だから世代を刻んだ |
 | cap | 103 bytesは載り、104 bytesは`name too long`で拒む |
 | cap | 容量の式がtools/sfs4.shとkernel25.cの実際の値を読んでいる (答の判っている小さな木で確かめる) |
-| run | kernel25が92 bytesの名前を引き、読み、同じ長さの名前で作る |
+| cap | 深さ12の木 (経路131 bytes) がsfs4に載って戻る |
+| run | 92 bytesの名前と131 bytesの経路を、引き・読み・作り、statする |
 | run | guestが作った長い名前が、走った後のimageをhostで開いても在る |
 | run | 旧世代の窓 (32 MiB) の外に置いた中身が読める |
 | run | sfs3のimageは`?`で拒む |
