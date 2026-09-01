@@ -1172,6 +1172,7 @@ runroot4() {
 
 # **第 5 部の完了条件の 1 つめ。** 長い名前が OS の側でも通ること。
 # ホストで詰められても，カーネルが引けなければ意味がない
+G92B=$(printf 'h%.0s' $(seq 1 92))      # ゲストが作る側の長い名前
 r=$out/n4root
 rm -rf "$r"; mkdir -p "$r/bin"
 cp tmp/build/sh2.bin "$r/bin/sh2"
@@ -1180,17 +1181,27 @@ printf 'ninety-two\n' > "$r/$G92"
 cat > "$r/go.sh" <<EOF
 cat $G92
 echo "cat \$?"
-cp $G92 copy.txt
-cat copy.txt
+cp $G92 $G92B
 echo "cp \$?"
+cat $G92B
 EOF
 printf 'sh2 go.sh\n' > "$r/boot"
-{ printf 'ninety-two\ncat 0\nninety-two\ncp 0\n'; } > "$out/n4.want"
+printf 'ninety-two\ncat 0\ncp 0\nninety-two\n' > "$out/n4.want"
 runroot4 "$r" "$out/n4.out"
 rc=$?
 [ "$rc" -eq 0 ] && diff -u "$out/n4.want" "$out/n4.out" > "$out/n4.diff"
-report $? "run: kernel25 が 92 バイトの名前を引き，読み，写す"
+report $? "run: kernel25 が 92 バイトの名前を引き，読み，同じ長さの名前で作る"
 [ -s "$out/n4.diff" ] && sed -n '4,$p' "$out/n4.diff"
+
+# **走った後の像をホスト側で開く。** 「cat できた」だけでは，カーネルが
+# 表に書いた項目が sfs4 の形になっているとは言えない。記憶から切り出して
+# sfs4.sh で展開し，ゲストが作った長い名前がそこに在ることを確かめる
+rm -rf "$out/n4.back"
+dd if="$out/r4" of="$out/i4.after" bs=64K \
+    iflag=skip_bytes,count_bytes skip=536870912 count=4194304 2> /dev/null \
+    && sh tools/sfs4.sh unpack "$out/i4.after" "$out/n4.back" > /dev/null 2>&1 \
+    && [ "$(cat "$out/n4.back/$G92B" 2> /dev/null)" = 'ninety-two' ]
+report $? "run: ゲストが作った 92 バイトの名前がホスト側でも開ける"
 
 # **第 5 部の完了条件の 2 つめ。** 旧世代の窓 (32 MiB) の外に置いた
 # 中身が読めること。
@@ -1235,18 +1246,30 @@ report $? "run: sfs3 の像は kernel25 が '?' で拒む (読めたつもりに
 # **窓に入らない像は載せない。** はみ出した先は何も無い番地なので，
 # 書いた中身が黙って消える。頭の大きさの欄だけを窓より大きく書き換え，
 # 中身は正しいままにして，カーネルが大きさを見ているかを確かめる
-sh tools/sfs4.sh pack "$out/s4rt" "$out/big4.img" 262144 32 > /dev/null 2>&1
-# 頭の +4 が大きさの欄。0x20000001 = 窓 (512 MiB) より 1 バイト大きい
-printf '\001\000\000\040' \
-    | dd of="$out/big4.img" bs=1 seek=4 conv=notrunc 2> /dev/null
-rm -f "$out/rbig"
-dd if=/dev/null of="$out/rbig" bs=1 seek=1073741824 2> /dev/null
-dd if="$out/big4.img" of="$out/rbig" bs=64K oflag=seek_bytes \
-    seek=536870912 conv=notrunc 2> /dev/null
-STONE_QEMU_RAMFILE="$out/rbig" STONE_QEMU_RAM=1G \
-    sh tools/env.sh qemu tmp/build/kernel25.bin < /dev/null \
-    > "$out/big4.out" 2>&1 || true
+# 頭の +4 が大きさの欄。中身は正しいまま，そこだけ書き換える。
+# $1 = 欄に書く 4 バイト (8 進のエスケープ)  $2 = 出力
+bigsize() {
+    sh tools/sfs4.sh pack "$out/s4rt" "$out/big4.img" 262144 32 > /dev/null 2>&1
+    # shellcheck disable=SC2059
+    printf "$1" | dd of="$out/big4.img" bs=1 seek=4 conv=notrunc 2> /dev/null
+    rm -f "$out/rbig"
+    dd if=/dev/null of="$out/rbig" bs=1 seek=1073741824 2> /dev/null
+    dd if="$out/big4.img" of="$out/rbig" bs=64K oflag=seek_bytes \
+        seek=536870912 conv=notrunc 2> /dev/null
+    STONE_QEMU_RAMFILE="$out/rbig" STONE_QEMU_RAM=1G \
+        sh tools/env.sh qemu tmp/build/kernel25.bin < /dev/null \
+        > "$2" 2>&1 || true
+}
+
+# 0x20000001 = 窓 (512 MiB) より 1 バイト大きい
+bigsize '\001\000\000\040' "$out/big4.out"
 grep -qx 'S' "$out/big4.out"
 report $? "run: 窓を超える大きさの像は kernel25 が 'S' で拒む"
+
+# **符号つきで比べていたら通り抜ける値。** 0xffffffff は int で見ると
+# -1 であり，窓より小さいことになってしまう
+bigsize '\377\377\377\377' "$out/neg4.out"
+grep -qx 'S' "$out/neg4.out"
+report $? "run: 2^31 を超える大きさも 'S' で拒む (符号なしで比べている)"
 
 summary

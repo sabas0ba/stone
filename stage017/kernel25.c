@@ -1328,6 +1328,7 @@ int main(void) {
   int b;
   int n;
   int used;
+  unsigned isz;
   char name[64];
 
   if (ld4(SFSA) != 0x34736673) {        /* 'sfs4' */
@@ -1336,8 +1337,11 @@ int main(void) {
     return 1;
   }
   /* 窓に入らないイメージは載せない。引き算の向きに注意 ---
-   * SFSA + 大きさ で比べると 32 bit を回り込んで通ってしまう */
-  if (ld4(SFSA + 4) > SFSTOP - SFSA) {
+   * SFSA + 大きさ で比べると 32 bit を回り込んで通ってしまう。
+   * 両辺を unsigned に揃えるのは，符号つきで比べると 2^31 以上の
+   * でたらめな大きさが負数になって通り抜けるからである */
+  isz = ld4(SFSA + 4);
+  if (isz > (unsigned)(SFSTOP - SFSA)) {
     putc('S');
     putc('\n');
     return 1;
