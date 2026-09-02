@@ -106,7 +106,13 @@ fi
 # SHA-256 とも一致するので，放っておくとキャッシュの照合を通って
 # しまう (1.2.1)。tools/build.sh の nonempty が印を拒むようになって
 # いるが，消しておけば作り直しが素直に走る
-if [ -d tmp/build ]; then
+# **ビルドが走っている間は消さない。** 生成物は `> tmp/build/x` で
+# 0 バイトの器を先に作り，QEMU が書き終えて初めて中身が入る。その隙に
+# 消すと出力は消えた inode へ行き，段は「生成物が空」で落ちる。
+# 停止検知の定期実行が走行中のビルドを壊した (2026-09-02)
+if [ -d tmp/build ] && pgrep -f 'tools/build\.sh' > /dev/null 2>&1; then
+    say "tools/build.sh が走っているので 0 バイトの生成物は消さない"
+elif [ -d tmp/build ]; then
     empty=$(find tmp/build -type f -size 0 2> /dev/null | wc -l | tr -d ' ')
     if [ "$empty" -gt 0 ]; then
         if [ "$check_only" -eq 1 ]; then
