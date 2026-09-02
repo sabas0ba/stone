@@ -152,6 +152,8 @@ GNU公式配布元の`https://ftp.gnu.org/gnu/gcc/gcc-4.7.4/gcc-4.7.4.tar.bz2`�
 
 全配布木は現在のsfs3/kernel24に収まらない。さらに`libstdc++-v3/include`だけを見ても50-byteのcomponentがあり、3 headerが現在の47-byte上限を超える。documentation、testsuite、Java frontendを除外するだけでは名前長の問題は解消しない。
 
+**この測定に対する答が7章のsfs4/kernel25である。** 同じ`gcc17.sh measure`を新世代に当てた値は[tests/stage017/expected/gcc47-tree.txt](../tests/stage017/expected/gcc47-tree.txt)にある。名前は103 bytesまで、窓は536,870,912 bytesになり、最小imageは478,015,272 bytesで収まる。
+
 ## 5. どの案でも等しく要るもの
 
 判断を待つ間に進められるもの。**どれも主語は我々の器である。**
@@ -325,7 +327,7 @@ sh tools/diff17.sh <名前>   1 つだけ
 
 1. ~~GCC 4.7.4を固定付きで取得する。~~ 完了。
 2. ~~配布木をsfs3/kernel24の上限と比較する。~~ 完了。現在の構成には収まらない。
-3. sfsの名前長とkernelのmemory mapを更新し、GCCの測定用source treeを配置できるようにする。
+3. ~~sfsの名前長とkernelのmemory mapを更新する。~~ 完了。7章 (sfs4 / kernel25)。
 4. GCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。
 5. GCC 7のbuildに必要なC++ subsetとruntime symbolを静的に測定し、案Aの実装範囲を決める。
 
@@ -336,3 +338,112 @@ sh tools/diff17.sh <名前>   1 つだけ
 一方、前版の「項目数とimage sizeは`pack`の引数なので拡張できる」という記述は不正確だった。host側の`pack`は値を受け取れるが、kernel24がsfsに割り当てるaddress spaceは`0x84000000`から`0x86000000`までの32 MiBに限られる。GCC 4.7.4の配布木が必要とする最小imageは473,459,336 bytesであり、`pack`の引数だけでは解決しない。
 
 したがって、差分build機能を作り直す必要はないが、GCCのbuildに進む前にsfs formatとkernel memory mapの世代更新が必要である。少なくともcomponentを50 bytes以上保持し、測定用source treeとbuild outputを同時に置ける容量を定義する。
+
+**この結論に対する実装が7章である。** 差分buildの判定は1行も変えていない。
+
+## 7. sfs4 と kernel25 —— 長い名前と広い窓 (6.1 の 3)
+
+4.5 の測定に対する答である。**変えたのは名前の枠と像の置き場だけ**で、
+差分buildの判定も、syscallの並びも、userlandも1行も変えていない。
+
+### 7.1 sfs4
+
+| | sfs3 | sfs4 |
+|---|---:|---:|
+| 項目の幅 | 72 bytes | 128 bytes |
+| 名前の枠 | 48 bytes | 104 bytes |
+| 名前の上限 | 47 bytes | 103 bytes |
+| 頭の32 bytes | magic / size / tbloff / count / cursor | 同じ |
+| 名前より後ろの6語 | parent / dataoff / len / flags / mtlo / mthi | 同じ順 |
+
+magicは`sfs4`。道具は[tools/sfs4.sh](../tools/sfs4.sh)で、`pack` / `unpack` /
+`list`の引数はsfs3と同じである。
+
+**なぜ103か。** 項目を128 bytes = 2の冪にすると、索引から位置を出す算術が
+乗算ではなく左shiftで済む。128から後ろの6語 (24 bytes) を引くと名前の枠が
+104 bytes、終端の分を除いて103 bytesになる。実測の92 bytesに11 bytesの余りが
+残る。
+
+**長すぎる名前は黙って切らずに拒む。** 切ると同名衝突が起き、別のfileを
+上書きする。104 bytesのcomponentは`name too long`で名指しで落とす。
+
+**深さ10以上でpackが落ちていたのを直した。** `pack`はdirectoryを浅い順に
+並べてから作るが、深さの印を0詰めせずに並べると文字列として比べられ、
+`"10"`が`"2"`より前に来る。親より先に子が出て`parent not found`で落ちる。
+tccの木は深さ6だったので表に出ていなかったが、GCC 4.7.4は深さ12なので
+1 fileも載らなかった。`tools/sfs2.sh` / `sfs3.sh`にも同じ誤りがあったので
+同時に直した。深さ9までの木では並び順が変わらないので、既存のimageは
+1 byteも変わらない。
+
+### 7.2 kernel25
+
+kernel24の写しに`#define`と起動時の検査を入れただけである。
+
+```
+                kernel24        kernel25
+  SFSA          0x8400_0000  -> 0xa000_0000     sfs image
+  窓の上端      0x8600_0000     0xc000_0000     (SFSTOPを新設)
+  窓の大きさ    33,554,432   -> 536,870,912 bytes
+  RAM           512 MiB      -> 1 GiB
+  PATHMAX       63           -> 255 bytes         (statat / spawn)
+```
+
+**名前を広げただけでは足りない。** 名前1段が103 bytes持てても、経路を受ける
+器が63 bytesなら、92 bytesの名前は**rootに置いてもstatできない**。`open`は
+経路をそのまま辿るので`cat`だけでは表に出ず、`stat`で初めて出る。GCC 4.7.4の
+木は最長の経路が131 bytes・深さ12なので、余りを足して255にした。`mk20`の差分
+buildは`statat`を使うので、ここが塞がっていると測定用treeを置いてもbuildできない。
+
+**なぜ上へ移したか。** `0x8600_0000`より下は1 byteも動かせない。trap frame
+(`0x8370_0000`)・kernel stack (`0x8380_0000`)・user像のload先
+(`0x8600_0000`) はld16の前置部に機械語として焼き込まれており、動かすと
+linkerの世代が要る。kernel19が記憶域を広げたときと同じ制約である。
+上へ伸ばすしかなく、`SAVETOP` (`0xa000_0000`) の先が唯一の空きだった。
+
+`0x8400_0000`〜`0x8600_0000`の32 MiBが空いた。`0x8100_0000`〜`0x8370_0000`と
+合わせ、当面は使わない。
+
+**kernel24とsfs3はそのまま残す。** `tools/tcc17.sh`と`tools/ext17.sh`
+(tcc・zlib・bzip2をbuildする道) は32 MiBで足りており、動かす理由が無い。
+凍結した世代は凍結したまま再現できることが、この鎖の前提である
+([artifacts.md](artifacts.md))。kernel25へ移すのは、移す必要が測定で出て
+からにする。
+
+**窓に入らないimageは載せない。** 頭の大きさの欄を見て、窓を超えるなら`S`を
+出して止まる。黙って載せると、はみ出した先は何も無い番地なので、書いた中身が
+消える。形の違うimage (sfs3) は`?`で止まる。
+
+### 7.3 測り直した結果
+
+| | 値 |
+|---|---:|
+| GCC 4.7.4の最小image | 478,015,272 bytes |
+| kernel25の窓 | 536,870,912 bytes |
+| 余り | 58,855,640 bytes |
+| 103 bytesを超えるcomponent | 0 |
+
+**全配布木が窓に収まる。** ただし余りは56 MiBしかなく、build outputを同じ像に
+置く余地は小さい。6.1の4に進むときは、必要なtranslation unitだけを取り出した
+測定用treeを使う。
+
+### 7.4 何を検査しているか
+
+`tests/stage017` 第5部。
+
+| 検査 | 中身 |
+|---|---|
+| roundtrip | 92 bytesの名前を含む木がsfs4に載って戻る。時刻もnanosecondまで一致 |
+| cap (対照) | 同じ木をsfs3は名指しで拒む —— だから世代を刻んだ |
+| cap | 103 bytesは載り、104 bytesは`name too long`で拒む |
+| cap | 容量の式がtools/sfs4.shとkernel25.cの実際の値を読んでいる (答の判っている小さな木で確かめる) |
+| cap | 深さ12の木 (経路131 bytes) がsfs4に載って戻る |
+| run | 92 bytesの名前と131 bytesの経路を、引き・読み・作り、statする |
+| run | guestが作った長い名前が、走った後のimageをhostで開いても在る |
+| run | 旧世代の窓 (32 MiB) の外に置いた中身が読める |
+| run | sfs3のimageは`?`で拒む |
+| run | 窓を超える大きさのimageは`S`で拒む |
+| run | 2^31を超える大きさも`S`で拒む —— 符号つきで比べていたら通り抜ける |
+
+**「載る」だけでは足りない。** hostで詰められてもkernelが引けなければ意味が
+ないので、長い名前は必ずguestでも引かせる。同じ理由で、窓が広がったことは
+「旧世代なら届かない位置のfileが読める」という形でしか確かめない。

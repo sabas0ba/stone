@@ -185,6 +185,13 @@ build_stage017() {
         -- stage017/kernel24.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
         -- kern17 kernel24 stage017/kernel24.c
+
+    # カーネルの第 25 世代。kernel24 との差は sfs4 と配置だけ
+    # (docs/stage017-gcc.md 7 章)
+    step kernel25 kernel25.bin \
+        -- stage017/kernel25.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin \
+        -- kern17 kernel25 stage017/kernel25.c
 }
 
 # カーネルを 1 つ作る (前置部は 'K')。stage016.sh の kern と同じ手だが，
@@ -315,7 +322,7 @@ cc17_run() {
 
 do_stage017() {
     run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
-        kernel23.bin kernel24.bin \
+        kernel23.bin kernel24.bin kernel25.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
         l19_posix_sys.o l19_posix_morecore.o l19_posix_stdio.o \
@@ -332,7 +339,7 @@ do_stage017() {
            stage017/pp17.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
            stage017/mk20.c \
-           stage017/kernel23.c stage017/kernel24.c \
+           stage017/kernel23.c stage017/kernel24.c stage017/kernel25.c \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \

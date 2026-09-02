@@ -1,27 +1,34 @@
 #!/bin/sh
-# sfs3 イメージとディレクトリの相互変換 (ホスト側の道具)。
-# 形式は docs/stage017-cc.md 11.3。
+# sfs4 イメージとディレクトリの相互変換 (ホスト側の道具)。
+# 形式は docs/stage017-gcc.md 7 章。
 #
 # 使用法:
-#   sfs3.sh pack <dir> <img> [size] [maxent]   ディレクトリ -> イメージ
-#   sfs3.sh unpack <img> <dir>                 イメージ -> ディレクトリ
-#   sfs3.sh list <img>                         一覧 (種別・長さ・時刻・経路)
+#   sfs4.sh pack <dir> <img> [size] [maxent]   ディレクトリ -> イメージ
+#   sfs4.sh unpack <img> <dir>                 イメージ -> ディレクトリ
+#   sfs4.sh list <img>                         一覧 (種別・長さ・時刻・経路)
 #
 # 既定: size = 4194304 (4 MiB), maxent = 256。
 #
-# sfs2 (tools/sfs2.sh) との違いは**項目が更新時刻を持つ**ことだけである。
-# 項目は 64 -> 72 バイトに広がり，末尾に mtlo / mthi (epoch からの
-# ナノ秒を u32 2 本で持つ) が付いた。
+# sfs3 (tools/sfs3.sh) との違いは**名前の枠が広がったことだけ**である。
+# 項目は 72 -> 128 バイトになり，名前は 48 -> 104 バイト (終端を除いて
+# 103 バイト) を持つ。頭の 32 バイトも，そこから先の並びも sfs3 と同じで，
+# 名前より後ろの 6 語 (親・位置・長さ・flags・mtlo・mthi) の順も変えていない。
 #
-# **秒に直さずナノ秒のまま持つ。** カーネルが goldfish RTC から取る値が
-# ナノ秒であり，秒に直すには 64 bit の除算が要る (docs/stage017-cc.md
-# 11.2)。ホスト側もそれに合わせる。
+# **なぜ広げたか。** GCC 4.7.4 の配布木を測ると，名前の最長が 92 バイト
+# あり，47 バイトを超えるものが 248 個ある
+# (tests/stage017/expected/gcc47-tree.txt)。sfs3 は長い名前を黙って
+# 切らずに拒むので，その木は 1 つも載らない。
 #
-# **sfs2 / sfs1 は残してある。** Stage 12〜16 の検査がそれらに依っており，
-# 凍結済みの成果物の再現に要る。
+# **なぜ 103 か。** 項目を 128 バイト = 2 の冪にすると，索引から位置を
+# 出す算術が乗算ではなく左シフトで済む。128 から後ろの 6 語 (24 バイト)
+# を引くと名前の枠が 104 バイト，終端の分を除いて 103 バイトになる。
+# 実測の 92 バイトに 11 バイトの余りがある。
+#
+# **sfs3 / sfs2 / sfs1 は残してある。** Stage 12〜17 の検査がそれらに
+# 依っており，凍結済みの成果物の再現に要る。
 set -eu
 
-die() { echo "sfs3.sh: $*" >&2; exit 1; }
+die() { echo "sfs4.sh: $*" >&2; exit 1; }
 
 # u32 リトルエンディアンの読み書き
 r32() { od -An -tu4 -j "$2" -N 4 "$1" | tr -d ' '; }
@@ -33,10 +40,18 @@ w32() {
         | dd of="$1" bs=4 seek=$(($2 / 4)) conv=notrunc 2> /dev/null
 }
 
-# 表項目 (72 バイト): name[48], parent, dataoff, len, flags, mtlo, mthi
+# 表項目 (128 バイト): name[104], parent, dataoff, len, flags, mtlo, mthi
 TBLOFF=32
-ENTSZ=72
-NAMEMAX=47
+ENTSZ=128
+NAMESZ=104
+NAMEMAX=103
+E_NAME=0
+E_PAR=104
+E_OFF=108
+E_LEN=112
+E_FLAG=116
+E_MTLO=120
+E_MTHI=124
 F_USED=1
 F_DIR=2
 
@@ -67,14 +82,15 @@ mtime_ns() {
 went() {
     _eo=$((TBLOFF + $2 * ENTSZ))
     if [ -n "$3" ]; then
-        printf '%s' "$3" | dd of="$1" bs=1 seek="$_eo" conv=notrunc 2> /dev/null
+        printf '%s' "$3" \
+            | dd of="$1" bs=1 seek=$((_eo + E_NAME)) conv=notrunc 2> /dev/null
     fi
-    w32 "$1" $((_eo + 48)) "$4"
-    w32 "$1" $((_eo + 52)) "$5"
-    w32 "$1" $((_eo + 56)) "$6"
-    w32 "$1" $((_eo + 60)) "$7"
-    w32 "$1" $((_eo + 64)) $(( $8 % 4294967296 ))
-    w32 "$1" $((_eo + 68)) $(( $8 / 4294967296 ))
+    w32 "$1" $((_eo + E_PAR))  "$4"
+    w32 "$1" $((_eo + E_OFF))  "$5"
+    w32 "$1" $((_eo + E_LEN))  "$6"
+    w32 "$1" $((_eo + E_FLAG)) "$7"
+    w32 "$1" $((_eo + E_MTLO)) $(( $8 % 4294967296 ))
+    w32 "$1" $((_eo + E_MTHI)) $(( $8 / 4294967296 ))
 }
 
 pack() {
@@ -85,7 +101,7 @@ pack() {
 
     rm -f "$img"
     dd if=/dev/null of="$img" bs=1 seek="$size" 2> /dev/null
-    printf 'sfs3' | dd of="$img" bs=4 conv=notrunc 2> /dev/null
+    printf 'sfs4' | dd of="$img" bs=4 conv=notrunc 2> /dev/null
     w32 "$img" 4 "$size"
     w32 "$img" 8 "$TBLOFF"
     w32 "$img" 12 "$cnt"
@@ -142,12 +158,13 @@ pack() {
 }
 
 check_magic() {
-    [ "$(dd if="$1" bs=4 count=1 2> /dev/null)" = 'sfs3' ] \
-        || die "not an sfs3 image: $1"
+    [ "$(dd if="$1" bs=4 count=1 2> /dev/null)" = 'sfs4' ] \
+        || die "not an sfs4 image: $1"
 }
 
 entname() {
-    dd if="$1" bs=1 skip="$2" count=48 2> /dev/null | tr '\0' '\n' | head -n 1
+    dd if="$1" bs=1 skip=$(($2 + E_NAME)) count="$NAMESZ" 2> /dev/null \
+        | tr '\0' '\n' | head -n 1
 }
 
 # 全項目を "索引 親 flags 位置 長さ 時刻(ns) 名前" (TAB 区切り) で出す
@@ -156,12 +173,12 @@ entries() {
     _i=0
     while [ "$_i" -lt "$_cnt" ]; do
         _eo=$((_tbl + _i * ENTSZ))
-        _fl=$(r32 "$1" $((_eo + 60)))
+        _fl=$(r32 "$1" $((_eo + E_FLAG)))
         if [ $((_fl & F_USED)) -ne 0 ]; then
-            _lo=$(r32 "$1" $((_eo + 64))); _hi=$(r32 "$1" $((_eo + 68)))
+            _lo=$(r32 "$1" $((_eo + E_MTLO))); _hi=$(r32 "$1" $((_eo + E_MTHI)))
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_i" \
-                "$(r32 "$1" $((_eo + 48)))" "$_fl" \
-                "$(r32 "$1" $((_eo + 52)))" "$(r32 "$1" $((_eo + 56)))" \
+                "$(r32 "$1" $((_eo + E_PAR)))" "$_fl" \
+                "$(r32 "$1" $((_eo + E_OFF)))" "$(r32 "$1" $((_eo + E_LEN)))" \
                 "$((_hi * 4294967296 + _lo))" \
                 "$(entname "$1" "$_eo")"
         fi
@@ -250,6 +267,6 @@ case "$cmd" in
 pack)   pack "$@" ;;
 unpack) unpack "$@" ;;
 list)   list "$@" ;;
-*)      echo "usage: sfs3.sh {pack <dir> <img> [size] [maxent] | unpack <img> <dir> | list <img>}" >&2
+*)      echo "usage: sfs4.sh {pack <dir> <img> [size] [maxent] | unpack <img> <dir> | list <img>}" >&2
         exit 2 ;;
 esac
