@@ -20,7 +20,8 @@
 #
 #   1. 追跡している遠隔の枝と突き合わせ，**遅れているときだけ**揃える
 #   2. `tmp/build` の 0 バイトの生成物を消す (巻き戻りが残すことがある)
-#   3. STONE_ENGINE=host のときだけ，1.2 のホスト実行パッチを当て直す
+#   3. STONE_ENGINE=host のときだけ，1.2 のホスト実行パッチを当て直し，
+#      qemu-system-riscv32 が居ることを確かめる (巻き戻りで消えることがある)
 #   4. --build / --test があれば続きから走らせる (スタンプが効く)
 #
 # ---- しないこと ----
@@ -167,6 +168,14 @@ patch_env() {
 
 if [ "${STONE_ENGINE:-}" = host ]; then
     patch_env
+    # **巻き戻りは QEMU ごと消すことがある** (2026-09-02 に実際に起きた)。
+    # 無いまま --build を走らせると，全段が「生成物が空」で落ちて原因が
+    # 読めなくなる。dev-notes 1.2 の導入コマンドを示して止まる
+    if ! command -v qemu-system-riscv32 > /dev/null 2>&1; then
+        say "**qemu-system-riscv32 が無い。** 巻き戻りで消えている (dev-notes 1.2)"
+        say "  apt-get update && apt-get install -y qemu-system-misc"
+        [ "$check_only" -eq 1 ] || exit 1
+    fi
 else
     if grep -q 'STONE_ENGINE:-}" = host' tools/env.sh 2> /dev/null; then
         say "作業木の tools/env.sh にホスト実行のパッチが当たっている"
