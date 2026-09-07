@@ -1306,4 +1306,22 @@ bigsize '\377\377\377\377' "$out/neg4.out"
 grep -qx 'S' "$out/neg4.out"
 report $? "run: 2^31 を超える大きさも 'S' で拒む (符号なしで比べている)"
 
+section "差分試験の OS 側 (libc を我々の OS の上でホストと突き合わせる)"
+
+# **libc の穴は，我々が書いた期待値では出ない。** 我々は自分が使う
+# 書き方しか試さないからである (cc15u と同じ構図)。前置部だけで走る
+# 側は Stage 15 が見ているので，ここは libc を繋いで OS の上で走らせる
+# 側だけを見る (docs/stage017-gcc.md 5.3)。
+#
+# 走行は 1 回の起動に全プローブを詰めてある (2 分ほど)
+if ! command -v "${CC:-gcc}" > /dev/null 2>&1; then
+    echo "   skip: ホストに ${CC:-gcc} が無い (突き合わせる相手がいない)"
+else
+    sh tools/diff17.sh os > "$out/diff17os.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/diff17os.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: libc の値が我々の OS とホストで一致する"
+fi
+
 summary

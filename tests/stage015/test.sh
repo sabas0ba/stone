@@ -186,11 +186,15 @@ section "差分試験 (我々の鎖とホストの処理系で値を突き合わ
 # 我々が書いていない物差しと突き合わせて初めて出た
 # (docs/stage017-gcc.md 5.2)。
 #
-# 走行は 90 秒ほど。飛ばすものは名前と理由を tools/diff17.sh が必ず出す
+# 走行は 90 秒ほど。飛ばすものは名前と理由を tools/diff17.sh が必ず出す。
+#
+# ここで見るのは**前置部だけで走る側** (bare) である。libc を繋いで
+# OS の上で走らせる側は Stage 17 の生成物 (libc21 / kernel24) を要る
+# ので tests/stage017 が見る (docs/stage017-gcc.md 5.3)
 if ! command -v "${CC:-gcc}" > /dev/null 2>&1; then
     echo "   skip: ホストに ${CC:-gcc} が無い (突き合わせる相手がいない)"
 else
-    sh tools/diff17.sh > tmp/s15/diff17.log 2>&1
+    sh tools/diff17.sh bare > tmp/s15/diff17.log 2>&1
     r=$?
     sed 's/^/   /' tmp/s15/diff17.log
     [ "$r" -eq 0 ]
