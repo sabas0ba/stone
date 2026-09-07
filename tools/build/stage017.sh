@@ -149,6 +149,27 @@ build_stage017() {
             -- libc21_run "$f" "$n"
     done
 
+    # libc の第 22 世代 (5.3)。libc21 との差は，**ホストと突き合わせて
+    # 出た C89 との食い違い** —— printf の旗と精度と %o / %X，%f の
+    # 丸め，strtoul / strtoull の空白と endptr である。
+    #
+    # **訳す器が libc21 までと違う。** 第 21 世代までは cc15k で訳して
+    # いたが，この世代を測るプローブは最前線の cc15v で訳す。器と libc の
+    # 世代が食い違っていると，出た差がどちらのものか言えなくなる
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal; do
+        n=$(echo "$f" | tr / _)
+        step "l22_$n" "l22_$n.o" \
+            -- "stage017/libc22/$f.c" \
+               stage017/libc22/include/*.h \
+               stage017/libc22/include/sys/time.h \
+               stage017/libc22/include/sys/stat.h \
+               stage017/libc22/include/sys/types.h \
+               tmp/build/cc15v.bin tmp/build/pp.bin \
+            -- libc22_run "$f" "$n"
+    done
+
     # 前処理器の第 17 世代 (第 3 部の 3 の 2)。-I を探す道として持つ。
     # **libc を繋がない** —— sys_* は 'E' 前置部のものを直に呼ぶ
     # (docs/stage017-cc.md 17 章)
@@ -216,6 +237,18 @@ libc21_run() {
     sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l21_$2.i" \
         > "tmp/build/l21_$2.o"
     echo "built tmp/build/l21_$2.o" >&2
+}
+
+libc22_run() {
+    sh tools/bundle.sh stage017/libc22/include/*.h \
+        "sys/time.h=stage017/libc22/include/sys/time.h" \
+        "sys/stat.h=stage017/libc22/include/sys/stat.h" \
+        "sys/types.h=stage017/libc22/include/sys/types.h" \
+        "stage017/libc22/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l22_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15v.bin < "tmp/build/l22_$2.i" \
+        > "tmp/build/l22_$2.o"
+    echo "built tmp/build/l22_$2.o" >&2
 }
 
 libc20_run() {
@@ -335,6 +368,10 @@ do_stage017() {
         l21_src_morecore.o l21_src_misc15.o \
         l21_posix_sys.o l21_posix_morecore.o l21_posix_stdio.o \
         l21_posix_assert.o l21_posix_dir.o l21_posix_signal.o \
+        l22_src_string.o l22_src_ctype.o l22_src_stdlib.o \
+        l22_src_morecore.o l22_src_misc15.o \
+        l22_posix_sys.o l22_posix_morecore.o l22_posix_stdio.o \
+        l22_posix_assert.o l22_posix_dir.o l22_posix_signal.o \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
@@ -347,6 +384,8 @@ do_stage017() {
            stage017/libc20/src/*.c stage017/libc20/posix/*.c \
            stage017/libc21/include/*.h stage017/libc21/include/sys/*.h \
            stage017/libc21/src/*.c stage017/libc21/posix/*.c \
+           stage017/libc22/include/*.h stage017/libc22/include/sys/*.h \
+           stage017/libc22/src/*.c stage017/libc22/posix/*.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh
