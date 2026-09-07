@@ -228,6 +228,7 @@ os_build() {
     # **落ちた ld の言い分は出力ファイルの中身である** (ld の標準出力は
     # 像なので。tools/ext17.sh do_run と同じ)。中身の有無では判らない
     # ので，見るのは終了状態のほうである
+    # shellcheck disable=SC2086
     { printf 'E'; cat "$osout/$_n.o" $_objs; printf '\0'; } \
         | sh tools/env.sh qemu "$osld" > "$osout/bin/$_n" 2> /dev/null \
         || return 4
@@ -313,15 +314,14 @@ os_run_all() {
             /^@@/   { on = 0 }
             on      { print }
         ' "$osout/run.out" > "$osout/$_n.ours"
-        "$HOSTCC" -w -include "$shim" -o "$osout/h_$_n" "$(os_src "$_n")" -lm \
-            > "$osout/h_$_n.log" 2>&1
-        if [ $? -ne 0 ]; then
+        if ! "$HOSTCC" -w -include "$shim" -o "$osout/h_$_n" \
+                "$(os_src "$_n")" -lm > "$osout/h_$_n.log" 2>&1; then
             printf 'FAIL %-14s 我々は通すがホストが翻訳できない (%s)\n' \
                 "$_n" "$osout/h_$_n.log"
             fail=$((fail + 1)); continue
         fi
-        timeout 30 "$osout/h_$_n" < /dev/null > "$osout/$_n.host" 2> /dev/null
-        if [ $? -ne 0 ]; then
+        if ! timeout 30 "$osout/h_$_n" < /dev/null > "$osout/$_n.host" \
+                2> /dev/null; then
             printf 'FAIL %-14s ホストの実行が落ちた\n' "$_n"
             fail=$((fail + 1)); continue
         fi
