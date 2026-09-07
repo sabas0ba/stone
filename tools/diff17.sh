@@ -225,8 +225,11 @@ os_build() {
         || return 3
     _objs=""
     for _o in $OSLIB; do _objs="$_objs tmp/build/$_o.o"; done
+    # **落ちた ld の言い分は出力ファイルの中身である** (ld の標準出力は
+    # 像なので。tools/ext17.sh do_run と同じ)。中身の有無では判らない
+    # ので，見るのは終了状態のほうである
     { printf 'E'; cat "$osout/$_n.o" $_objs; printf '\0'; } \
-        | sh tools/env.sh qemu "$osld" > "$osout/bin/$_n" 2> "$osout/$_n.ld" \
+        | sh tools/env.sh qemu "$osld" > "$osout/bin/$_n" 2> /dev/null \
         || return 4
     [ -s "$osout/bin/$_n" ] || return 4
     return 0
@@ -260,8 +263,8 @@ os_run_all() {
                 pass=$((pass + 1)); continue
             fi
         else
-            printf 'FAIL %-14s 我々の側で組めない (%s を見よ)\n' "$_n" \
-                "$osout/$_n.ld"
+            printf 'FAIL %-14s 我々の側で組めない (%s/%s の .i と bin/%s を見よ)\n' \
+                "$_n" "$osout" "$_n" "$_n"
         fi
         fail=$((fail + 1))
     done
