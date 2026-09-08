@@ -216,6 +216,26 @@ build_stage017() {
            tmp/build/ld17.bin tmp/build/l22_posix_dir.o \
         -- osprog22_run sed1 stage017/sed1.c
 
+    # 正規表現機構 (5.6)。sed2 と sh3 が分け合う。**写しを 2 つ持たない**
+    step re1 re1.o \
+        -- stage017/re1.c stage017/re1.h tmp/build/cc15aa.bin \
+           tmp/build/pp16.bin \
+        -- osobj22_run re1 stage017/re1.c
+
+    # sed の第 2 世代 (5.6)。機構を re1 へ移しただけで、受ける形は同じ
+    step sed2 sed2 \
+        -- stage017/sed2.c stage017/re1.h tmp/build/re1.o \
+           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog22_run sed2 stage017/sed2.c tmp/build/re1.o
+
+    # シェルの第 3 世代 (5.6)。grep を正規表現へ引き上げ、configure が
+    # 使う道具 (tr / expr / basename / dirname / wc / sort / touch /
+    # chmod) を足したもの
+    step sh3 sh3 \
+        -- stage017/sh3.c stage017/re1.h tmp/build/re1.o \
+           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog22_run sh3 stage017/sh3.c tmp/build/re1.o
+
     step kernel25 kernel25.bin \
         -- stage017/kernel25.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
@@ -250,23 +270,40 @@ libc21_run() {
 # **新しい道具はここから作る** —— 凍結した世代 (libc19 / cc15p) は
 # 既存の成果物のためのもので，新しく書くものを縛る理由が無い
 osprog22_run() {
+    _nm=$1
+    _src=$2
+    shift 2
     sh tools/bundle.sh stage017/libc22/include/*.h \
         "sys/time.h=stage017/libc22/include/sys/time.h" \
         "sys/stat.h=stage017/libc22/include/sys/stat.h" \
         "sys/types.h=stage017/libc22/include/sys/types.h" \
-        "$2" \
-        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
-    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${1}.i" \
-        > "tmp/build/${1}.o"
-    { printf 'E'; cat "tmp/build/${1}.o" \
+        stage017/re1.h "$_src" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${_nm}.i"
+    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${_nm}.i" \
+        > "tmp/build/${_nm}.o"
+    # shellcheck disable=SC2086
+    { printf 'E'; cat "tmp/build/${_nm}.o" $* \
         tmp/build/l22_src_string.o tmp/build/l22_src_ctype.o \
         tmp/build/l22_src_stdlib.o tmp/build/l22_src_misc15.o \
         tmp/build/l22_posix_sys.o tmp/build/l22_posix_morecore.o \
         tmp/build/l22_posix_stdio.o tmp/build/l22_posix_assert.o \
         tmp/build/l22_posix_dir.o tmp/build/l22_posix_signal.o \
         tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
-        | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/build/$1"
-    echo "built tmp/build/$1" >&2
+        | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/build/$_nm"
+    echo "built tmp/build/$_nm" >&2
+}
+
+# 道具どうしで分け合う部品を 1 つ .o にする (re1 が最初)
+osobj22_run() {
+    sh tools/bundle.sh stage017/libc22/include/*.h \
+        "sys/time.h=stage017/libc22/include/sys/time.h" \
+        "sys/stat.h=stage017/libc22/include/sys/stat.h" \
+        "sys/types.h=stage017/libc22/include/sys/types.h" \
+        stage017/re1.h "$2" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
+    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${1}.i" \
+        > "tmp/build/${1}.o"
+    echo "built tmp/build/${1}.o" >&2
 }
 
 libc22_run() {
@@ -384,7 +421,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 sed1 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 sed1 re1.o sed2 sh3 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin kernel25.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -407,7 +444,8 @@ do_stage017() {
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
            stage017/mk20.c \
            stage017/kernel23.c stage017/kernel24.c stage017/kernel25.c \
-           stage017/sed1.c \
+           stage017/sed1.c stage017/re1.c stage017/re1.h \
+           stage017/sed2.c stage017/sh3.c \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \

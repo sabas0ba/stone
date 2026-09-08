@@ -162,10 +162,10 @@ else
     #
     # 起動は 1 回だけ。1 つの像に台本と入力を詰め，シェル (sh2) に
     # 順に起動させて `@@名前` の行で切り分ける (tools/diff17.sh と同じ手)
-    for f in tmp/build/sed1 tmp/build/sh2.bin tmp/build/kernel24.bin; do
+    for f in "${STONE_OSSED:-tmp/build/sed2}" tmp/build/sh2.bin tmp/build/kernel24.bin; do
         [ -s "$f" ] || { echo "error: $f が無い (sh tools/build.sh stage017)" >&2; exit 1; }
     done
-    cp tmp/build/sed1 "$out/root/sed"
+    cp "${STONE_OSSED:-tmp/build/sed2}" "$out/root/sed"
     cp tmp/build/sh2.bin "$out/root/sh2"
     : > "$out/root/go.sh"
     while read -r inf q scr; do

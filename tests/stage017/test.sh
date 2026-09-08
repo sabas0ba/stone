@@ -1324,6 +1324,20 @@ else
     report $? "diff: sed の出力が我々の OS とホストで一致する"
 fi
 
+section "道具 --- 我々の OS の道具をホストの同名の道具と突き合わせる (5.6)"
+
+# grep (正規表現)・tr・expr・basename・dirname・wc・sort。**無いと
+# configure は落ちるのではなく，空の値を掴んで進む**
+if ! command -v tr > /dev/null 2>&1; then
+    echo "   skip: ホストに tr が無い"
+else
+    sh tools/difftool.sh > "$out/difftool.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/difftool.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: 道具の出力が我々の OS とホストで一致する"
+fi
+
 section "差分試験の OS 側 (libc を我々の OS の上でホストと突き合わせる)"
 
 # **libc の穴は，我々が書いた期待値では出ない。** 我々は自分が使う
