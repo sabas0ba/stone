@@ -111,3 +111,9 @@ desig        ok   abcdefghij\n
 # GNU の文式 ({ 文...; 式; })。GCC とカーネルのヘッダが max / min を
 # この形で書くので、**呼ぶ側のソースを直しても避けられない**。
 stmtexpr     ok   abcdefg\n
+
+# ---- C89 の外側 第 4 陣 (cc15z。docs/stage018-ext.md 9) ----
+#
+# typeof / __typeof__。カーネルのヘッダが container_of / min / max を
+# 文式と組で書く。式の型だけが要るので、出したコードを捨てて読む。
+typeofx      ok   abcdefg\n
