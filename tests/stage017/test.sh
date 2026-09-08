@@ -1306,6 +1306,24 @@ bigsize '\377\377\377\377' "$out/neg4.out"
 grep -qx 'S' "$out/neg4.out"
 report $? "run: 2^31 を超える大きさも 'S' で拒む (符号なしで比べている)"
 
+section "sed --- 我々の OS の上でホストの sed と突き合わせる (5.5)"
+
+# **我々の OS には正規表現が 1 つも無かった。** autoconf の configure は
+# ほぼすべてを sed でやるので，4.2 はここで止まる。
+#
+# 測るのは我々が書いた期待値ではなく**ホストの sed の出力**である
+# (tools/diffsed.sh)。台本は autoconf の configure が使う形を選んである。
+# 走行は 1 回の起動に全件を詰めてある (1 分ほど)
+if ! command -v sed > /dev/null 2>&1; then
+    echo "   skip: ホストに sed が無い (突き合わせる相手がいない)"
+else
+    sh tools/diffsed.sh os > "$out/diffsed.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/diffsed.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: sed の出力が我々の OS とホストで一致する"
+fi
+
 section "差分試験の OS 側 (libc を我々の OS の上でホストと突き合わせる)"
 
 # **libc の穴は，我々が書いた期待値では出ない。** 我々は自分が使う

@@ -209,6 +209,13 @@ build_stage017() {
 
     # カーネルの第 25 世代。kernel24 との差は sfs4 と配置だけ
     # (docs/stage017-gcc.md 7 章)
+    # sed の第 1 世代 (docs/stage017-gcc.md 5.5)。正規表現機構を持つ
+    # 最初の道具である。GCC の configure は sed 無しでは 1 行も進まない
+    step sed1 sed1 \
+        -- stage017/sed1.c tmp/build/cc15aa.bin tmp/build/pp16.bin \
+           tmp/build/ld17.bin tmp/build/l22_posix_dir.o \
+        -- osprog22_run sed1 stage017/sed1.c
+
     step kernel25 kernel25.bin \
         -- stage017/kernel25.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
@@ -237,6 +244,29 @@ libc21_run() {
     sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l21_$2.i" \
         > "tmp/build/l21_$2.o"
     echo "built tmp/build/l21_$2.o" >&2
+}
+
+# libc22 と最前線の器で組む OS プログラム (osprog19_run の第 22 世代版)。
+# **新しい道具はここから作る** —— 凍結した世代 (libc19 / cc15p) は
+# 既存の成果物のためのもので，新しく書くものを縛る理由が無い
+osprog22_run() {
+    sh tools/bundle.sh stage017/libc22/include/*.h \
+        "sys/time.h=stage017/libc22/include/sys/time.h" \
+        "sys/stat.h=stage017/libc22/include/sys/stat.h" \
+        "sys/types.h=stage017/libc22/include/sys/types.h" \
+        "$2" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
+    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${1}.i" \
+        > "tmp/build/${1}.o"
+    { printf 'E'; cat "tmp/build/${1}.o" \
+        tmp/build/l22_src_string.o tmp/build/l22_src_ctype.o \
+        tmp/build/l22_src_stdlib.o tmp/build/l22_src_misc15.o \
+        tmp/build/l22_posix_sys.o tmp/build/l22_posix_morecore.o \
+        tmp/build/l22_posix_stdio.o tmp/build/l22_posix_assert.o \
+        tmp/build/l22_posix_dir.o tmp/build/l22_posix_signal.o \
+        tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/build/$1"
+    echo "built tmp/build/$1" >&2
 }
 
 libc22_run() {
@@ -354,7 +384,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 sed1 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin kernel25.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -377,6 +407,7 @@ do_stage017() {
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
            stage017/mk20.c \
            stage017/kernel23.c stage017/kernel24.c stage017/kernel25.c \
+           stage017/sed1.c \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \

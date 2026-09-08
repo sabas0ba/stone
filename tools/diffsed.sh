@@ -2,8 +2,8 @@
 # 我々の sed とホストの sed に**同じ台本と同じ入力**を食わせ，出力を
 # 突き合わせる (docs/stage017-gcc.md 5.5)。
 #
-#   sh tools/diffsed.sh          全部
-#   sh tools/diffsed.sh <番号>   1 つだけ
+#   sh tools/diffsed.sh        ホストで組んだ我々の sed と突き合わせる
+#   sh tools/diffsed.sh os     **我々の OS の上で走らせた** sed と突き合わせる
 #
 # ## なぜ要るか
 #
@@ -12,32 +12,26 @@
 # 閉じ方) は**実物と突き合わせないと決まらない**。差分試験を libc へ
 # 広げたとき (5.3) と同じ筋である。
 #
-# ## どちらの sed を測るか
+# ## 台本はファイルに置く
 #
-#   STONE_SED=tmp/sedhost   ホストの gcc で組んだ我々の sed (既定)
-#   STONE_SED=<OS 側>       我々の OS の上で走らせたもの (tests/stage017)
-#
-# ホスト側で組んだものを既定にするのは，**同じソースだから**である ——
-# 直しの往復はこちらで回し，OS の上での走行は tests/stage017 が見る。
+# 引数ではなく `-f` で渡す。**引用の差を測ってしまわないため**である
+# —— 我々のシェルとホストのシェルで `;` や `{` の扱いが違えば，sed の
+# 差ではないものが差として出る。
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 
+mode=${1:-host}
 out=tmp/dsed
-mkdir -p "$out"
+rm -rf "$out"
+mkdir -p "$out/root"
 
 OURS=${STONE_SED:-tmp/sedhost}
 HOSTSED=${HOSTSED:-sed}
 
-if [ ! -x "$OURS" ]; then
-    echo "error: $OURS が無い (gcc -w -o tmp/sedhost stage017/sed1.c)" >&2
-    exit 1
-fi
-
-# 入力の台本。**我々のソースが使う形ではなく，autoconf の configure が
-# 使う形**を選んである —— 変数の差し替え・行の抜き出し・字の入替え
-cat > "$out/in1.txt" <<'EOF'
+# ---- 入力 ----
+cat > "$out/root/in1.txt" <<'EOF'
 hello world
   leading spaces
 ac_cv_prog_CC=gcc
@@ -48,7 +42,7 @@ aaa bbb aaa
 x
 EOF
 
-cat > "$out/in2.txt" <<'EOF'
+cat > "$out/root/in2.txt" <<'EOF'
 one
 two
 three
@@ -56,98 +50,158 @@ four
 five
 EOF
 
-# 台本と入力の組。1 行 1 件で "入力|台本" の形にする
-run_one() {
-    n=$1
-    inf=$2
-    shift 2
-    "$OURS" "$@" < "$inf" > "$out/ours.$n" 2> "$out/ours.$n.err"
-    orc=$?
-    "$HOSTSED" "$@" < "$inf" > "$out/host.$n" 2> "$out/host.$n.err"
-    hrc=$?
-    if [ "$orc" -ne "$hrc" ]; then
-        printf 'FAIL %-3s 終了コードが違う (我々 %s / ホスト %s): %s\n' \
-            "$n" "$orc" "$hrc" "$*"
-        fail=$((fail + 1))
-        return 1
+# ---- 台本 ----
+# 1 件 = 入力・-n の有無・台本。**autoconf の configure が使う形**を選ぶ
+ncase=0
+mkcase() {
+    ncase=$((ncase + 1))
+    n=$ncase
+    [ "$n" -lt 10 ] && n="0$n"
+    printf '%s\n' "$3" > "$out/root/s$n.sed"
+    printf '%s %s s%s.sed\n' "$1" "$2" "$n" >> "$out/cases"
+}
+
+: > "$out/cases"
+mkcase in1.txt 0 's/hello/HELLO/'
+mkcase in1.txt 0 's/o/0/'
+mkcase in1.txt 0 's/o/0/g'
+mkcase in1.txt 0 's/o/0/2'
+mkcase in1.txt 0 's/aaa/X/g'
+mkcase in1.txt 0 's/^/> /'
+mkcase in1.txt 0 's/$/ <EOL>/'
+mkcase in1.txt 0 's/^ *//'
+mkcase in1.txt 0 's/  *$//'
+mkcase in1.txt 0 's/[aeiou]/./g'
+mkcase in1.txt 0 's/[^a-z ]/#/g'
+mkcase in1.txt 0 's/[a-z][a-z]*/W/g'
+mkcase in1.txt 0 's/\(a*\)b/[\1]/g'
+mkcase in1.txt 0 's/\([a-z_]*\)=\(.*\)/\2 is \1/'
+mkcase in1.txt 0 's/\(.\)\1/<\1\1>/g'
+mkcase in1.txt 0 's/^\(ac_cv_[a-z_]*\)=\(.*\)$/\1 -> \2/'
+mkcase in1.txt 0 's/world/[&]/'
+mkcase in1.txt 0 's/world/\&/'
+mkcase in1.txt 0 's/o/\n/g'
+mkcase in1.txt 0 's/x*/-/g'
+mkcase in1.txt 0 's/ *//g'
+mkcase in1.txt 0 'y/abc/ABC/'
+mkcase in2.txt 1 '2p'
+mkcase in2.txt 1 '$p'
+mkcase in2.txt 1 '2,4p'
+mkcase in2.txt 0 '2d'
+mkcase in2.txt 0 '2,4d'
+mkcase in2.txt 1 '/three/p'
+mkcase in2.txt 0 '/three/d'
+mkcase in2.txt 1 '/two/,/four/p'
+mkcase in2.txt 1 '/two/,$p'
+mkcase in2.txt 0 '/two/!d'
+mkcase in2.txt 1 '='
+mkcase in2.txt 0 '2q'
+mkcase in2.txt 1 '1{
+p
+p
+}'
+mkcase in2.txt 0 's/one/1/
+s/two/2/'
+mkcase in2.txt 1 's/two/2/p'
+mkcase in2.txt 1 'N
+P'
+mkcase in2.txt 0 'n
+d'
+mkcase in2.txt 1 ':a
+/three/{
+p
+b a2
+}
+b
+:a2'
+
+pass=0
+fail=0
+
+# ---- ホスト側の答を作る ----
+while read -r inf q scr; do
+    if [ "$q" = 1 ]; then
+        "$HOSTSED" -n -f "$out/root/$scr" < "$out/root/$inf" \
+            > "$out/host.$scr" 2> /dev/null
+    else
+        "$HOSTSED" -f "$out/root/$scr" < "$out/root/$inf" \
+            > "$out/host.$scr" 2> /dev/null
     fi
-    if cmp -s "$out/ours.$n" "$out/host.$n"; then
-        printf 'ok   %-3s %s\n' "$n" "$*"
+done < "$out/cases"
+
+cmpcase() {
+    scr=$1
+    if cmp -s "$out/ours.$scr" "$out/host.$scr"; then
+        printf 'ok   %-10s %s\n' "$scr" "$(head -n 1 "$out/root/$scr")"
         pass=$((pass + 1))
         return 0
     fi
-    printf 'FAIL %-3s 出力が違う: %s\n' "$n" "$*"
-    diff -u "$out/host.$n" "$out/ours.$n" | sed -n '3,12p' | sed 's/^/       /'
+    printf 'FAIL %-10s %s\n' "$scr" "$(head -n 1 "$out/root/$scr")"
+    diff -u "$out/host.$scr" "$out/ours.$scr" | sed -n '3,12p' | sed 's/^/       /'
     fail=$((fail + 1))
     return 1
 }
 
-pass=0
-fail=0
-want=${1:-}
-n=0
+if [ "$mode" = host ]; then
+    if [ ! -x "$OURS" ]; then
+        echo "error: $OURS が無い (gcc -w -o tmp/sedhost stage017/sed1.c)" >&2
+        exit 1
+    fi
+    while read -r inf q scr; do
+        if [ "$q" = 1 ]; then
+            "$OURS" -n -f "$out/root/$scr" < "$out/root/$inf" \
+                > "$out/ours.$scr" 2> /dev/null
+        else
+            "$OURS" -f "$out/root/$scr" < "$out/root/$inf" \
+                > "$out/ours.$scr" 2> /dev/null
+        fi
+        cmpcase "$scr"
+    done < "$out/cases"
+else
+    # ---- 我々の OS の上で走らせる ----
+    #
+    # 起動は 1 回だけ。1 つの像に台本と入力を詰め，シェル (sh2) に
+    # 順に起動させて `@@名前` の行で切り分ける (tools/diff17.sh と同じ手)
+    for f in tmp/build/sed1 tmp/build/sh2.bin tmp/build/kernel24.bin; do
+        [ -s "$f" ] || { echo "error: $f が無い (sh tools/build.sh stage017)" >&2; exit 1; }
+    done
+    cp tmp/build/sed1 "$out/root/sed"
+    cp tmp/build/sh2.bin "$out/root/sh2"
+    : > "$out/root/go.sh"
+    while read -r inf q scr; do
+        printf 'echo @@%s\n' "$scr" >> "$out/root/go.sh"
+        if [ "$q" = 1 ]; then
+            printf 'sed -n -f %s < %s\n' "$scr" "$inf" >> "$out/root/go.sh"
+        else
+            printf 'sed -f %s < %s\n' "$scr" "$inf" >> "$out/root/go.sh"
+        fi
+    done < "$out/cases"
+    printf 'echo @@end\n' >> "$out/root/go.sh"
+    printf 'sh2 go.sh\n' > "$out/root/boot"
 
-case1() {
-    n=$((n + 1))
-    if [ -n "$want" ] && [ "$want" != "$n" ]; then return 0; fi
-    _in=$1
-    shift
-    run_one "$n" "$out/$_in" "$@"
-}
-
-# ---- s の基本 ----
-case1 in1.txt 's/hello/HELLO/'
-case1 in1.txt 's/o/0/'
-case1 in1.txt 's/o/0/g'
-case1 in1.txt 's/o/0/2'
-case1 in1.txt 's/aaa/X/g'
-case1 in1.txt 's/^/> /'
-case1 in1.txt 's/$/ <EOL>/'
-case1 in1.txt 's/^ *//'
-case1 in1.txt 's/  *$//'
-# ---- 文字級 ----
-case1 in1.txt 's/[aeiou]/./g'
-case1 in1.txt 's/[^a-z ]/#/g'
-case1 in1.txt 's/[a-z][a-z]*/W/g'
-# ---- 組と後方参照 ----
-case1 in1.txt 's/\(a*\)b/[\1]/g'
-case1 in1.txt 's/\([a-z_]*\)=\(.*\)/\2 is \1/'
-case1 in1.txt 's/\(.\)\1/<\1\1>/g'
-case1 in1.txt 's/^\(ac_cv_[a-z_]*\)=\(.*\)$/\1 -> \2/'
-# ---- & と逃げ ----
-case1 in1.txt 's/world/[&]/'
-case1 in1.txt 's/world/\&/'
-case1 in1.txt 's/o/\n/g'
-# ---- 空に合う形 ----
-case1 in1.txt 's/x*/-/g'
-case1 in1.txt 's/ *//g'
-# ---- 番地 ----
-case1 in2.txt -n '2p'
-case1 in2.txt -n '$p'
-case1 in2.txt -n '2,4p'
-case1 in2.txt '2d'
-case1 in2.txt '2,4d'
-case1 in2.txt -n '/three/p'
-case1 in2.txt '/three/d'
-case1 in2.txt -n '/two/,/four/p'
-case1 in2.txt -n '/two/,$p'
-case1 in2.txt '/two/!d'
-case1 in2.txt -n '='
-case1 in2.txt '2q'
-case1 in2.txt -n '1{p;p;}'
-# ---- 複数の -e と ; ----
-case1 in2.txt -e 's/one/1/' -e 's/two/2/'
-case1 in2.txt 's/one/1/;s/two/2/'
-# ---- y ----
-case1 in1.txt 'y/abc/ABC/'
-# ---- p 旗 ----
-case1 in2.txt -n 's/two/2/p'
-# ---- n と N ----
-case1 in2.txt -n 'N;P'
-case1 in2.txt 'n;d'
-# ---- b と : ----
-case1 in2.txt -n ':a;/three/{p;b a2;};b;:a2'
+    sh tools/sfs3.sh pack "$out/root" "$out/fs.img" 16777216 256 > /dev/null \
+        && rm -f "$out/ram" \
+        && dd if=/dev/null of="$out/ram" bs=1 seek=536870912 2> /dev/null \
+        && dd if="$out/fs.img" of="$out/ram" bs=64K oflag=seek_bytes \
+            seek=67108864 conv=notrunc 2> /dev/null \
+        && STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-900} \
+            STONE_QEMU_RAMFILE="$out/ram" STONE_QEMU_RAM=512M \
+            sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+            > "$out/run.out" 2>&1
+    if ! grep -q '^@@end$' "$out/run.out"; then
+        echo "FAIL 走行が最後まで届かなかった ($out/run.out を見よ)"
+        exit 1
+    fi
+    while read -r inf q scr; do
+        awk -v n="@@$scr" '
+            $0 == n { on = 1; next }
+            /^@@/   { on = 0 }
+            on      { print }
+        ' "$out/run.out" > "$out/ours.$scr"
+        cmpcase "$scr"
+    done < "$out/cases"
+fi
 
 echo
-echo "diffsed: 一致 $pass / 食い違い $fail"
+echo "diffsed ($mode): 一致 $pass / 食い違い $fail"
 [ "$fail" -eq 0 ]
