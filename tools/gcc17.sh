@@ -2,6 +2,7 @@
 # GCC 4.7.4 を Stage 17 の測定対象として扱う。
 #
 #   gcc17.sh measure   取得済みソースと現在の sfs4/kernel25 の容量を比較する
+#   gcc17.sh pack      全配布木を窓と同じ大きさの sfs4 に実際に詰める (手動)
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 #
@@ -11,6 +12,21 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# 作業用の表の項目数。
+#
+# **最小 image は「読むだけ」の値である。** 表を実測ちょうど (81,356) で
+# 切ると，ゲストは file を 1 つも作れない。GCC を組む間に出る .o や .a は
+# 表に項目を要るので，詰める側は最初から余りを持たせる。
+#
+# 2^17 は実測の 81,356 を超える最小の 2 の冪で，49,716 項目の余りが残る。
+# 項目幅が 128 バイトなので表は 16 MiB 丁度になり，窓 512 MiB のうち
+# data 領域に 52,491,992 バイトの余りが残る (docs/stage017-gcc.md 7.4)。
+#
+# STONE_SFS4_WORKSPACE_ENTRIES で下げられる。**pack の経路そのものを
+# 現実的な時間で検査するため**である。この shell 実装は表の空き枠も
+# 1 つずつ走査するので，131,072 枠のままでは検査に数十分かかる。
+WORKSPACE_ENTRIES=${STONE_SFS4_WORKSPACE_ENTRIES:-131072}
 if [ -n "${STONE_GCC47_SRC:-}" ]; then
     src=$STONE_GCC47_SRC
     src_name=$(basename "$src")
@@ -109,16 +125,30 @@ measure() {
     [ -n "$sfstop" ] || die "kernel25 の SFSTOP を読めない"
     sfs_window_bytes=$((sfstop - sfsa))
 
+    # 作業用に表を広げた場合。**表は先に切ってしまうので，余りは data
+    # 領域だけに残る。** ここが GCC を組む間に出る生成物の置き場になる
+    workspace_table_bytes=$((table_offset + WORKSPACE_ENTRIES * entry_size))
+    workspace_used_bytes=$((workspace_table_bytes + padded_file_bytes))
+    workspace_free_entries=$((WORKSPACE_ENTRIES - table_entries))
+    workspace_headroom_bytes=$((sfs_window_bytes - workspace_used_bytes))
+
     fits_name_limit=yes
     [ "$names_over_limit" -eq 0 ] || fits_name_limit=no
     fits_entry_types=yes
     fits_window=yes
+    fits_workspace=yes
     if [ "$unsupported_entries" -ne 0 ]; then
         minimum_image_bytes=unknown
+        workspace_used_bytes=unknown
+        workspace_headroom_bytes=unknown
         fits_entry_types=no
         fits_window=unknown
-    elif [ "$minimum_image_bytes" -gt "$sfs_window_bytes" ]; then
-        fits_window=no
+        fits_workspace=unknown
+    else
+        [ "$minimum_image_bytes" -le "$sfs_window_bytes" ] || fits_window=no
+        # 余りが負なら，木そのものが予約した項目数に入っていない
+        [ "$workspace_free_entries" -ge 0 ] || fits_workspace=no
+        [ "$workspace_headroom_bytes" -ge 0 ] || fits_workspace=no
     fi
 
     cat <<EOF
@@ -142,17 +172,100 @@ sfs4-table-entries=$table_entries
 sfs4-table-bytes=$table_bytes
 sfs4-minimum-image-bytes=$minimum_image_bytes
 kernel25-sfs-window-bytes=$sfs_window_bytes
+sfs4-workspace-table-entries=$WORKSPACE_ENTRIES
+sfs4-workspace-free-entries=$workspace_free_entries
+sfs4-workspace-used-bytes=$workspace_used_bytes
+sfs4-workspace-headroom-bytes=$workspace_headroom_bytes
 fits-entry-types=$fits_entry_types
 fits-name-limit=$fits_name_limit
 fits-kernel25-window=$fits_window
+fits-kernel25-workspace=$fits_workspace
+EOF
+}
+
+# 全配布木を，窓と同じ大きさの sfs4 に実際に詰めて，詰めた結果を検算する。
+#
+# **見積りと実物は別である。** measure は表の幅と詰めた大きさから下限を
+# 出すだけで，pack がその規模を通せるかは見ていない。深さ 12・81,355 経路
+# という規模では，並び順や親の索引付けなど計算に出ない所で落ちうる
+# (実際に深さ 10 以上で落ちる誤りが後から見つかっている)。
+#
+# **CI では回さない。** tools/sfs4.sh の pack は項目ごとに dd と od を呼ぶ
+# POSIX shell であり，81,356 項目では数時間かかる。手で測るための手順として
+# 置く。進行は SFS4_PROGRESS で stderr へ出る
+# (docs/stage017-gcc.md 7.5)。
+pack() {
+    [ -d "$src" ] || die "詰める木が無い: $src (sh tools/fetch.sh gcc47)"
+
+    # sfs4 が表現できない entry があれば，詰めた結果は木と一致しない。
+    # 数だけ数えて先へ進むと「全部載った」と誤読するので，名指しで止める
+    link=$(find "$src" -type l -print -quit)
+    other=$(find "$src" ! -type f ! -type d ! -type l -print -quit)
+    [ -z "$link" ] || die "symbolic link は sfs4 に載らない: $link"
+    [ -z "$other" ] || die "未対応の entry は sfs4 に載らない: $other"
+
+    files=$(find "$src" -type f -printf '.\n' | wc -l | tr -d ' ')
+    directories=$(find "$src" -type d -printf '.\n' | wc -l | tr -d ' ')
+    table_entries=$((files + directories))
+    paths=$((table_entries - 1))            # ルートは経路を持たない
+    padded_file_bytes=$(find "$src" -type f -printf '%s\n' | awk '
+        { padded += int(($1 + 3) / 4) * 4 }
+        END { printf "%.0f", padded }
+    ')
+
+    table_offset=$(constant "$repo_root/tools/sfs4.sh" TBLOFF)
+    entry_size=$(constant "$repo_root/tools/sfs4.sh" ENTSZ)
+    [ -n "$table_offset" ] || die "sfs4 の表位置を読めない"
+    [ -n "$entry_size" ] || die "sfs4 の項目幅を読めない"
+
+    # ゲストが載せられる上限そのもので詰める。ここを超えた image は
+    # kernel25 が S を出して拒む (docs/stage017-gcc.md 7.2)
+    sfsa=$(define "$repo_root/stage017/kernel25.c" SFSA)
+    sfstop=$(define "$repo_root/stage017/kernel25.c" SFSTOP)
+    [ -n "$sfsa" ] || die "kernel25 の SFSA を読めない"
+    [ -n "$sfstop" ] || die "kernel25 の SFSTOP を読めない"
+    image_bytes=$((sfstop - sfsa))
+
+    out="$repo_root/tmp/g17"
+    image="$out/gcc47.sfs4"
+    mkdir -p "$out"
+    SFS4_PROGRESS=1 sh "$repo_root/tools/sfs4.sh" pack "$src" "$image" \
+        "$image_bytes" "$WORKSPACE_ENTRIES"
+
+    [ "$(dd if="$image" bs=4 count=1 2> /dev/null)" = sfs4 ] \
+        || die "詰めた後の magic が sfs4 でない"
+
+    # 頭の 16 バイト目は data の書き込み位置である。表を先に切ってから
+    # 詰めた分だけ進むので，見積りと 1 バイトも違わないはずである
+    cursor=$(od -An -tu4 -j 16 -N 4 "$image" | tr -d ' ')
+    expected=$((table_offset + WORKSPACE_ENTRIES * entry_size \
+        + padded_file_bytes))
+    [ "$cursor" -eq "$expected" ] \
+        || die "使用量が一致しない (expected=$expected image=$cursor)"
+
+    # 詰めた image を読み直して経路の数を数える。表を書く側と読む側の
+    # 両方を通さないと，親の索引付けの誤りが表に出ない
+    packed_paths=$(sh "$repo_root/tools/sfs4.sh" list "$image" | wc -l | tr -d ' ')
+    [ "$packed_paths" -eq "$paths" ] \
+        || die "経路の数が一致しない (source=$paths image=$packed_paths)"
+
+    cat <<EOF
+image=$image
+image-bytes=$image_bytes
+used-bytes=$cursor
+headroom-bytes=$((image_bytes - cursor))
+table-entries=$WORKSPACE_ENTRIES
+free-entries=$((WORKSPACE_ENTRIES - table_entries))
+paths=$packed_paths
 EOF
 }
 
 cmd=${1:-}
 case "$cmd" in
 measure) measure ;;
+pack) pack ;;
 *)
-    echo "usage: gcc17.sh measure" >&2
+    echo "usage: gcc17.sh {measure | pack}" >&2
     exit 2
     ;;
 esac

@@ -589,7 +589,12 @@ printf '1234'  > "$out/mt/d1/b"         # 4 バイト -> 詰めて 4
     printf 'sfs4-table-bytes=800\n'     # 32 + 6 * 128
     printf 'sfs4-minimum-image-bytes=812\n'         # 800 + 12
     printf 'kernel25-sfs-window-bytes=536870912\n'  # 0xc000_0000 - 0xa000_0000
+    printf 'sfs4-workspace-table-entries=131072\n'
+    printf 'sfs4-workspace-free-entries=131066\n'   # 131072 - 6
+    printf 'sfs4-workspace-used-bytes=16777260\n'   # 32 + 131072 * 128 + 12
+    printf 'sfs4-workspace-headroom-bytes=520093652\n'  # 536870912 - 16777260
     printf 'fits-entry-types=yes\nfits-name-limit=yes\nfits-kernel25-window=yes\n'
+    printf 'fits-kernel25-workspace=yes\n'
 } > "$out/mt.want"
 STONE_GCC47_SRC="$PWD/$out/mt" sh tools/gcc17.sh measure > "$out/mt.out" 2>&1
 diff -u "$out/mt.want" "$out/mt.out" > "$out/mt.diff"

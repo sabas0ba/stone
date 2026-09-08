@@ -9,6 +9,11 @@
 #
 # 既定: size = 4194304 (4 MiB), maxent = 256。
 #
+# SFS4_PROGRESS が空でなければ，pack の進行を 1000 項目ごとに stderr へ
+# 出す。**GCC の木は 81,356 項目あり，この shell 実装では数時間かかる。**
+# 何も出ないと止まっているのか進んでいるのか判らないので，切り分けの
+# ために置く (tools/gcc17.sh pack)。
+#
 # sfs3 (tools/sfs3.sh) との違いは**名前の枠が広がったことだけ**である。
 # 項目は 72 -> 128 バイトになり，名前は 48 -> 104 バイト (終端を除いて
 # 103 バイト) を持つ。頭の 32 バイトも，そこから先の並びも sfs3 と同じで，
@@ -152,6 +157,9 @@ pack() {
             cur=$(((cur + len + 3) / 4 * 4))    # 4 バイト境界へ切上げ
         fi
         i=$((i + 1))
+        if [ -n "${SFS4_PROGRESS:-}" ] && [ $((i % 1000)) -eq 0 ]; then
+            echo "sfs4.sh: $i / $cnt entries, $cur bytes" >&2
+        fi
     done < "$list"
     rm -f "$list" "$idx"
     w32 "$img" 16 "$cur"
