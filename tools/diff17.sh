@@ -41,7 +41,7 @@ cd "$repo_root"
 out=tmp/d17
 mkdir -p "$out"
 
-cc=${STONE_DIFF_CC:-tmp/build/cc15z.bin}   # 最前線の世代で測る
+cc=${STONE_DIFF_CC:-tmp/build/cc15aa.bin}  # 最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -107,6 +107,7 @@ beyond_c89() {
     desig)   return 0 ;;
     stmtexpr) return 0 ;;
     typeofx) return 0 ;;
+    caserange) return 0 ;;
     esac
     return 1
 }

@@ -117,3 +117,10 @@ stmtexpr     ok   abcdefg\n
 # typeof / __typeof__。カーネルのヘッダが container_of / min / max を
 # 文式と組で書く。式の型だけが要るので、出したコードを捨てて読む。
 typeofx      ok   abcdefg\n
+
+# ---- C89 の外側 第 5 陣 (cc15aa。docs/stage018-ext.md 11) ----
+#
+# 範囲つき case (case lo ... hi:)。書き換えれば避けられる形ではあるが、
+# 書き換えると 256 行になることがある。空の範囲 (lo > hi) が合致しない
+# ことまで見る。
+caserange    ok   abcdefg\n
