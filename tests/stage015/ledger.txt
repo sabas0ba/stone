@@ -105,3 +105,9 @@ c99decl      ok   abcdefgh\n
 # 場所が 0 になること**まで見る。指示子は書く位置を跳ばすので、跳んだ
 # 手前が埋まらないまま残ると「動くが違う」になる。
 desig        ok   abcdefghij\n
+
+# ---- C89 の外側 第 3 陣 (cc15y。docs/stage018-ext.md 7) ----
+#
+# GNU の文式 ({ 文...; 式; })。GCC とカーネルのヘッダが max / min を
+# この形で書くので、**呼ぶ側のソースを直しても避けられない**。
+stmtexpr     ok   abcdefg\n

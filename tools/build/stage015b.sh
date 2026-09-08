@@ -62,6 +62,9 @@ build_stage015b() {
     # GCC 4.7 の C も Linux も当たり前に使う形で，**触れなかった場所が
     # 0 になること**まで含めて規則である (docs/stage018-ext.md 3.5)
     ccgen cc15x cc15w stage015/cc15x.sc
+    # 第 25 世代。GNU の文式 ({ 文...; 式; })。GCC とカーネルのヘッダが
+    # マクロの中で使う (docs/stage018-ext.md 7)
+    ccgen cc15y cc15x stage015/cc15y.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -83,13 +86,13 @@ do_stage015b() {
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
         cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
-        cc15x0.bin cc15x.bin \
+        cc15x0.bin cc15x.bin cc15y0.bin cc15y.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
            stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
-           stage015/cc15x.sc \
+           stage015/cc15x.sc stage015/cc15y.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
