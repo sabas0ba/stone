@@ -95,9 +95,15 @@ pack() {
     i=1
 
     # ディレクトリを先に作れるよう，経路の浅い順・辞書順に並べる
+    #
+    # **深さの印は 0 詰めにする。** 詰めずに並べると文字列として比べられ，
+    # "10" が "2" より前に来る。深さ 10 以上の木で親より先に子が出て，
+    # pack が "parent not found" で落ちる (GCC 4.7.4 の木は深さ 12)。
+    # tcc の木は深さ 6 だったので，これまで表に出ていなかった
     list=$(mktemp)
     (cd "$dir" && { find . -mindepth 1 -type d | sed 's|^\./||' \
-                        | awk '{print NF"/"$0}' FS=/ | LC_ALL=C sort | cut -d/ -f2-
+                        | awk -v FS=/ '{printf "%03d/%s\n", NF, $0}' \
+                        | LC_ALL=C sort | cut -d/ -f2-
                     find . -mindepth 1 -type f | sed 's|^\./||' | LC_ALL=C sort; }) > "$list"
 
     idx=$(mktemp)

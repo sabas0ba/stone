@@ -435,8 +435,12 @@ sh tools/resume.sh --check    直すべき点を並べるだけ (何も変えな
 することは 4 つである。
 
 1. 追跡している遠隔の枝と突き合わせ，**遅れているときだけ**揃える
-2. `tmp/build` の 0 バイトの生成物を消す
-3. `STONE_ENGINE=host` のときだけ 1.2 のパッチを当て，`skip-worktree` を立てる
+2. `tmp/build` の 0 バイトの生成物を消す。**ただしビルドが走っている間は
+   消さない** —— 生成物は 0 バイトの器を先に作って QEMU が後から埋めるので，
+   その隙に消すと出力が消えた inode へ行き，段が「生成物が空」で落ちる
+   (停止検知の定期実行が走行中のビルドを 1 度壊した)
+3. `STONE_ENGINE=host` のときだけ 1.2 のパッチを当て，`skip-worktree` を立てる。
+   併せて `qemu-system-riscv32` が居ることを確かめ，無ければ止まる (下記)
 4. `--build` / `--test` があれば続きから走らせる (スタンプが効く)
 
 **しないことのほうが大事である。**
@@ -473,6 +477,20 @@ STONE_ENGINE=host sh tools/resume.sh
 に任せられる。**「1 コマンドで済む」わけではない。** 済むのは
 スクリプトが生きているとき (作業木だけが壊れた場合や，巻き戻りが
 浅かった場合) である。
+
+#### QEMU ごと消えることがある
+
+巻き戻りの snapshot は，1.2 の `apt-get install qemu-system-misc` を
+打つ前まで戻ることがある (2026-09-02 に起きた)。このとき `resume.sh --build`
+をそのまま走らせると，最初の段から「生成物が空」で落ち，原因が
+`timeout: failed to run command 'qemu-system-riscv32'` の 1 行に埋もれる。
+`resume.sh` は `STONE_ENGINE=host` のとき QEMU の有無を見て，無ければ
+導入コマンドを示して止まるようにした。戻すのは 1.2 と同じ 1 行である
+(索引が古いと 404 になるので `apt-get update` を先に打つ)。
+
+```sh
+apt-get update && apt-get install -y qemu-system-misc
+```
 
 #### パッチ本文をスクリプトに書き写さないこと
 

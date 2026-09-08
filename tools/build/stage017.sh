@@ -186,7 +186,7 @@ build_stage017() {
            tmp/build/ld16.bin \
         -- kern17 kernel24 stage017/kernel24.c
 
-    # カーネルの第 25 世代。GCC の木に合わせて sfs4 の名前と領域を広げる
+    # カーネルの第 25 世代。kernel24 との差は sfs4 と配置だけ
     # (docs/stage017-gcc.md 7 章)
     step kernel25 kernel25.bin \
         -- stage017/kernel25.c tmp/build/cc15p.bin tmp/build/pp16.bin \

@@ -1,18 +1,45 @@
-/* kernel25.c --- 簡易 OS のカーネル (GCC の木を載せる世代)
+/* kernel25.c --- 簡易 OS のカーネル (Stage 17 第 5 部の世代)
  *
- * kernel24 の写しに sfs4 と広い sfs 領域を入れたものである
- * (docs/stage017-gcc.md 7 章)。
+ * kernel24 の写しに**sfs4 と新しい配置と広い経路**を入れたものである
+ * (docs/stage017-gcc.md 7 章)。変えたのは #define と，起動時に読む
+ * magic と，イメージの大きさの検査だけである。
  *
- *   sfs4          name[48] -> name[128]。最長 127 バイト
- *   sfs 領域      0xa000_0000 -> 0xe000_0000 の 1 GiB
- *   QEMU RAM      この世代を走らせる側が 1536M を明示する
+ *   sfs4      表項目が 72 -> 128 バイトになり，名前の枠が 48 -> 104
+ *             バイト (終端を除いて 103) に広がった。名前より後ろの
+ *             6 語の並びは sfs3 と同じで，頭の 32 バイトも同じ
+ *   SFSA      0x8400_0000 -> 0xa000_0000。窓が 32 MiB -> 512 MiB
+ *   PATHMAX   経路を受ける器が 63 -> 255 バイト (statat / spawn)
  *
- * 0x8000_0000 -> 0xa000_0000 の既存配置は動かさない。UBASE と
- * linker の既定、255 MiB の heap、spawn の退避領域は kernel24 と同じで
- * ある。sfs は従来の 512 MiB RAM の直後へ分離する。
+ * **名前を広げただけでは足りない。** 名前 1 段が 103 バイト持てても，
+ * 経路を受ける器が 63 バイトなら，92 バイトの名前は根に置いても
+ * stat できない。GCC 4.7.4 の木は最長の経路が 131 バイト・深さ 12
+ * なので，そこに余りを足して 255 にした。
  *
- * 以下は kernel24 からの引き継ぎである。kernel24 は kernel23 の写しに
- * **時刻**を入れたものである (docs/stage017-cc.md 11 章)。
+ * **なぜ広げたか。** GCC 4.7.4 の配布木を測ると，名前の最長が 92
+ * バイト，47 バイトを超えるものが 248 個あり，最小のイメージが
+ * 473,459,336 バイト要る (tests/stage017/expected/gcc47-tree.txt)。
+ * sfs3 と kernel24 では名前も容量も届かない。
+ *
+ * **なぜ退避領域より上へ移したか。** 0x8600_0000 より下は 1 バイトも
+ * 動かせない。トラップフレーム (0x8370_0000)・カーネルスタック
+ * (0x8380_0000)・ユーザ像のロード先 (0x8600_0000) は ld16 の前置部に
+ * 機械語として焼き込まれているからである (kernel19 と同じ制約)。
+ * 上へ伸ばすしかなく，SAVETOP (0xa000_0000) の先が唯一の空きである。
+ * RAM を 512 MiB から 1 GiB へ広げ，0xa000_0000〜0xc000_0000 を
+ * sfs に当てた。
+ *
+ *   SFSA    0x8400_0000 -> 0xa000_0000   sfs イメージ
+ *   SFSTOP  (新)           0xc000_0000   その上端 = RAM の終わり
+ *
+ * **0x8400_0000〜0x8600_0000 の 32 MiB が空いた。** 0x8100_0000〜
+ * 0x8370_0000 と合わせ，当面は使わない。
+ *
+ * **イメージが窓に入らなければ起動しない。** 頭の大きさの欄を見て，
+ * 窓を超えるなら 'S' を出して止まる。黙って載せると，はみ出した先は
+ * 何も無い番地なので，書いた中身が消える。
+ *
+ * kernel24 (第 4 部の 1) は時刻を入れた世代である。以下はそれ以前
+ * からの引き継ぎ。
  *
  *   sfs3          表項目が 64 -> 72 バイトになり，末尾に更新時刻
  *                 (epoch からのナノ秒) を u32 2 本で持つ
@@ -195,9 +222,16 @@ int urun(void);
 /* メモリ配置 (docs/stage012-os.md 4.3 / 5.5, docs/stage013-tools.md 3.2) */
 #define TFA     0x83700000      /* トラップフレーム */
 #define SAVEA   0x97000000      /* spawn の退避領域 (ここから上へ積む) */
-#define SAVETOP 0xa0000000      /* 退避領域の上限 (= sfs4 の先頭) */
-#define SFSA    0xa0000000      /* sfs4 イメージ (既存の 512 MiB より上) */
-#define SFSEND  0xe0000000      /* sfs4 の上限 (= 1536 MiB RAM の終わり) */
+#define SAVETOP 0xa0000000      /* 退避領域の上限 (= RAM の終わり) */
+#define SFSA    0xa0000000      /* 共有領域 (sfs イメージ) */
+#define SFSTOP  0xc0000000      /* その上端 (= RAM の終わり) */
+
+/* 経路の上限 (終端を除く)。**名前の上限より深い理由がある。**
+ * 名前 1 段が 103 バイト持てても，経路を受ける器が 63 バイトしか
+ * 無ければ，その名前は stat も spawn もできない。GCC 4.7.4 の木は
+ * 最長の経路が 131 バイト・深さ 12 なので，そこに余りを足して 255 と
+ * した (器は 256 バイト。カーネルスタックは 0x8380_0000 にある) */
+#define PATHMAX 255
 #define UBASE   0x86000000      /* ユーザ像のロード位置 */
 #define USP     0x97000000      /* ユーザのフレームスタック上端 */
 #define UBRKMAX 0x96000000      /* brk の上限 */
@@ -208,17 +242,25 @@ int urun(void);
 #define RTC_LO  0
 #define RTC_HI  4
 
-/* sfs4 の表 (docs/stage017-gcc.md 7 章)。sfs3 から name を
- * 48 -> 128 バイトへ広げた。更新時刻は同じ 2 語である。
+/* sfs4 の表 (docs/stage017-gcc.md 7 章)。sfs3 との違いは**名前の枠が
+ * 48 -> 104 バイトに広がり，項目が 72 -> 128 バイトになった**ことだけ
+ * である。128 は 2 の冪なので，索引から位置を出す算術が軽くなる。
+ * 以下は sfs3 からの引き継ぎ。
  *
- * sfs3 と以前の配置は docs/stage017-cc.md 11.3 に残す。 */
-#define ENTSZ   152
+ * sfs3 の表 (docs/stage017-cc.md 11.3)。sfs2 との違いは**項目が
+ * 64 -> 72 バイトになり，末尾に更新時刻が付いた**ことだけである。
+ * 以下は sfs2 からの引き継ぎ。
+ *
+ * sfs2 の表 (docs/stage016-os.md 6.3)。sfs1 との違いは
+ * **名前が 52 -> 48 に縮み，空いた 4 バイトが親の索引になった**こと。
+ * 項目は 64 バイトのままなので算術は変わらない */
+#define ENTSZ   128
 #define E_NAME  0
-#define NAMEMAX 127
-#define E_PAR   128
-#define E_OFF   132
-#define E_LEN   136
-#define E_FLAG  140
+#define NAMEMAX 103
+#define E_PAR   104
+#define E_OFF   108
+#define E_LEN   112
+#define E_FLAG  116
 #define F_USED  1
 #define F_DIR   2
 /* 消されたが，まだ開いている fd が指している項目 (第 4 部の 1)。
@@ -231,8 +273,8 @@ int urun(void);
 #define F_NULL  8
 
 /* 更新時刻 (epoch からのナノ秒)。**秒に直さない** (11.2) */
-#define E_MTLO  144
-#define E_MTHI  148
+#define E_MTLO  120
+#define E_MTHI  124
 
 /* syscall 番号。Linux 互換 (stage012-os.md 5.4) と独自の拡張
  * (500 番台。stage013-tools.md 3.2) */
@@ -736,11 +778,11 @@ int sys_chdir(unsigned path) {
  * **許可・所有者は返さない。** 持っていない欄を 0 で埋めて名前だけ
  * 揃えると，呼び手が「見た」つもりになる。無いものは無いままにする */
 int sys_statat(int dirfd, unsigned path, unsigned out) {
-  char p[64];
+  char p[PATHMAX + 1];
   int i;
   unsigned e;
   (void)dirfd;                          /* 常に AT_FDCWD 相当 */
-  if (cpystr(p, path, 63) < 0) return 0 - E2BIG;
+  if (cpystr(p, path, PATHMAX) < 0) return 0 - E2BIG;
   i = sfsfind(p);
   if (i < 0) return 0 - ENOENT;
   e = ent(i);
@@ -1068,8 +1110,8 @@ static int spawnerr;
 
 int sys_spawn(unsigned sa) {
   unsigned *tf;
-  char path[64];
-  char name[64];
+  char path[PATHMAX + 1];
+  char name[PATHMAX + 1];
   unsigned argvp;
   unsigned p;
   int ci;
@@ -1087,7 +1129,7 @@ int sys_spawn(unsigned sa) {
 
   tf = (unsigned *)TFA;
   if (depth >= MAXDEP) return 0 - ENOMEM;
-  if (cpystr(path, ld4(sa), 63) < 0) return 0 - E2BIG;
+  if (cpystr(path, ld4(sa), PATHMAX) < 0) return 0 - E2BIG;
   ci = sfsfind(path);
   if (ci < 0) return 0 - ENOENT;
   /* 親を壊す前に，載せられる ELF であることを確かめる。elfok が通れば
@@ -1133,7 +1175,7 @@ int sys_spawn(unsigned sa) {
   ipos = fd0pos;
   p = ld4(sa + 8);
   if (p != 0) {
-    if (cpystr(name, p, 63) < 0) return 0 - E2BIG;
+    if (cpystr(name, p, PATHMAX) < 0) return 0 - E2BIG;
     ie = sfsfind(name);
     if (ie < 0) return 0 - ENOENT;
     ipos = 0;
@@ -1142,7 +1184,7 @@ int sys_spawn(unsigned sa) {
   opos = fd1pos;
   p = ld4(sa + 12);
   if (p != 0) {
-    if (cpystr(name, p, 63) < 0) return 0 - E2BIG;
+    if (cpystr(name, p, PATHMAX) < 0) return 0 - E2BIG;
     oe = sfsfind(name);
     if (oe < 0) {
       oe = sfsnew(name);
@@ -1198,7 +1240,7 @@ int sys_spawn(unsigned sa) {
     unsigned pe;
     pe = ld4(sa + 16);
     if (pe != 0) {
-      if (cpystr(name, pe, 63) >= 0) {
+      if (cpystr(name, pe, PATHMAX) >= 0) {
         int ee;
         ee = sfsfind(name);
         if (ee < 0) {
@@ -1299,6 +1341,7 @@ int main(void) {
   int b;
   int n;
   int used;
+  unsigned isz;
   char name[64];
 
   if (ld4(SFSA) != 0x34736673) {        /* 'sfs4' */
@@ -1306,19 +1349,18 @@ int main(void) {
     putc('\n');
     return 1;
   }
-  if (ld4(SFSA + 4) < 32 || ld4(SFSA + 4) > SFSEND - SFSA) {
+  /* 窓に入らないイメージは載せない。引き算の向きに注意 ---
+   * SFSA + 大きさ で比べると 32 bit を回り込んで通ってしまう。
+   * 両辺を unsigned に揃えるのは，符号つきで比べると 2^31 以上の
+   * でたらめな大きさが負数になって通り抜けるからである */
+  isz = ld4(SFSA + 4);
+  if (isz > (unsigned)(SFSTOP - SFSA)) {
     putc('S');
     putc('\n');
     return 1;
   }
   tblo = (int)ld4(SFSA + 8);
   tbln = (int)ld4(SFSA + 12);
-  if (tblo < 32 || tblo > (int)ld4(SFSA + 4)
-      || tbln < 1 || tbln > ((int)ld4(SFSA + 4) - tblo) / ENTSZ) {
-    putc('T');
-    putc('\n');
-    return 1;
-  }
   for (i = 0; i < NFD; i++) fdent[i] = -1;
   cwd = 0;                              /* 起動時の作業ディレクトリはルート */
   fd0ent = -1;
