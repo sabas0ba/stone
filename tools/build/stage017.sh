@@ -154,7 +154,7 @@ build_stage017() {
     # 丸め，strtoul / strtoull の空白と endptr である。
     #
     # **訳す器が libc21 までと違う。** 第 21 世代までは cc15k で訳して
-    # いたが，この世代を測るプローブは最前線の cc15v で訳す。器と libc の
+    # いたが，この世代を測るプローブは最前線の cc15w で訳す。器と libc の
     # 世代が食い違っていると，出た差がどちらのものか言えなくなる
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
              posix/sys posix/morecore posix/stdio posix/assert posix/dir \
@@ -166,7 +166,7 @@ build_stage017() {
                stage017/libc22/include/sys/time.h \
                stage017/libc22/include/sys/stat.h \
                stage017/libc22/include/sys/types.h \
-               tmp/build/cc15v.bin tmp/build/pp.bin \
+               tmp/build/cc15w.bin tmp/build/pp.bin \
             -- libc22_run "$f" "$n"
     done
 
@@ -246,7 +246,7 @@ libc22_run() {
         "sys/types.h=stage017/libc22/include/sys/types.h" \
         "stage017/libc22/$1.c" \
         | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l22_$2.i"
-    sh tools/env.sh qemu tmp/build/cc15v.bin < "tmp/build/l22_$2.i" \
+    sh tools/env.sh qemu tmp/build/cc15w.bin < "tmp/build/l22_$2.i" \
         > "tmp/build/l22_$2.o"
     echo "built tmp/build/l22_$2.o" >&2
 }

@@ -41,7 +41,7 @@ cd "$repo_root"
 out=tmp/d17
 mkdir -p "$out"
 
-cc=${STONE_DIFF_CC:-tmp/build/cc15v.bin}   # 最前線の世代で測る
+cc=${STONE_DIFF_CC:-tmp/build/cc15w.bin}   # 最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -93,6 +93,21 @@ skip_reason() {
     esac
 }
 
+# **C89 の外側を測るプローブ。** 我々が拒んだときの裏取りは
+# `gcc -std=c89 -pedantic-errors` に「その入力は誤りか」を訊く形だが，
+# C99 や GNU の書き方は C89 モードのホストなら**当たり前に拒む**ので，
+# この裏取りが素通しになる —— 我々が実装できていないだけの拒否が
+# 「拒むのが正しい」に化ける。
+#
+# ここに名前があるプローブは，**我々が拒んだ時点で落とす**
+# (docs/stage018-ext.md 4)。
+beyond_c89() {
+    case $1 in
+    c99decl) return 0 ;;
+    esac
+    return 1
+}
+
 pass=0; fail=0; skipped=0
 
 one() {
@@ -126,6 +141,15 @@ one() {
     "$HOSTCC" -w -include "$shim" -o "$out/h_$n" "$prb/$n.c" -lm \
         > "$out/h_$n.log" 2>&1
     hostc=$?
+
+    if [ "$ourc" -ne 0 ] && beyond_c89 "$n"; then
+        # **C89 の外側を測るプローブは，拒んだ時点で落とす。**
+        # C89 モードのホストに訊いても「誤り」と言うに決まっているので，
+        # 裏取りにならない
+        printf 'FAIL %-14s 我々が拒む (rc=%s)。C89 の外側を受ける約束のプローブである\n' \
+            "$n" "$ourc"
+        fail=$((fail + 1)); return 1
+    fi
 
     if [ "$ourc" -ne 0 ]; then
         # **我々が拒んだ。** 拒むのが正しいと言えるのは，その入力が
@@ -255,7 +279,9 @@ os_run_all() {
             _built="$_built $_n"
             continue
         fi
-        if [ "$_rc" -eq 3 ]; then
+        if [ "$_rc" -eq 3 ] && beyond_c89 "$_n"; then
+            printf 'FAIL %-14s 我々が拒む。C89 の外側を受ける約束のプローブである\n' "$_n"
+        elif [ "$_rc" -eq 3 ]; then
             if os_reject_ok "$_n"; then
                 printf 'FAIL %-14s 我々だけが拒む。ホストは C89 として通す\n' "$_n"
             else

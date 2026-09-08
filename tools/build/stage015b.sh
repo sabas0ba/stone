@@ -53,6 +53,11 @@ build_stage015b() {
     # いた。差分試験 (tools/diff17.sh) がホストとの食い違いで見つけた。
     # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い
     ccgen cc15v cc15u stage015/cc15v.sc
+    # 第 23 世代。C89 の外側 (C99 と GNU の別綴り) を受ける第 1 陣 ——
+    # __extension__ / __inline__ などの別綴り・文の後ろの宣言・for の
+    # 初期化での宣言。実物のソースはどれも当たり前に使う
+    # (docs/stage018-ext.md)
+    ccgen cc15w cc15v stage015/cc15w.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -73,12 +78,12 @@ do_stage015b() {
         cc15p0.bin cc15p.bin cc15q0.bin cc15q.bin \
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
-        cc15v0.bin cc15v.bin \
+        cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
-           stage015/cc15u.sc stage015/cc15v.sc \
+           stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
