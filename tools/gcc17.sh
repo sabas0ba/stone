@@ -243,9 +243,27 @@ pack() {
     [ "$cursor" -eq "$expected" ] \
         || die "使用量が一致しない (expected=$expected image=$cursor)"
 
-    # 詰めた image を読み直して経路の数を数える。表を書く側と読む側の
-    # 両方を通さないと，親の索引付けの誤りが表に出ない
-    packed_paths=$(sh "$repo_root/tools/sfs4.sh" list "$image" | wc -l | tr -d ' ')
+    # 詰めた image を読み直して，種別と経路の集合をそのまま突き合わせる。
+    #
+    # **数を数えるだけでは足りない。** 親の索引が 1 つずれても，項目は
+    # 有効なまま残るので list は同じ行数を出す。数が合ったまま，guest から
+    # 見える木だけが別物になる。同じ理由で，重複した経路や種別の取り違えも
+    # 数には出ない。ここは親の索引付けを通すための検査なので，集合で比べる。
+    want="$out/want.txt"
+    got="$out/got.txt"
+    (cd "$src" && { find . -mindepth 1 -type d -printf 'd\t%P\n'
+                    find . -mindepth 1 -type f -printf 'f\t%P\n'; }) \
+        | LC_ALL=C sort > "$want"
+    # list は "種別 長さ 時刻 経路" を空白で揃えて出す。経路には空白が
+    # ありうるので，前の 3 語だけを落として残りをそのまま経路とする
+    sh "$repo_root/tools/sfs4.sh" list "$image" | awk '
+        {
+            end = index($0, $3) + length($3) + 1
+            printf "%s\t%s\n", $1, substr($0, end)
+        }' | LC_ALL=C sort > "$got"
+    diff -u "$want" "$got" > "$out/paths.diff" \
+        || die "経路の集合が一致しない ($out/paths.diff を見る)"
+    packed_paths=$(wc -l < "$got" | tr -d ' ')
     [ "$packed_paths" -eq "$paths" ] \
         || die "経路の数が一致しない (source=$paths image=$packed_paths)"
 
