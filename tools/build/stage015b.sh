@@ -58,6 +58,10 @@ build_stage015b() {
     # 初期化での宣言。実物のソースはどれも当たり前に使う
     # (docs/stage018-ext.md)
     ccgen cc15w cc15v stage015/cc15w.sc
+    # 第 24 世代。指示つき初期化子 (.f = v / [k] = v。C99 6.7.8)。
+    # GCC 4.7 の C も Linux も当たり前に使う形で，**触れなかった場所が
+    # 0 になること**まで含めて規則である (docs/stage018-ext.md 3.5)
+    ccgen cc15x cc15w stage015/cc15x.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -79,11 +83,13 @@ do_stage015b() {
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
         cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
+        cc15x0.bin cc15x.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
            stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
+           stage015/cc15x.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
