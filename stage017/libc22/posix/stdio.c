@@ -151,7 +151,14 @@ size_t fwrite(void *buf, size_t size, size_t n, FILE *f) {
   return (size_t)w / size;
 }
 
-/* 改行まで (改行を含む) 読み，NUL で終端する。1 バイトも読めなければ NULL */
+/* 改行まで (改行を含む) 読み，NUL で終端する。1 バイトも読めなければ NULL。
+ *
+ * **「読めなかった」と「読む余地が無かった」は別である** (第 22 世代。
+ * docs/stage017-gcc.md 5.4)。C89 7.9.7.2 が NULL を返せと言うのは
+ * 終端か誤りに当たったときだけで，`n == 1` は 1 バイトも要求されて
+ * いないだけだから，終端を書いて s を返す。第 21 世代は両方を
+ * 「i == 0」で一括りにしていたので，`fgets(b, 1, f)` が NULL を返して
+ * いた —— 呼び手からは終端に見える。 */
 char *fgets(char *s, int n, FILE *f) {
   int i;
   int c;
@@ -165,7 +172,7 @@ char *fgets(char *s, int n, FILE *f) {
     i = i + 1;
     if (c == '\n') break;
   }
-  if (i == 0) return NULL;
+  if (i == 0 && n > 1) return NULL;
   s[i] = 0;
   return s;
 }

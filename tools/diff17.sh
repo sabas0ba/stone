@@ -320,8 +320,11 @@ os_run_all() {
                 "$_n" "$osout/h_$_n.log"
             fail=$((fail + 1)); continue
         fi
-        if ! timeout 30 "$osout/h_$_n" < /dev/null > "$osout/$_n.host" \
-                2> /dev/null; then
+        # **ホスト側も作業場の中で走らせる。** ファイルを作るプローブが
+        # あるので (filex)，走らせる場所を揃えないと repo が汚れるうえ，
+        # 残り物が次の走行の答を変える
+        if ! ( cd "$osout" && timeout 30 "./h_$_n" < /dev/null > "$_n.host" \
+                2> /dev/null ); then
             printf 'FAIL %-14s ホストの実行が落ちた\n' "$_n"
             fail=$((fail + 1)); continue
         fi
