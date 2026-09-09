@@ -50,6 +50,18 @@ four
 five
 EOF
 
+# 第 2 世代の機構 (re2) で受けるようになった形を測るための入力。
+# **組の中へ後戻りする形**と**選択の最長一致**がここに要る (5.7)
+cat > "$out/root/in3.txt" <<'EOF'
+aab
+aaab
+abc123
+a1b2c3
+ac_cv_prog_CC=gcc
+  spaced	out
+xyzzy
+EOF
+
 # ---- 台本 ----
 # 1 件 = 入力・-n の有無・台本。**autoconf の configure が使う形**を選ぶ
 ncase=0
@@ -114,6 +126,34 @@ b a2
 }
 b
 :a2'
+# ---- ここから下は re2 (第 2 世代の機構) で受けるようになった形 ----
+# 組の中へ後戻りする形。**re1 はここで外していた** —— 組が貪欲に
+# 取ったあと，続きが外れても取り方を試し直せなかった (5.7)
+mkcase in3.txt 0 's/\(a*\)ab/[\1]/'
+mkcase in3.txt 0 's/\(a*\)\(ab\)/<\1|\2>/'
+# 台本の中で組を 2 度使う。**re1 は 2 つめの \1 が別の組を指していた**
+mkcase in3.txt 0 's/\(a\)\(b\)/[\2\1]/
+s/\([0-9]\)/{\1}/'
+# 選択 (GNU の \|)。**最左最長**を採るかどうかがここで出る
+mkcase in3.txt 0 's/ac\|ac_cv/X/'
+mkcase in3.txt 0 's/aab\|xyz/Y/'
+mkcase in1.txt 0 's/hello\|world/X/g'
+mkcase in1.txt 0 's/^hello\|baz$/X/'
+mkcase in3.txt 0 's/\(a\|b\)*/[&]/'
+# 回数つきの繰返し
+mkcase in3.txt 0 's/a\{2\}/X/'
+mkcase in3.txt 0 's/a\{2,3\}/X/'
+mkcase in3.txt 0 's/a\{2,\}b/X/'
+mkcase in3.txt 0 's/[a-z]\{3\}/W/g'
+mkcase in3.txt 0 's/\(ab\)\{1,2\}/Z/'
+# 字種
+mkcase in3.txt 0 's/[[:digit:]]/#/g'
+mkcase in3.txt 0 's/[[:alpha:]][[:alnum:]]*/W/g'
+mkcase in3.txt 0 's/[[:space:]]\{1,\}/_/g'
+mkcase in3.txt 0 's/[^[:print:]]/?/g'
+# \+ と \?
+mkcase in3.txt 0 's/ab\+/P/'
+mkcase in3.txt 0 's/ab\?/Q/g'
 
 pass=0
 fail=0
@@ -162,10 +202,10 @@ else
     #
     # 起動は 1 回だけ。1 つの像に台本と入力を詰め，シェル (sh2) に
     # 順に起動させて `@@名前` の行で切り分ける (tools/diff17.sh と同じ手)
-    for f in "${STONE_OSSED:-tmp/build/sed2}" tmp/build/sh2.bin tmp/build/kernel24.bin; do
+    for f in "${STONE_OSSED:-tmp/build/sed3}" tmp/build/sh2.bin tmp/build/kernel24.bin; do
         [ -s "$f" ] || { echo "error: $f が無い (sh tools/build.sh stage017)" >&2; exit 1; }
     done
-    cp "${STONE_OSSED:-tmp/build/sed2}" "$out/root/sed"
+    cp "${STONE_OSSED:-tmp/build/sed3}" "$out/root/sed"
     cp tmp/build/sh2.bin "$out/root/sh2"
     : > "$out/root/go.sh"
     while read -r inf q scr; do

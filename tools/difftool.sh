@@ -35,6 +35,9 @@ abc
 abbbc
 ac
 xyz
+aab
+abbc
+x123y
 EOF
 
 cat > "$out/root/t2.txt" <<'EOF'
@@ -77,6 +80,12 @@ wc -c < t2.txt
 wc -l t2.txt
 sort t2.txt
 sort -u t2.txt
+grep -E ab+c t1.txt
+grep -E ab?c t1.txt
+grep -E ab{2}c t1.txt
+grep -E [0-9]+y t1.txt
+egrep a.c t1.txt
+expr aabcd : a*abc
 EOF
 
 pass=0
@@ -91,10 +100,11 @@ while read -r line; do
 done < "$out/cmds"
 
 # ---- 我々の OS で走らせる ----
-for f in tmp/build/sh3 tmp/build/kernel24.bin; do
+osh=${STONE_OSSH:-tmp/build/sh4}
+for f in "$osh" tmp/build/kernel24.bin; do
     [ -s "$f" ] || { echo "error: $f が無い (sh tools/build.sh stage017)" >&2; exit 1; }
 done
-cp tmp/build/sh3 "$out/root/sh3"
+cp "$osh" "$out/root/sh3"
 : > "$out/root/go.sh"
 n=0
 while read -r line; do

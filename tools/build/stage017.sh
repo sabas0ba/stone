@@ -236,6 +236,40 @@ build_stage017() {
            tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
         -- osprog22_run sh3 stage017/sh3.c tmp/build/re1.o
 
+    # 正規表現機構の第 2 世代 (5.7)。ERE・選択・{n,m}・字種を受け，
+    # 組の中へ後戻りできる。awk はこれが無いと書けない
+    step re2 re2.o \
+        -- stage017/re2.c stage017/re2.h tmp/build/cc15aa.bin \
+           tmp/build/pp16.bin \
+        -- osobj22_run re2 stage017/re2.c
+
+    # sed の第 3 世代 (5.7)。機構を re2 へ替えたもの
+    step sed3 sed3 \
+        -- stage017/sed3.c stage017/re2.h tmp/build/re2.o \
+           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog22_run sed3 stage017/sed3.c tmp/build/re2.o
+
+    # シェルの第 4 世代 (5.7)。grep -E が使えるようになった
+    step sh4 sh4 \
+        -- stage017/sh4.c stage017/re2.h tmp/build/re2.o \
+           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog22_run sh4 stage017/sh4.c tmp/build/re2.o
+
+    # awk の数と書式 (5.8)。**翻訳単位を分けてある** —— awk はこの鎖で
+    # いちばん大きなプログラムで，1 ファイルでは我々の cc の表が溢れる
+    step awkfmt1 awkfmt1.o \
+        -- stage017/awkfmt1.c stage017/awkfmt1.h tmp/build/cc15aa.bin \
+           tmp/build/pp16.bin \
+        -- osobj22_run awkfmt1 stage017/awkfmt1.c
+
+    # awk の第 1 世代 (5.8)。configure が使う道具の最後の 1 つで，
+    # re2 の ERE を使う
+    step awk1 awk1 \
+        -- stage017/awk1.c stage017/re2.h stage017/awkfmt1.h \
+           tmp/build/re2.o tmp/build/awkfmt1.o \
+           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog22_run awk1 stage017/awk1.c tmp/build/re2.o tmp/build/awkfmt1.o
+
     step kernel25 kernel25.bin \
         -- stage017/kernel25.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
@@ -277,7 +311,7 @@ osprog22_run() {
         "sys/time.h=stage017/libc22/include/sys/time.h" \
         "sys/stat.h=stage017/libc22/include/sys/stat.h" \
         "sys/types.h=stage017/libc22/include/sys/types.h" \
-        stage017/re1.h "$_src" \
+        stage017/re1.h stage017/re2.h stage017/awkfmt1.h "$_src" \
         | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${_nm}.i"
     sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${_nm}.i" \
         > "tmp/build/${_nm}.o"
@@ -299,7 +333,7 @@ osobj22_run() {
         "sys/time.h=stage017/libc22/include/sys/time.h" \
         "sys/stat.h=stage017/libc22/include/sys/stat.h" \
         "sys/types.h=stage017/libc22/include/sys/types.h" \
-        stage017/re1.h "$2" \
+        stage017/re1.h stage017/re2.h stage017/awkfmt1.h "$2" \
         | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
     sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${1}.i" \
         > "tmp/build/${1}.o"
@@ -421,7 +455,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 sed1 re1.o sed2 sh3 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 sed1 re1.o sed2 sh3 re2.o sed3 sh4 awkfmt1.o awk1 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin kernel25.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -446,6 +480,9 @@ do_stage017() {
            stage017/kernel23.c stage017/kernel24.c stage017/kernel25.c \
            stage017/sed1.c stage017/re1.c stage017/re1.h \
            stage017/sed2.c stage017/sh3.c \
+           stage017/re2.c stage017/re2.h \
+           stage017/sed3.c stage017/sh4.c \
+           stage017/awk1.c stage017/awkfmt1.c stage017/awkfmt1.h \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \
