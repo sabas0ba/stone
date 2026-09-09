@@ -255,6 +255,12 @@ build_stage017() {
            tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
         -- osprog22_run sh4 stage017/sh4.c tmp/build/re2.o
 
+    # シェルの第 5 世代 (5.9)。経路展開 (glob) を持つ
+    step sh5 sh5 \
+        -- stage017/sh5.c stage017/re2.h tmp/build/re2.o \
+           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog22_run sh5 stage017/sh5.c tmp/build/re2.o
+
     # awk の数と書式 (5.8)。**翻訳単位を分けてある** —— awk はこの鎖で
     # いちばん大きなプログラムで，1 ファイルでは我々の cc の表が溢れる
     step awkfmt1 awkfmt1.o \
@@ -455,7 +461,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 sed1 re1.o sed2 sh3 re2.o sed3 sh4 awkfmt1.o awk1 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 sed1 re1.o sed2 sh3 re2.o sed3 sh4 sh5 awkfmt1.o awk1 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin kernel25.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -481,7 +487,7 @@ do_stage017() {
            stage017/sed1.c stage017/re1.c stage017/re1.h \
            stage017/sed2.c stage017/sh3.c \
            stage017/re2.c stage017/re2.h \
-           stage017/sed3.c stage017/sh4.c \
+           stage017/sed3.c stage017/sh4.c stage017/sh5.c \
            stage017/awk1.c stage017/awkfmt1.c stage017/awkfmt1.h \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \

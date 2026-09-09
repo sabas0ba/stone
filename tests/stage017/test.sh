@@ -1338,6 +1338,21 @@ else
     report $? "diff: 道具の出力が我々の OS とホストで一致する"
 fi
 
+section "経路展開 --- 我々のシェルの glob をホストのシェルと突き合わせる (5.9)"
+
+# sh2 は glob を持たなかった。GCC の Makefile は `*.c` を使うので，
+# **無いと落ちるのではなく語がそのまま残って進む**。同じ台本を両方の
+# シェルに食わせて測る (tools/diffglob.sh)
+if [ -s tmp/build/sh5 ]; then
+    sh tools/diffglob.sh os > "$out/diffglob.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/diffglob.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: 経路展開が我々の OS とホストで一致する"
+else
+    echo "   skip: tmp/build/sh5 が無い"
+fi
+
 section "awk --- 我々の OS の上でホストの awk と突き合わせる (5.8)"
 
 # **awk は言語ひとつぶんある。** 我々が期待値を書くと我々の読み違いが

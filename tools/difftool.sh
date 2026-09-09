@@ -49,8 +49,9 @@ cherry
 EOF
 
 # 1 行 1 件。**引用の要らない形だけ** —— 唯一の例外が掛け算の `\*` で，
-# 素の `*` はシェルが展開してしまう (ホストは展開し、我々の sh3 は
-# しない。**それはシェルの差であって道具の差ではない**)
+# 素の `*` は**両方のシェルが経路展開してしまう** (sh5 が glob を
+# 持ったので，いまはどちらも同じ振舞いである。5.9)。展開そのものは
+# tools/diffglob.sh で測るので，ここでは道具の差だけを見る
 cat > "$out/cmds" <<'EOF'
 grep ab*c t1.txt
 grep ^ac t1.txt
@@ -100,7 +101,7 @@ while read -r line; do
 done < "$out/cmds"
 
 # ---- 我々の OS で走らせる ----
-osh=${STONE_OSSH:-tmp/build/sh4}
+osh=${STONE_OSSH:-tmp/build/sh5}
 for f in "$osh" tmp/build/kernel24.bin; do
     [ -s "$f" ] || { echo "error: $f が無い (sh tools/build.sh stage017)" >&2; exit 1; }
 done
