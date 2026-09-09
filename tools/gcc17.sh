@@ -191,8 +191,8 @@ EOF
 # (実際に深さ 10 以上で落ちる誤りが後から見つかっている)。
 #
 # **CI では回さない。** tools/sfs4.sh の pack は項目ごとに dd と od を呼ぶ
-# POSIX shell であり，81,356 項目では数時間かかる。手で測るための手順として
-# 置く。進行は SFS4_PROGRESS で stderr へ出る
+# POSIX shell であり，81,356 項目では 1 時間半かかる (実測 1h27m)。手で
+# 測るための手順として置く。進行は SFS4_PROGRESS で stderr へ出る
 # (docs/stage017-gcc.md 7.5)。
 pack() {
     [ -d "$src" ] || die "詰める木が無い: $src (sh tools/fetch.sh gcc47)"
