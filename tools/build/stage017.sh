@@ -170,6 +170,23 @@ build_stage017() {
             -- libc22_run "$f" "$n"
     done
 
+    # libc の第 23 世代 (6.3)。libc22 との差は**浮動小数点の変換**だけ
+    # である —— %g と %e を %f と同じに扱っており，丸めを 0 から遠い側へ
+    # 倒していた。どちらも落ちるのではなく黙って違う値を書く
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal; do
+        n=$(echo "$f" | tr / _)
+        step "l23_$n" "l23_$n.o" \
+            -- "stage017/libc23/$f.c" \
+               stage017/libc23/include/*.h \
+               stage017/libc23/include/sys/time.h \
+               stage017/libc23/include/sys/stat.h \
+               stage017/libc23/include/sys/types.h \
+               tmp/build/cc15aa.bin tmp/build/pp.bin \
+            -- libc23_run "$f" "$n"
+    done
+
     # 前処理器の第 17 世代 (第 3 部の 3 の 2)。-I を探す道として持つ。
     # **libc を繋がない** —— sys_* は 'E' 前置部のものを直に呼ぶ
     # (docs/stage017-cc.md 17 章)
@@ -240,33 +257,36 @@ build_stage017() {
     # 組の中へ後戻りできる。awk はこれが無いと書けない
     step re2 re2.o \
         -- stage017/re2.c stage017/re2.h tmp/build/cc15aa.bin \
-           tmp/build/pp16.bin \
-        -- osobj22_run re2 stage017/re2.c
+           tmp/build/pp16.bin tmp/build/l23_posix_stdio.o \
+        -- osobj23_run re2 stage017/re2.c
 
     # sed の第 3 世代 (5.7)。機構を re2 へ替えたもの
     step sed3 sed3 \
         -- stage017/sed3.c stage017/re2.h tmp/build/re2.o \
            tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
-        -- osprog22_run sed3 stage017/sed3.c tmp/build/re2.o
+           tmp/build/l23_posix_stdio.o \
+        -- osprog23_run sed3 stage017/sed3.c tmp/build/re2.o
 
     # シェルの第 4 世代 (5.7)。grep -E が使えるようになった
     step sh4 sh4 \
         -- stage017/sh4.c stage017/re2.h tmp/build/re2.o \
            tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
-        -- osprog22_run sh4 stage017/sh4.c tmp/build/re2.o
+           tmp/build/l23_posix_stdio.o \
+        -- osprog23_run sh4 stage017/sh4.c tmp/build/re2.o
 
     # シェルの第 5 世代 (5.9)。経路展開 (glob) を持つ
     step sh5 sh5 \
         -- stage017/sh5.c stage017/re2.h tmp/build/re2.o \
            tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
-        -- osprog22_run sh5 stage017/sh5.c tmp/build/re2.o
+           tmp/build/l23_posix_stdio.o \
+        -- osprog23_run sh5 stage017/sh5.c tmp/build/re2.o
 
     # awk の数と書式 (5.8)。**翻訳単位を分けてある** —— awk はこの鎖で
     # いちばん大きなプログラムで，1 ファイルでは我々の cc の表が溢れる
     step awkfmt1 awkfmt1.o \
         -- stage017/awkfmt1.c stage017/awkfmt1.h tmp/build/cc15aa.bin \
-           tmp/build/pp16.bin \
-        -- osobj22_run awkfmt1 stage017/awkfmt1.c
+           tmp/build/pp16.bin tmp/build/l23_posix_stdio.o \
+        -- osobj23_run awkfmt1 stage017/awkfmt1.c
 
     # awk の第 1 世代 (5.8)。configure が使う道具の最後の 1 つで，
     # re2 の ERE を使う
@@ -274,7 +294,8 @@ build_stage017() {
         -- stage017/awk1.c stage017/re2.h stage017/awkfmt1.h \
            tmp/build/re2.o tmp/build/awkfmt1.o \
            tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
-        -- osprog22_run awk1 stage017/awk1.c tmp/build/re2.o tmp/build/awkfmt1.o
+           tmp/build/l23_posix_stdio.o \
+        -- osprog23_run awk1 stage017/awk1.c tmp/build/re2.o tmp/build/awkfmt1.o
 
     step kernel25 kernel25.bin \
         -- stage017/kernel25.c tmp/build/cc15p.bin tmp/build/pp16.bin \
@@ -344,6 +365,55 @@ osobj22_run() {
     sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${1}.i" \
         > "tmp/build/${1}.o"
     echo "built tmp/build/${1}.o" >&2
+}
+
+# libc23 と最前線の器で組む OS プログラム。**新しい道具はここから作る**
+osprog23_run() {
+    _nm=$1
+    _src=$2
+    shift 2
+    sh tools/bundle.sh stage017/libc23/include/*.h \
+        "sys/time.h=stage017/libc23/include/sys/time.h" \
+        "sys/stat.h=stage017/libc23/include/sys/stat.h" \
+        "sys/types.h=stage017/libc23/include/sys/types.h" \
+        stage017/re1.h stage017/re2.h stage017/awkfmt1.h "$_src" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${_nm}.i"
+    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${_nm}.i" \
+        > "tmp/build/${_nm}.o"
+    # shellcheck disable=SC2086
+    { printf 'E'; cat "tmp/build/${_nm}.o" $* \
+        tmp/build/l23_src_string.o tmp/build/l23_src_ctype.o \
+        tmp/build/l23_src_stdlib.o tmp/build/l23_src_misc15.o \
+        tmp/build/l23_posix_sys.o tmp/build/l23_posix_morecore.o \
+        tmp/build/l23_posix_stdio.o tmp/build/l23_posix_assert.o \
+        tmp/build/l23_posix_dir.o tmp/build/l23_posix_signal.o \
+        tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/build/$_nm"
+    echo "built tmp/build/$_nm" >&2
+}
+
+osobj23_run() {
+    sh tools/bundle.sh stage017/libc23/include/*.h \
+        "sys/time.h=stage017/libc23/include/sys/time.h" \
+        "sys/stat.h=stage017/libc23/include/sys/stat.h" \
+        "sys/types.h=stage017/libc23/include/sys/types.h" \
+        stage017/re1.h stage017/re2.h stage017/awkfmt1.h "$2" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
+    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${1}.i" \
+        > "tmp/build/${1}.o"
+    echo "built tmp/build/${1}.o" >&2
+}
+
+libc23_run() {
+    sh tools/bundle.sh stage017/libc23/include/*.h \
+        "sys/time.h=stage017/libc23/include/sys/time.h" \
+        "sys/stat.h=stage017/libc23/include/sys/stat.h" \
+        "sys/types.h=stage017/libc23/include/sys/types.h" \
+        "stage017/libc23/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l23_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/l23_$2.i" \
+        > "tmp/build/l23_$2.o"
+    echo "built tmp/build/l23_$2.o" >&2
 }
 
 libc22_run() {
@@ -479,6 +549,10 @@ do_stage017() {
         l22_src_morecore.o l22_src_misc15.o \
         l22_posix_sys.o l22_posix_morecore.o l22_posix_stdio.o \
         l22_posix_assert.o l22_posix_dir.o l22_posix_signal.o \
+        l23_src_string.o l23_src_ctype.o l23_src_stdlib.o \
+        l23_src_morecore.o l23_src_misc15.o \
+        l23_posix_sys.o l23_posix_morecore.o l23_posix_stdio.o \
+        l23_posix_assert.o l23_posix_dir.o l23_posix_signal.o \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
@@ -498,6 +572,8 @@ do_stage017() {
            stage017/libc21/src/*.c stage017/libc21/posix/*.c \
            stage017/libc22/include/*.h stage017/libc22/include/sys/*.h \
            stage017/libc22/src/*.c stage017/libc22/posix/*.c \
+           stage017/libc23/include/*.h stage017/libc23/include/sys/*.h \
+           stage017/libc23/src/*.c stage017/libc23/posix/*.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh

@@ -60,7 +60,7 @@ oskern=tmp/build/kernel24.bin
 # 測る libc の世代。**前の世代を測り直せるようにしてある** ——
 # 「直す前は何が違っていたか」を後から再現できないと，直した記録が
 # 我々の言い分だけになる (STONE_DIFF_LIBCGEN=21 で第 21 世代)
-osgen=${STONE_DIFF_LIBCGEN:-22}
+osgen=${STONE_DIFF_LIBCGEN:-23}
 LIBC=stage017/libc$osgen
 # /lib と同じ組合せ。src/morecore と posix/morecore は同じ符号を
 # 別の環境向けに定義するので，どちらか一方だけ (tools/ext17.sh と同じ)

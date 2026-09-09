@@ -10,275 +10,41 @@
 
 static int fmtint(unsigned long long v, int base, int up, char *out);
 
-static double p10[9];
-
-static int fmtint(unsigned long long v, int base, int up, char *out);
-
-static int initp10(void) {
-  int i;
-  p10[0] = 1e1;
-  for (i = 1; i < 9; i = i + 1) p10[i] = p10[i - 1] * p10[i - 1];
-  return 0;
-}
-
-/* 10^0 .. 10^22 は double で**正確に**表せる。ここまでは掛けても
- * 誤差が入らないので，桁寄せを 1 回の掛け算で済ませられる */
-static double pw10[23];
-
-static int initpw10(void) {
-  int i;
-  pw10[0] = 1.0;
-  for (i = 1; i < 23; i = i + 1) pw10[i] = pw10[i - 1] * 10.0;
-  return 0;
-}
-
-/* a * b の丸め誤差を正確に求める (Dekker)。**半端の判定に要る** ——
- * 2.45 は 2 進では 2.45 より僅かに大きいので %.1f は 2.5 になるべき
- * だが，2.45 * 10 を素直に計算すると丁度 24.5 に丸まって「半端」に
- * 見えてしまい，偶数丸めで 2.4 になる */
-static double prod_err(double a, double b, double p) {
-  double c;
-  double ahi;
-  double alo;
-  double bhi;
-  double blo;
-  c = 134217729.0 * a;          /* 2^27 + 1 */
-  ahi = c - (c - a);
-  alo = a - ahi;
-  c = 134217729.0 * b;
-  bhi = c - (c - b);
-  blo = b - bhi;
-  return ((ahi * bhi - p) + ahi * blo + alo * bhi) + alo * blo;
-}
-
-/* v * 10^k を整数へ丸める。**半端は偶数へ** (ホストの printf と同じ) */
-static unsigned long long scaleround(double v, int k) {
-  double t;
-  double err;
-  double frac;
-  unsigned long long n;
-  err = 0;
-  if (k >= 0 && k <= 22) {
-    t = v * pw10[k];
-    err = prod_err(v, pw10[k], t);
-  } else if (k >= 0) {
-    t = v;
-    while (k > 22) { t = t * pw10[22]; k = k - 22; }
-    t = t * pw10[k];
-  } else {
-    int m;
-    m = -k;
-    t = v;
-    while (m > 22) { t = t / pw10[22]; m = m - 22; }
-    t = t / pw10[m];
-  }
-  n = (unsigned long long)t;
-  frac = (t - (double)n) + err;
-  if (frac > 0.5) n = n + 1;
-  else if (frac == 0.5) { if (n % 2 == 1) n = n + 1; }
-  return n;
-}
-
-/* v (> 0) の上位 nsig 桁を digs に入れ，先頭桁の 10 の冪を *ex に返す */
-static int digits(double v, int nsig, char *digs, int *ex) {
-  int e;
-  int i;
-  int k;
-  double w;
-  unsigned long long n;
-  unsigned long long lim;
-  /* まず桁の位置を見当づける。ここの誤差は下で直す */
-  e = 0;
-  w = v;
-  for (i = 8; i >= 0; i = i - 1) {
-    while (w >= p10[i]) { w = w / p10[i]; e = e + (1 << i); }
-  }
-  for (i = 8; i >= 0; i = i - 1) {
-    while (w * p10[i] < 10.0) { w = w * p10[i]; e = e - (1 << i); }
-  }
-  if (w >= 10.0) e = e + 1;
-  if (nsig > 18) nsig = 18;
-  lim = 1;
-  for (i = 0; i < nsig; i = i + 1) lim = lim * 10;
-  n = scaleround(v, nsig - 1 - e);
-  if (n >= lim) { e = e + 1; n = scaleround(v, nsig - 1 - e); }
-  if (n < lim / 10) { e = e - 1; n = scaleround(v, nsig - 1 - e); }
-  if (n >= lim) { n = n / 10; e = e + 1; }
-  for (i = nsig - 1; i >= 0; i = i - 1) {
-    k = (int)(n % 10);
-    n = n / 10;
-    digs[i] = (char)('0' + k);
-  }
-  digs[nsig] = 0;
-  *ex = e;
-  return 0;
-}
-
-static int putn(char *out, int at, int c) {
-  out[at] = (char)c;
-  return at + 1;
-}
-
-/* 指数の形 (d.ddde±XX) */
-static int fmte(double v, int prec, int up, char *out) {
-  char digs[24];
-  int e;
-  int i;
-  int n;
-  int ae;
-  n = 0;
-  if (v < 0) { out[n] = '-'; n = n + 1; v = -v; }
-  if (v == 0.0) {
-    e = 0;
-    for (i = 0; i <= prec; i = i + 1) digs[i] = '0';
-    digs[prec + 1] = 0;
-  } else {
-    digits(v, prec + 1, digs, &e);
-  }
-  n = putn(out, n, digs[0]);
-  if (prec > 0) {
-    n = putn(out, n, '.');
-    for (i = 1; i <= prec; i = i + 1) n = putn(out, n, digs[i]);
-  }
-  n = putn(out, n, up ? 'E' : 'e');
-  if (e < 0) { n = putn(out, n, '-'); ae = -e; } else { n = putn(out, n, '+'); ae = e; }
-  if (ae >= 100) {
-    n = putn(out, n, '0' + ae / 100);
-    n = putn(out, n, '0' + (ae / 10) % 10);
-    n = putn(out, n, '0' + ae % 10);
-  } else {
-    n = putn(out, n, '0' + ae / 10);
-    n = putn(out, n, '0' + ae % 10);
-  }
-  out[n] = 0;
-  return n;
-}
-
-/* 小数の形 (ddd.ddd)。
+/* 浮動小数点の 3 つの形 (%e / %f / %g) は **libc に任せる**。
  *
- * 桁数が 18 に収まるなら**まるごと整数へ寄せて**組む —— こうすると
- * 丸めが scaleround の 1 か所だけになり，桁配列を並べ直す途中で
- * 半端の扱いが変わらない */
-static int fmtf(double v, int prec, char *out) {
-  char digs[24];
-  char body[64];
-  int e;
-  int i;
+ * 第 1 世代を書いたときは `libc22` が `%g` と `%e` を `%f` と同じに
+ * 扱っていたので awk の側で持っていた。`libc23` がその穴を埋めた
+ * (docs/stage017-gcc.md 6.3) ので，**写しを 2 つ持つ理由が消えた** ——
+ * 同じ規則を書く場所が 2 つあると必ず片方だけ直す誤りが出る
+ * (stage018-ext.md 3.2 / 5.1 と同じ形)。
+ *
+ * 桁寄せと半端の倒し方 (Dekker の手で積を正確に求めて偶数へ倒す) は
+ * `libc23/posix/stdio.c` にある。 */
+static int fpone(double v, int kind, int prec, int up, int alt, char *out) {
+  char spec[16];
   int n;
-  int nsig;
-  int ip;
-  int bl;
   n = 0;
-  if (v < 0) { out[n] = '-'; n = n + 1; v = -v; }
-  if (v == 0.0) {
-    n = putn(out, n, '0');
-    if (prec > 0) {
-      n = putn(out, n, '.');
-      for (i = 0; i < prec; i = i + 1) n = putn(out, n, '0');
-    }
-    out[n] = 0;
-    return n;
-  }
-  digits(v, 1, digs, &e);
-  nsig = e + prec + 1;
-  if (nsig <= 18) {
-    unsigned long long u;
-    u = scaleround(v, prec);
-    bl = fmtint(u, 10, 0, body);
-    if (bl <= prec) {
-      /* 0.00ddd の形。整数部の 0 と足りない桁を補う */
-      n = putn(out, n, '0');
-      if (prec > 0) {
-        n = putn(out, n, '.');
-        for (i = 0; i < prec - bl; i = i + 1) n = putn(out, n, '0');
-        for (i = 0; i < bl; i = i + 1) n = putn(out, n, body[i]);
-      }
-      out[n] = 0;
-      return n;
-    }
-    for (i = 0; i < bl - prec; i = i + 1) n = putn(out, n, body[i]);
-    if (prec > 0) {
-      n = putn(out, n, '.');
-      for (i = bl - prec; i < bl; i = i + 1) n = putn(out, n, body[i]);
-    }
-    out[n] = 0;
-    return n;
-  }
-  /* 18 桁に収まらない。上位 18 桁だけを数え，残りは 0 で埋める ——
-   * ホストは 2 進の値を正確に十進へ展開するので，ここから先は
-   * 一致しない (5.8 に註がある) */
-  nsig = 18;
-  digits(v, nsig, digs, &e);
-  ip = e + 1;
-  if (ip <= 0) {
-    n = putn(out, n, '0');
-  } else {
-    for (i = 0; i < ip; i = i + 1) {
-      if (i < nsig) n = putn(out, n, digs[i]);
-      else n = putn(out, n, '0');
-    }
-  }
-  if (prec > 0) {
-    n = putn(out, n, '.');
-    for (i = 0; i < prec; i = i + 1) {
-      int k;
-      k = ip + i;
-      if (k < 0 || k >= nsig) n = putn(out, n, '0');
-      else n = putn(out, n, digs[k]);
-    }
-  }
-  out[n] = 0;
-  return n;
+  spec[n] = '%'; n = n + 1;
+  if (alt) { spec[n] = '#'; n = n + 1; }
+  spec[n] = '.'; n = n + 1;
+  spec[n] = '*'; n = n + 1;
+  if (up) spec[n] = (char)(kind - ('a' - 'A'));
+  else spec[n] = (char)kind;
+  n = n + 1;
+  spec[n] = 0;
+  return sprintf(out, spec, prec, v);
 }
 
-/* %g。指数が小さすぎるか大きすぎれば e の形，そうでなければ f の形。
- * 末尾の 0 を落とすのが %g の要点である */
+static int fmte(double v, int prec, int up, char *out) {
+  return fpone(v, 'e', prec, up, 0, out);
+}
+
+static int fmtf(double v, int prec, char *out) {
+  return fpone(v, 'f', prec, 0, 0, out);
+}
+
 static int fmtg(double v, int prec, int up, int alt, char *out) {
-  char tmp[512];
-  char digs[24];
-  int e;
-  int n;
-  int i;
-  int dot;
-  if (prec == 0) prec = 1;
-  if (v == 0.0) {
-    e = 0;
-  } else {
-    digits(v < 0 ? -v : v, prec, digs, &e);
-  }
-  if (e < -4 || e >= prec) {
-    n = fmte(v, prec - 1, up, tmp);
-  } else {
-    n = fmtf(v, prec - 1 - e, tmp);
-  }
-  if (!alt) {
-    /* 末尾の 0 を落とす。指数部があれば小数部だけを見る */
-    int epos;
-    int last;
-    epos = -1;
-    for (i = 0; i < n; i = i + 1) {
-      if (tmp[i] == 'e' || tmp[i] == 'E') { epos = i; break; }
-    }
-    dot = -1;
-    for (i = 0; i < n; i = i + 1) {
-      if (tmp[i] == '.') { dot = i; break; }
-    }
-    if (dot >= 0) {
-      last = (epos < 0) ? n : epos;
-      while (last > dot + 1 && tmp[last - 1] == '0') last = last - 1;
-      if (last == dot + 1) last = dot;
-      if (epos < 0) {
-        tmp[last] = 0;
-        n = last;
-      } else {
-        memmove(tmp + last, tmp + epos, (size_t)(n - epos + 1));
-        n = last + (n - epos);
-        tmp[n] = 0;
-      }
-    }
-  }
-  strcpy(out, tmp);
-  return n;
+  return fpone(v, 'g', prec, up, alt, out);
 }
 
 /* 整数を字にする (基数つき) */
@@ -351,11 +117,10 @@ int awk_numstr(double d, char *fmt, char *out) {
   return 0;
 }
 
-int awk_fmtinit(void) {
-  initp10();
-  initpw10();
-  return 0;
-}
+/* いまは支度が要らない (浮動小数点の変換を libc に任せたため)。
+ * 呼び手の形は残す —— 世代が変わって支度が要るようになったときに，
+ * 呼ぶ場所を探し直さずに済む */
+int awk_fmtinit(void) { return 0; }
 
 int awk_fmt(char *fmt, int argc, char **as, double *an, int *aisnum,
             char *out, int outmax) {
