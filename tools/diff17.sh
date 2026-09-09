@@ -41,7 +41,7 @@ cd "$repo_root"
 out=tmp/d17
 mkdir -p "$out"
 
-cc=${STONE_DIFF_CC:-tmp/build/cc15aa.bin}  # 最前線の世代で測る
+cc=${STONE_DIFF_CC:-tmp/build/cc15ab.bin}  # 最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -142,7 +142,12 @@ one() {
     fi
 
     # ---- ホストの側 ----
-    "$HOSTCC" -w -include "$shim" -o "$out/h_$n" "$prb/$n.c" -lm \
+    # **-funsigned-char で組む。** 素の char が符号つきかは処理系定義で，
+    # RV32 (我々の的) は符号なし，x86-64 のホストは符号つきである
+    # (cc15aa.sc の charsign)。物差しには**我々の的の約束**を伝える ——
+    # -std=c89 を伝えるのと同じ筋で，我々に合わせているのではない
+    "$HOSTCC" -w -funsigned-char -include "$shim" -o "$out/h_$n" \
+        "$prb/$n.c" -lm \
         > "$out/h_$n.log" 2>&1
     hostc=$?
 
@@ -344,7 +349,7 @@ os_run_all() {
             /^@@/   { on = 0 }
             on      { print }
         ' "$osout/run.out" > "$osout/$_n.ours"
-        if ! "$HOSTCC" -w -include "$shim" -o "$osout/h_$_n" \
+        if ! "$HOSTCC" -w -funsigned-char -include "$shim" -o "$osout/h_$_n" \
                 "$(os_src "$_n")" -lm > "$osout/h_$_n.log" 2>&1; then
             printf 'FAIL %-14s 我々は通すがホストが翻訳できない (%s)\n' \
                 "$_n" "$osout/h_$_n.log"

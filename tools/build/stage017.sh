@@ -183,7 +183,7 @@ build_stage017() {
                stage017/libc23/include/sys/time.h \
                stage017/libc23/include/sys/stat.h \
                stage017/libc23/include/sys/types.h \
-               tmp/build/cc15aa.bin tmp/build/pp.bin \
+               tmp/build/cc15ab.bin tmp/build/pp.bin \
             -- libc23_run "$f" "$n"
     done
 
@@ -256,35 +256,35 @@ build_stage017() {
     # 正規表現機構の第 2 世代 (5.7)。ERE・選択・{n,m}・字種を受け，
     # 組の中へ後戻りできる。awk はこれが無いと書けない
     step re2 re2.o \
-        -- stage017/re2.c stage017/re2.h tmp/build/cc15aa.bin \
+        -- stage017/re2.c stage017/re2.h tmp/build/cc15ab.bin \
            tmp/build/pp16.bin tmp/build/l23_posix_stdio.o \
         -- osobj23_run re2 stage017/re2.c
 
     # sed の第 3 世代 (5.7)。機構を re2 へ替えたもの
     step sed3 sed3 \
         -- stage017/sed3.c stage017/re2.h tmp/build/re2.o \
-           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
            tmp/build/l23_posix_stdio.o \
         -- osprog23_run sed3 stage017/sed3.c tmp/build/re2.o
 
     # シェルの第 4 世代 (5.7)。grep -E が使えるようになった
     step sh4 sh4 \
         -- stage017/sh4.c stage017/re2.h tmp/build/re2.o \
-           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
            tmp/build/l23_posix_stdio.o \
         -- osprog23_run sh4 stage017/sh4.c tmp/build/re2.o
 
     # シェルの第 5 世代 (5.9)。経路展開 (glob) を持つ
     step sh5 sh5 \
         -- stage017/sh5.c stage017/re2.h tmp/build/re2.o \
-           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
            tmp/build/l23_posix_stdio.o \
         -- osprog23_run sh5 stage017/sh5.c tmp/build/re2.o
 
     # awk の数と書式 (5.8)。**翻訳単位を分けてある** —— awk はこの鎖で
     # いちばん大きなプログラムで，1 ファイルでは我々の cc の表が溢れる
     step awkfmt1 awkfmt1.o \
-        -- stage017/awkfmt1.c stage017/awkfmt1.h tmp/build/cc15aa.bin \
+        -- stage017/awkfmt1.c stage017/awkfmt1.h tmp/build/cc15ab.bin \
            tmp/build/pp16.bin tmp/build/l23_posix_stdio.o \
         -- osobj23_run awkfmt1 stage017/awkfmt1.c
 
@@ -293,7 +293,7 @@ build_stage017() {
     step awk1 awk1 \
         -- stage017/awk1.c stage017/re2.h stage017/awkfmt1.h \
            tmp/build/re2.o tmp/build/awkfmt1.o \
-           tmp/build/cc15aa.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
            tmp/build/l23_posix_stdio.o \
         -- osprog23_run awk1 stage017/awk1.c tmp/build/re2.o tmp/build/awkfmt1.o
 
@@ -378,7 +378,7 @@ osprog23_run() {
         "sys/types.h=stage017/libc23/include/sys/types.h" \
         stage017/re1.h stage017/re2.h stage017/awkfmt1.h "$_src" \
         | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${_nm}.i"
-    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/${_nm}.i" \
+    sh tools/env.sh qemu tmp/build/cc15ab.bin < "tmp/build/${_nm}.i" \
         > "tmp/build/${_nm}.o"
     # shellcheck disable=SC2086
     { printf 'E'; cat "tmp/build/${_nm}.o" $* \
@@ -404,6 +404,9 @@ osobj23_run() {
     echo "built tmp/build/${1}.o" >&2
 }
 
+# **libc23 と新しい道具は最前線の器 (cc15ab) で訳す。** 器と libc の
+# 世代が食い違っていると，差分試験で出た差がどちらのものか言えなくなる
+# (libc22 のときと同じ筋。stage017/libc22.md 1 章)
 libc23_run() {
     sh tools/bundle.sh stage017/libc23/include/*.h \
         "sys/time.h=stage017/libc23/include/sys/time.h" \
@@ -411,7 +414,7 @@ libc23_run() {
         "sys/types.h=stage017/libc23/include/sys/types.h" \
         "stage017/libc23/$1.c" \
         | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l23_$2.i"
-    sh tools/env.sh qemu tmp/build/cc15aa.bin < "tmp/build/l23_$2.i" \
+    sh tools/env.sh qemu tmp/build/cc15ab.bin < "tmp/build/l23_$2.i" \
         > "tmp/build/l23_$2.o"
     echo "built tmp/build/l23_$2.o" >&2
 }
