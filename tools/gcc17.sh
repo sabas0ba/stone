@@ -487,7 +487,9 @@ baseline_iso() {
 #         既に在れば通るし，無ければ decl として名指しされる。1 行で
 #         「何が無いか」と「それを埋めたら何が起きるか」の両方が読める
 #   cap   容量の上限 (pp16 の束ね 64 員 / cc の 6)
-#   pp    我々の pp が落ちた (詳細は終了コード)
+#   pp    我々の pp が落ち，host の cpp は C89 として通す。**我々の pp の穴**
+#   ppext 我々の pp が落ち，host の cpp も C89 として拒む。規格の外の形
+#         (詳細は host の診断と我々の終了コード)
 #   decl  我々の .i を host が GNU C としても通さない。宣言か型が我々の
 #         libc に無いことがほとんどである (詳細は host の最初の診断)
 #   ext   我々が拒み，host も C89 として拒む。GNU / C99 の拡張である
@@ -550,7 +552,20 @@ unit_run() {
         rc=$?
     fi
     if [ "$rc" -ne 0 ]; then
-        printf 'pp\t%s\n' "$rc"
+        # pp も終了コードしか言わない。cc と同じ手で，**同じ入力を host の
+        # cpp に C89 として読ませて**分類する。host も拒めば規格の外の形
+        # (ppext。たとえば macro 展開で defined が現れる形は 6.10.1 の
+        # 未定義動作で，GCC は受けるが我々は 4 で拒む)，host が通せば
+        # 我々の pp の穴 (pp) である
+        # shellcheck disable=SC2046
+        if "$HOSTCC" -E -std=c89 -pedantic-errors -undef -D__STONE__=1 -nostdinc \
+                -I"$ours" -I"$stub" $(lib_dirs "$lib") -DHAVE_CONFIG_H \
+                "$src/$lib/$u.c" > /dev/null 2> "$o.hpp.log"; then
+            printf 'pp\t%s\n' "$rc"
+        else
+            printf 'ppext\t%s (pp %s)\n' \
+                "$(grep -m1 -oE 'error: .*' "$o.hpp.log" | cut -c1-90)" "$rc"
+        fi
         return 0
     fi
 
