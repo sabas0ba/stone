@@ -472,10 +472,11 @@ baseline_iso() {
     for h in "$ours"/*.h "$ours"/sys/*.h; do
         printf '#include <%s>\n' "${h#"$ours"/}"
     done > "$work/out/baseline.c"
-    # 診断が 1 つも無ければ grep が 1 を返し，空の baseline が正しい答である
+    # 診断が 1 つも無ければ grep が 1 を返し，空の baseline が正しい答である。
+    # 末尾の空白は落として揃える (単位側は read が落とすので，こちらも落とす)
     "$HOSTCC" -fsyntax-only -std=c89 -pedantic-errors -nostdinc -I"$ours" \
         -include "$shim" "$work/out/baseline.c" 2>&1 \
-        | grep -oE 'error: ISO C[^[]*' | sort -u > "$b" || true
+        | grep -oE 'error: ISO C[^[]*' | sed 's/ *$//' | sort -u > "$b" || true
     return 0
 }
 
@@ -557,6 +558,11 @@ unit_run() {
     else
         rc=$?
     fi
+    if [ "$rc" -eq 6 ]; then
+        # 容量超過。cc の 6 と同じで，適合の話ではなく器の大きさの話である
+        printf 'cap\tpp 6\n'
+        return 0
+    fi
     if [ "$rc" -ne 0 ]; then
         # pp も終了コードしか言わない。cc と同じ手で，**同じ入力を host の
         # cpp に C89 として読ませて**分類する。host も拒めば規格の外の形
@@ -604,9 +610,13 @@ unit_run() {
     baseline_iso
     "$HOSTCC" -fsyntax-only -std=c89 -pedantic-errors -include "$shim" -x c "$o.host.c" \
         > "$o.h2.log" 2>&1 || true
-    # ISO C の診断が 1 つも無ければ grep が 1 を返す。それも答である
-    iso=$(grep -oE 'error: ISO C[^[]*' "$o.h2.log" | sort | uniq -c | sort -rn \
-        | while read -r _ msg; do
+    # ISO C の診断が 1 つも無ければ grep が 1 を返す。それも答である。
+    #
+    # **限界。** 引くのは診断の文面なので，単位自身が long long を使って
+    # いても我々の header と同じ文面なら隠れる。long long は C99 / GNU の
+    # 形で Stage 18 の側の話なので，ここでは受け入れる
+    iso=$(grep -oE 'error: ISO C[^[]*' "$o.h2.log" | sed 's/ *$//' | sort | uniq -c \
+        | sort -rn | while read -r _ msg; do
               grep -qxF "$msg" "$work/out/baseline.iso" || { echo "$msg"; break; }
           done) || true
     if [ -n "$iso" ]; then
