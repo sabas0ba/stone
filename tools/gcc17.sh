@@ -544,8 +544,14 @@ unit_run() {
     # ことを期待する呼び出しは if で受けて終了コードを取る。裸で置くと
     # rc=$? に届く前に script ごと終わり，units では tee の手前が消えて
     # 表が途中で切れる
+    # **HAVE_CONFIG_H を与える。** libiberty の単位は #ifdef HAVE_CONFIG_H の
+    # 下で config.h を読む。GCC の build は -DHAVE_CONFIG_H で組むが，pp16 に
+    # -D は無い。同じ意味の駆動 file を本体にし，単位そのものは束ねの員と
+    # して 1 文字も変えずに含める。config.h が読まれないと HAVE_STRING_H
+    # などが立たず，<string.h> が飛ばされて size_t が無い .i になる
+    printf '#define HAVE_CONFIG_H 1\n#include "%s.c"\n' "$u" > "$o.drv.c"
     # shellcheck disable=SC2086
-    if sh tools/bundle.sh $members "$src/$lib/$u.c" \
+    if sh tools/bundle.sh $members "$u.c=$src/$lib/$u.c" "$o.drv.c" \
             | sh tools/env.sh qemu "$pp16" > "$o.i" 2> "$o.pp.err"; then
         rc=0
     else
@@ -584,14 +590,19 @@ unit_run() {
     fi
 
     # ここから host に訊く。-x c で前処理から通す (.i のままだと -include
-    # が効かない)。我々の .i に指令は残っていないので，通し直しても変わらない
-    if ! "$HOSTCC" -fsyntax-only -std=gnu89 -w -include "$shim" -x c "$o.i" \
+    # が効かない)。我々の .i に指令は残っていないので，通し直しても変わらない。
+    #
+    # **末尾の EOT (0x04) を落とす。** pp16 は出力の終わりに束ねの終端印を
+    # 付け，cc15v はそれを終端として読む。host には "stray '\4'" になり，
+    # それだけで gnu89 の検査が落ちて，本当は通る単位まで decl に見えた
+    tr -d '\004' < "$o.i" > "$o.host.c"
+    if ! "$HOSTCC" -fsyntax-only -std=gnu89 -w -include "$shim" -x c "$o.host.c" \
             > "$o.h1.log" 2>&1; then
         printf 'decl\t%s\n' "$(grep -m1 -oE 'error: .*' "$o.h1.log")"
         return 0
     fi
     baseline_iso
-    "$HOSTCC" -fsyntax-only -std=c89 -pedantic-errors -include "$shim" -x c "$o.i" \
+    "$HOSTCC" -fsyntax-only -std=c89 -pedantic-errors -include "$shim" -x c "$o.host.c" \
         > "$o.h2.log" 2>&1 || true
     # ISO C の診断が 1 つも無ければ grep が 1 を返す。それも答である
     iso=$(grep -oE 'error: ISO C[^[]*' "$o.h2.log" | sort | uniq -c | sort -rn \
