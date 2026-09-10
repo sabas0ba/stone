@@ -9,6 +9,7 @@
 #   gcc17.sh closure <lib>/<unit> 1 単位の閉包 (無い header は空の代役で埋める) を出す
 #   gcc17.sh unit <lib>/<unit>    1 単位を bundle -> pp16 -> cc15v に通し，結果を 1 行で出す
 #   gcc17.sh units [lib]          全単位を通し，tmp/g17u/units.txt に表を出す (6.1 の 4)
+#   gcc17.sh where <lib>/<unit>   gap の単位で，cc が落ちる最初の関数の塊を絞る
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 # unit / units は鎖の像 (tmp/build) と QEMU を要る。STONE_ENGINE と
@@ -626,6 +627,42 @@ unit_run() {
     fi
 }
 
+# gap の位置を絞る。cc は終了コードしか言わないので，.i を関数の境界
+# (行頭の "}") で頭から切り詰めながら食わせ，**最初に同じ終了コードで
+# 落ちる塊**を出す。切り詰めた先で未解決の前方参照が残ると 2 になるが，
+# それは探している誤りではないので先へ進む。
+#
+#   gcc17.sh where <lib>/<unit>   (先に unit を通して .i を作っておく)
+where() {
+    lib=${1%%/*}; u=${1#*/}
+    o="$work/out/$lib.$u"
+    [ -s "$o.i" ] || die ".i が無い (sh tools/gcc17.sh unit $1)"
+    if sh tools/env.sh qemu "$cc15" < "$o.i" > /dev/null 2>&1; then
+        echo "$1: cc は通す (gap ではない)"
+        return 0
+    else
+        want=$?
+    fi
+    total=$(wc -l < "$o.i" | tr -d ' ')
+    prev=0
+    for end in $(grep -n '^}' "$o.i" | cut -d: -f1) "$total"; do
+        head -n "$end" "$o.i" > "$o.cut.i"
+        if sh tools/env.sh qemu "$cc15" < "$o.cut.i" > /dev/null 2>&1; then
+            rc=0
+        else
+            rc=$?
+        fi
+        if [ "$rc" -eq "$want" ]; then
+            echo "$1: cc が $want で落ちる最初の塊は .i の $((prev + 1))〜$end 行"
+            sed -n "$((prev + 1)),${end}p" "$o.i" | grep -vE '^\s*$' | tail -40 \
+                | sed 's/^/  | /'
+            return 0
+        fi
+        prev=$end
+    done
+    echo "$1: 塊ごとには落ちない (誤りが塊をまたぐ)"
+}
+
 units() {
     t="$work/units.txt"
     : > "$t"
@@ -648,8 +685,9 @@ headers) headers "${2:-}" ;;
 closure) [ -n "${2:-}" ] || die "closure <lib>/<unit>"; closure_all "$2"; cat "$work/out/${2%%/*}.${2#*/}.missing" >&2 ;;
 unit) [ -n "${2:-}" ] || die "unit <lib>/<unit>"; unit "$2" ;;
 units) units "${2:-}" ;;
+where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)
-    echo "usage: gcc17.sh {measure | pack | configure | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib]}" >&2
+    echo "usage: gcc17.sh {measure | pack | configure | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit>}" >&2
     exit 2
     ;;
 esac
