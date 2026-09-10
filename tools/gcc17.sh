@@ -472,9 +472,10 @@ baseline_iso() {
     for h in "$ours"/*.h "$ours"/sys/*.h; do
         printf '#include <%s>\n' "${h#"$ours"/}"
     done > "$work/out/baseline.c"
+    # 診断が 1 つも無ければ grep が 1 を返し，空の baseline が正しい答である
     "$HOSTCC" -fsyntax-only -std=c89 -pedantic-errors -nostdinc -I"$ours" \
         -include "$shim" "$work/out/baseline.c" 2>&1 \
-        | grep -oE 'error: ISO C[^[]*' | sort -u > "$b"
+        | grep -oE 'error: ISO C[^[]*' | sort -u > "$b" || true
     return 0
 }
 
@@ -537,17 +538,27 @@ unit_run() {
         return 0
     fi
 
+    # **落ちるのが本題である。** この script は set -e で走るので，拒む
+    # ことを期待する呼び出しは if で受けて終了コードを取る。裸で置くと
+    # rc=$? に届く前に script ごと終わり，units では tee の手前が消えて
+    # 表が途中で切れる
     # shellcheck disable=SC2086
-    sh tools/bundle.sh $members "$src/$lib/$u.c" \
-        | sh tools/env.sh qemu "$pp16" > "$o.i" 2> "$o.pp.err"
-    rc=$?
+    if sh tools/bundle.sh $members "$src/$lib/$u.c" \
+            | sh tools/env.sh qemu "$pp16" > "$o.i" 2> "$o.pp.err"; then
+        rc=0
+    else
+        rc=$?
+    fi
     if [ "$rc" -ne 0 ]; then
         printf 'pp\t%s\n' "$rc"
         return 0
     fi
 
-    sh tools/env.sh qemu "$cc15" < "$o.i" > "$o.o" 2> "$o.cc.err"
-    rc=$?
+    if sh tools/env.sh qemu "$cc15" < "$o.i" > "$o.o" 2> "$o.cc.err"; then
+        rc=0
+    else
+        rc=$?
+    fi
     if [ "$rc" -eq 0 ]; then
         printf 'ok\t%s\n' "$(wc -c < "$o.o" | tr -d ' ')"
         return 0
@@ -566,11 +577,12 @@ unit_run() {
     fi
     baseline_iso
     "$HOSTCC" -fsyntax-only -std=c89 -pedantic-errors -include "$shim" -x c "$o.i" \
-        > "$o.h2.log" 2>&1
+        > "$o.h2.log" 2>&1 || true
+    # ISO C の診断が 1 つも無ければ grep が 1 を返す。それも答である
     iso=$(grep -oE 'error: ISO C[^[]*' "$o.h2.log" | sort | uniq -c | sort -rn \
         | while read -r _ msg; do
               grep -qxF "$msg" "$work/out/baseline.iso" || { echo "$msg"; break; }
-          done)
+          done) || true
     if [ -n "$iso" ]; then
         printf 'ext\t%s\n' "$iso"
     else
