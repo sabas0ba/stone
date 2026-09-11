@@ -2,7 +2,7 @@
 # libc=stage017/libc21/include
 # pp-engine=os
 # pp=tmp/build/pp18 (OS)
-# cc=tmp/build/cc15w.bin
+# cc=tmp/build/cc15x.bin
 libiberty/regex	cap	pp 6
 libiberty/cplus-dem	ok	134920
 libiberty/cp-demangle	ok	140872
@@ -32,7 +32,7 @@ libiberty/lrealpath	decl	error: '_PC_PATH_MAX' undeclared (first use in this fun
 libiberty/make-relative-prefix	ok	11040
 libiberty/make-temp-file	ok	7484
 libiberty/objalloc	ok	4836
-libiberty/obstack	gap	1
+libiberty/obstack	ok	9072
 libiberty/partition	ok	7556
 libiberty/pexecute	ok	6408
 libiberty/physmem	ok	3988
@@ -64,8 +64,8 @@ libcpp/directives-only	ok	20236
 libcpp/errors	ok	19460
 libcpp/expr	ok	98872
 libcpp/files	decl	error: 'struct stat' has no member named 'st_mode'
-libcpp/identifiers	ext	error: ISO C90 forbids array 'proxy_assertion_broken' whose size cannot be evaluated
-libcpp/init	gap	1
+libcpp/identifiers	ok	19216
+libcpp/init	ok	31812
 libcpp/lex	gap	1
 libcpp/line-map	gap	5
 libcpp/macro	decl	error: 'struct stat' has no member named 'st_mtime'

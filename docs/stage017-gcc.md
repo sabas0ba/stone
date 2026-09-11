@@ -99,8 +99,8 @@ GCC 7 を訳せば案 A の目的に C++ 処理系を自作せずに届く」と
 (31〜33 章)。GCC 4.7 でも同じ形の表が出るはずで，**その表の長さが
 案 C の見積りそのもの**になる。
 
-**測った (8 章)。** libiberty と libcpp の 70 単位のうち **48 単位**が
-`.o` まで通り，表は「C 適合の穴 11 つ + libc の穴 4 つ + 器の上限 2 つ」に
+**測った (8 章)。** libiberty と libcpp の 70 単位のうち **51 単位**が
+`.o` まで通り，表は「C 適合の穴 11 つ + libc の穴 4 つ + 器の上限 1 つ」に
 なった。予想どおり同じ形の表が出ている。**表は測るたびに動く** ——
 前処理器の未対応 1 つ (`defined`) は `pp18` で，C 適合の穴の 1 つ
 (仮引数並びの抽象宣言子) は `cc15w` で埋め，そのたびに次の壁が出た。
@@ -589,20 +589,26 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 
 我々のheader自身が出すISO診断 (`long long`) はbaselineとして引く。
 
+> **`ext`と`gap`の限界 —— 同じものを拒んでいるとは限らない。** 我々のcc
+> は終了コードしか言わないので、hostの診断が**我々の拒む理由**だという
+> 保証は無い。実際に`libcpp/identifiers`は、我々がcastの型名 (8.3の9) で
+> 拒み、hostは別の行の`offsetof`をISO C違反と言っていた。**2つは無関係
+> だった** (8.6)。理由を名指しするには`where`で1単位ずつ絞るしかない。
+
 ### 8.2 測った結果
 
 3回測った。**1回に1つずつしか動かさない** —— 動いた単位の数が、その1つの
 効果そのものになる。
 
-| 結果 | 1. `pp16`+`cc15v` | 2. `pp18`+`cc15v` | 3. `pp18`+`cc15w` |
-|---|---:|---:|---:|
-| `ok` | **42** | **42** | **48** |
-| `gap` | 9 | 19 | 13 |
-| `decl` | 5 | 6 | 6 |
-| `ppext` | 13 | 0 | 0 |
-| `ext` | 0 | 1 | 1 |
-| `hdr` | 1 | 1 | 1 |
-| `cap` | 1 | 1 | 1 |
+| 結果 | 1. `pp16`+`cc15v` | 2. `pp18`+`cc15v` | 3. `pp18`+`cc15w` | 4. `pp18`+`cc15x` |
+|---|---:|---:|---:|---:|
+| `ok` | **42** | **42** | **48** | **51** |
+| `gap` | 9 | 19 | 13 | 11 |
+| `decl` | 5 | 6 | 6 | 6 |
+| `ppext` | 13 | 0 | 0 | 0 |
+| `ext` | 0 | 1 | 1 | 0 |
+| `hdr` | 1 | 1 | 1 | 1 |
+| `cap` | 1 | 1 | 1 | 1 |
 
 **1→2 で動いたのは13単位ちょうどで、8.4の`ppext`と一致する。** 他の57単位は
 状態も詳細も1文字も動いていない —— pp18が変えたのは変えるつもりだったもの
@@ -623,7 +629,16 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 結果である。`directives` / `directives-only` / `errors` / `expr` / `pch` /
 `traditional`が`.o`まで出た。**1つ通すと次が見える** —— 残る4単位
 (`charset` / `init` / `lex` / `symtab`) はobstackの原型を抜けた先で
-別の壁に当たり、8.3に3つの形が足された (9・10・11)。
+別の壁に当たり、8.3に4つの形が足された (9・10・11・12)。
+
+**3→4 で動いたのは3単位。** 8.3の9を[cc15x](../stage015/cc15x.md)で通した
+結果で、`obstack` / `init` / `identifiers`が`.o`まで出た。
+
+> **`identifiers`はここに居るはずではなかった。** 3までは`ext`
+> (我々が拒み、hostもC89として拒む) だったが、**2つは無関係だった** ——
+> 我々が拒んでいたのは4013行のcast (9) で、hostが言っていたのは4064行の
+> `offsetof`である。9を通したら`ok`になり、`offsetof`の方は**我々が元から
+> 受けていた**ことが判った。8.6に訂正として残す。
 
 最大は`cp-demangle`の140,800 bytesである。headerの閉包は69単位で閉じ、
 足りないのは`sys/times.h` 1つだけ (`getruntime`) である。
@@ -634,7 +649,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 `gcc47-tree.txt` (4.5) と違い、検査が突き合わせる相手ではない。器を直せば
 変わるべき値なので、次に測ったときの比較対象として置く。
 
-### 8.3 C適合の穴 —— 11つ (`gap` の13単位)
+### 8.3 C適合の穴 —— 11つ (`gap` の11単位)
 
 `gcc17.sh where`が、ccが落ちる最初の関数の塊まで絞る。そこから最小の形を
 作ってccに食わせた。**どれもhostはC89として通す。**
@@ -649,10 +664,11 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 | 6 | block scopeの`extern`宣言 | 1 | xmalloc |
 | 7 | 関数pointerの配列 `void (*fns[32]) (void)` | 1 | xatexit |
 | 8 | `putc`がstdio.hに無い | 5 | mkdeps |
-| 9 | 関数pointer型へのcast `(void *(*) (long)) xmalloc` | 1 | symtab, obstack, init |
+| 9 | ~~関数pointer型へのcast `(void *(*) (long)) xmalloc`~~ | 1 | **[cc15x](../stage015/cc15x.md)で通した** |
 | 10 | 配列の大きさの定数式に`sizeof` | 1 | lex |
 | 11 | pointerの型修飾子 `int (*const f)(int)` | 1 | charset |
 | 12 | 条件式の第2項が空pointer定数 `(k ? 0 : p)->f` | 5 | line-map |
+| 13 | 小数点から始まる浮動小数点定数 `.0001` | 1 | symtab |
 
 1は`ansidecl.h`の`VA_OPEN`が`{ va_list ap; va_start(ap, v); { struct Qdmy`
 と展開する形で、**可変長引数を使う単位すべてに効く**。
@@ -698,6 +714,10 @@ extern int _obstack_begin (struct obstack *, int, int,
 | `charset` | 11 (pointerの型修飾子) | 4284〜4325 |
 | `lex` | 10 (`sizeof`を定数式に) | 4052〜4081 |
 | `line-map` | 12 (条件式の型) | 4096〜4193 |
+
+9を[cc15x](../stage015/cc15x.md)で通すと`obstack`と`init`は`.o`まで出たが、
+`symtab`はさらに先の**13** (`approx_sqrt`の`.0001`) に当たった。
+**3つめの壁である。**
 
 #### 9・10・11・12 —— 4を通して見えた4つ
 
@@ -817,15 +837,16 @@ sfsが持つ情報に合わせてある。`st_ino`はsfsの表の索引がその
 POSIXの`time_t st_mtime`を足すかどうかは、`time_t`を32 bitにするか
 64 bitにするかと同じ判断になるので、そこで決める。
 
-### 8.6 器の上限 (`cap` の1単位) と定数式
+### 8.6 器の上限 (`cap` の1単位) と、`offsetof` についての訂正
 
 1つめは`libiberty/regex.c`が`pp 6` (容量超過) で止まる。8,000行あり、
 自分自身を2度includeして`re_search`の族をwide版まで作る形である。tccの
 ときに広げたpp16の器 (入力4 MiB・macro 4096) を超える。**pp18でも同じ**
 —— pp17系はアリーナが64 KiBで束ねの員も256だが、それでも足りない。
 
-2つめはpp18で測り直して出た`ext`の1単位である。`libcpp/identifiers.c`
-113行が
+2つめは`cap`ではない。**一度書き間違えたので、訂正として残す。**
+
+`libcpp/identifiers.c` 113行が
 
 ```c
 extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 1 : -1];
@@ -839,10 +860,25 @@ extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 
 
 で、**C89の整数定数式ではない**。6.4は整数定数式のキャストを「算術型を
 整数型へ変換するもの」に限っており、アドレスからのキャストは入らない。
-配列の大きさに使えないので、我々のccもhostの
-`-std=c89 -pedantic-errors`も拒む。GCC自身の`stddef.h`は
-`__builtin_offsetof`を使っており、**これはheaderでは閉じない** ——
-器の側に組み込みが要る。
+hostの`gcc -std=c89 -pedantic-errors`はこれを
+`ISO C90 forbids array 'proxy_assertion_broken' whose size cannot be
+evaluated`で拒む。
+
+**初版はここを「我々のccもhostも拒む」と書いた。誤りである。**
+`gcc17.sh`がこの単位を`ext`と出したのは、我々が**別の行**
+(4013行の`(void *(*) (long)) xmalloc`。8.3の9) で拒んでいたからで、
+hostのISO C診断とは無関係だった。[cc15x](../stage015/cc15x.md)で9を
+通したら、この単位は`ok`になった。
+
+**我々は元からこの形を受けている。** `cofs()`は「括弧・`(型 *)`の
+キャスト・整数・`->`と`.`の連鎖」を畳むように書いてあり、註にも
+「`offsetof`の展開の中身」と書いてある。つまり**我々はC89より緩い** ——
+GCCが自分の`__builtin_offsetof`を前提にこの形を使うので、受ける側に
+倒してあること自体は目的に合っている。
+
+**この取り違えの筋は記録する価値がある** (8.1の註)。`ext`も`gap`も
+「我々が拒んだ」ことしか言っておらず、添えてある診断はhostが**別に**
+見つけたものである。**2つが同じものだと読んではいけない。**
 
 ### 8.7 次の手
 
@@ -854,11 +890,13 @@ extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 
    **`STONE_GCC17_PP=os`で移した (8.1)。13単位を測り直した結果が8.2である。**
 3. ~~8.3の4 (`void *(*)(long)`) —— 12単位を塞いでいる~~
    **[cc15w](../stage015/cc15w.md)で通した。6単位が`.o`まで出た (8.2)。**
-4. **8.3の9 (関数pointer型へのcast) —— 3単位。** 4を通した先に出た形で、
-   `symtab` / `init` / `obstack`が待っている
-5. 8.3の10 (`sizeof`を定数式に)・11 (pointerの型修飾子)・12 (条件式の型)
-   —— 各1単位。10は`cofs`が「会った例が無い」として保留していたもので、
-   会った。12は**規則を取り違えていた**もので、他の11と性質が違う
+4. ~~8.3の9 (関数pointer型へのcast) —— 3単位~~
+   **[cc15x](../stage015/cc15x.md)で通した。3単位が`.o`まで出た (8.2)。**
+5. **8.3の10・11・12・13 —— 各1単位。** 10 (`sizeof`を定数式に) は`cofs`が
+   「会った例が無い」として保留していたもので、会った。12 (条件式の型) は
+   **規則を取り違えていた**もので、他と性質が違う。11 (pointerの型修飾子) は
+   `pstars`が既に読み飛ばしている処理を`fnpdec1`が持っていないだけ、
+   13 (`.0001`) は字句の話である
 6. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
 7. 8.3の残り5つ (2・3・5・6・7) と8 (`putc`)
 8. 8.5の`struct stat`のmember (5単位)・`sys/times.h`・`_PC_PATH_MAX`
