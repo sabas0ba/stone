@@ -314,7 +314,7 @@ work="$repo_root/tmp/g17u"
 ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc21/include}
 pp16=tmp/build/pp16.bin
 pp18=tmp/build/pp18
-cc15=tmp/build/cc15x.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+cc15=tmp/build/cc15y.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 

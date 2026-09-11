@@ -39,7 +39,7 @@ cd "$repo_root"
 out=tmp/d17
 mkdir -p "$out"
 
-cc=${STONE_DIFF_CC:-tmp/build/cc15x.bin}   # 最前線の世代で測る
+cc=${STONE_DIFF_CC:-tmp/build/cc15y.bin}   # 最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
