@@ -99,9 +99,11 @@ GCC 7 を訳せば案 A の目的に C++ 処理系を自作せずに届く」と
 (31〜33 章)。GCC 4.7 でも同じ形の表が出るはずで，**その表の長さが
 案 C の見積りそのもの**になる。
 
-**測った (8 章)。** libiberty と libcpp の 70 単位のうち 42 単位が
-`.o` まで通り，表は「C 適合の穴 8 つ + libc の穴 3 つ + 前処理器の
-未対応 1 つ + 器の上限 1 つ」になった。予想どおり同じ形の表が出ている。
+**測った (8 章)。** libiberty と libcpp の 70 単位のうち **48 単位**が
+`.o` まで通り，表は「C 適合の穴 10 つ + libc の穴 4 つ + 器の上限 2 つ」に
+なった。予想どおり同じ形の表が出ている。**表は測るたびに動く** ——
+前処理器の未対応 1 つ (`defined`) は `pp18` で，C 適合の穴の 1 つ
+(仮引数並びの抽象宣言子) は `cc15w` で埋め，そのたびに次の壁が出た。
 
 ### 4.2 GCC 4.7 の `configure` と `Makefile` が我々の OS で回るか
 
@@ -589,29 +591,39 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 
 ### 8.2 測った結果
 
-`pp16` (鎖の素の側) と`pp18` (OSの上) の両方で測った。**変わったのは
-13単位ちょうどで、8.4の`ppext`と一致する。** 他の57単位は状態も詳細も
-1文字も動いていない —— pp18が変えたのは変えるつもりだったものだけである。
+3回測った。**1回に1つずつしか動かさない** —— 動いた単位の数が、その1つの
+効果そのものになる。
 
-| 結果 | `pp16` | `pp18` (OS) |
-|---|---:|---:|
-| `ok` | **42** | **42** |
-| `gap` | 9 | 19 |
-| `decl` | 5 | 6 |
-| `ppext` | 13 | 0 |
-| `ext` | 0 | 1 |
-| `hdr` | 1 | 1 |
-| `cap` | 1 | 1 |
+| 結果 | 1. `pp16`+`cc15v` | 2. `pp18`+`cc15v` | 3. `pp18`+`cc15w` |
+|---|---:|---:|---:|
+| `ok` | **42** | **42** | **48** |
+| `gap` | 9 | 19 | 13 |
+| `decl` | 5 | 6 | 6 |
+| `ppext` | 13 | 0 | 0 |
+| `ext` | 0 | 1 | 1 |
+| `hdr` | 1 | 1 | 1 |
+| `cap` | 1 | 1 | 1 |
 
-**`ok`は42のまま増えなかった。** 13単位は前処理を抜けただけで、その先の
-壁に当たっている。内訳は次のとおりで、**10単位が8.3の4という既知の1つ**に
-集まった。
+**1→2 で動いたのは13単位ちょうどで、8.4の`ppext`と一致する。** 他の57単位は
+状態も詳細も1文字も動いていない —— pp18が変えたのは変えるつもりだったもの
+だけである。状態が同じというだけでは足りないので、`md5` / `crc32` /
+`symtab`の3単位では**同じ束ねを両方のppに通して`.i`をバイト単位で比べた**
+(8.4)。
+
+**ただし`ok`は42のまま増えなかった。** 13単位は前処理を抜けただけで、
+その先の壁に当たっている。
 
 | 移った先 | 単位 | 原因 |
 |---|---:|---|
 | `gap 1` | 10 | 8.3の4 (`obstack.h`の`void *(*) (long)`)。既知 |
 | `decl` | 2 | `struct stat`の`st_mode` / `st_mtime` (8.5) |
 | `ext` | 1 | `offsetof`が定数式でない (8.6の2。新規) |
+
+**2→3 で動いたのは6単位。** 8.3の4を[cc15w](../stage015/cc15w.md)で通した
+結果である。`directives` / `directives-only` / `errors` / `expr` / `pch` /
+`traditional`が`.o`まで出た。**1つ通すと次が見える** —— 残る4単位
+(`charset` / `init` / `lex` / `symtab`) はobstackの原型を抜けた先で
+別の壁に当たり、8.3に3つの形が足された (9・10・11)。
 
 最大は`cp-demangle`の140,800 bytesである。headerの閉包は69単位で閉じ、
 足りないのは`sys/times.h` 1つだけ (`getruntime`) である。
@@ -622,7 +634,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 `gcc47-tree.txt` (4.5) と違い、検査が突き合わせる相手ではない。器を直せば
 変わるべき値なので、次に測ったときの比較対象として置く。
 
-### 8.3 C適合の穴 —— 8つ (`gap` の19単位)
+### 8.3 C適合の穴 —— 10つ (`gap` の13単位)
 
 `gcc17.sh where`が、ccが落ちる最初の関数の塊まで絞る。そこから最小の形を
 作ってccに食わせた。**どれもhostはC89として通す。**
@@ -632,11 +644,14 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 | 1 | block内の`struct tag ;` (tagだけの宣言) | 1 | concat |
 | 2 | bit-field memberへの`++` | 5 | fibheap |
 | 3 | 関数名を括弧で囲む定義・宣言 `int (f) (int x)` | 1 | hashtab |
-| 4 | prototypeの仮引数に関数pointerの抽象宣言子 `void *(*)(long)` | 1 | obstack, symtab, **libcppの10単位** |
+| 4 | ~~prototypeの仮引数に関数pointerの抽象宣言子 `void *(*)(long)`~~ | 1 | **[cc15w](../stage015/cc15w.md)で通した** |
 | 5 | block scopeの`typedef` | 1 | sort |
 | 6 | block scopeの`extern`宣言 | 1 | xmalloc |
 | 7 | 関数pointerの配列 `void (*fns[32]) (void)` | 1 | xatexit |
 | 8 | `putc`がstdio.hに無い | 5 | mkdeps |
+| 9 | 関数pointer型へのcast `(void *(*) (long)) xmalloc` | 1 | symtab, obstack |
+| 10 | 配列の大きさの定数式に`sizeof` | 1 | lex |
+| 11 | pointerの型修飾子 `int (*const f)(int)` | 1 | charset |
 
 1は`ansidecl.h`の`VA_OPEN`が`{ va_list ap; va_start(ap, v); { struct Qdmy`
 と展開する形で、**可変長引数を使う単位すべてに効く**。
@@ -645,24 +660,57 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 `putc`を持たず、鎖の前置部が**1引数の**`putc`を提供しているので、
 C89の2引数の呼出しが引数個数の不一致 (5) になる。
 
-**4は2単位で出たが同じ形である。** 族を振る舞いではなく言語の規則で
-切る ([stage017-cc.md](stage017-cc.md) 33章の反省)。
+**族を振る舞いではなく言語の規則で切る**
+([stage017-cc.md](stage017-cc.md) 33章の反省)。4・9・11はどれも
+「抽象宣言子・型修飾子を読む場所が足りない」という近い話だが、
+**通る道が別**である —— 4は仮引数並びの宣言子、9はcastの型名、
+11はpointerの後ろの修飾子で、直す場所が違う。まとめて1つと数えると
+「1つ直したのに単位が動かない」が起きる。
 
-> **pp18で前処理を通したら、4が塞いでいる単位が2から12になった。**
-> `include/obstack.h` 193行の
->
-> ```c
-> extern int _obstack_begin (struct obstack *, int, int,
->                            void *(*) (long), void (*) (void *));
-> ```
->
-> をlibcppの全単位が`include/symtab.h` 22行経由で読む。`gcc17.sh where`が
-> `charset` / `directives` / `directives-only` / `errors` / `expr` /
-> `init` / `lex` / `line-map` / `pch` / `traditional`のどれでも
-> **`.i`の同じ1843〜1989行**を指す。
->
-> **いちばん効く1つが8.4から4へ移った。** 埋める順番は塞いでいる単位の
-> 数で決まるので、次に直すのはこれである (8.7)。
+#### 4 —— 12単位を塞いでいた1つ
+
+`include/obstack.h` 193行の
+
+```c
+extern int _obstack_begin (struct obstack *, int, int,
+                           void *(*) (long), void (*) (void *));
+```
+
+をlibcppの全単位が`include/symtab.h` 22行経由で読む。`gcc17.sh where`が
+`charset` / `directives` / `directives-only` / `errors` / `expr` /
+`init` / `lex` / `line-map` / `pch` / `traditional`のどれでも
+**`.i`の同じ1843〜1989行**を指した。pp18で前処理を通すまで、この10単位は
+`ppext`で止まっていて**この壁は見えていなかった**。
+
+[cc15w](../stage015/cc15w.md)で通した。**効いたのは6単位** ——
+`.o`まで出たのは`directives` / `directives-only` / `errors` / `expr` /
+`pch` / `traditional`で、残る4単位はその先の9・10・11に当たった。
+**1つ通すと次が見える。**
+
+#### 9・10・11 —— 4を通して見えた3つ
+
+いずれもcc15wで測り直して初めて出た。最小の形はどれもhostの
+`gcc -std=c89 -pedantic-errors`が通す。
+
+```c
+/*  9  symtab.c 65行。仮引数並びではなく cast の型名の側である */
+_obstack_begin (&table->stack, 0, 0,
+                (void *(*) (long)) xmalloc,
+                (void (*) (void *)) free);
+
+/* 10  lex.c 133行。翻訳時の表明。cofs が sizeof を「会った例が無い」と
+ *     して保留していたもの (stage015/cc15v.sc の註)。会った */
+typedef char check_word_type_size
+  [(sizeof(word_type) == 8 || sizeof(word_type) == 4) * 2 - 1];
+
+/* 11  charset.c 455行。C89 6.5.4.1 の pointer は
+ *     「* type-qualifier-list_opt」である */
+static unsigned char
+conversion_loop (int (*const one_conversion)(iconv_t, ...), ...)
+```
+
+11は仮引数だけの話ではない。`int (*const f)(int) = 0;`という局所の宣言も
+同じく1で止まる。
 
 ### 8.4 前処理器 —— `defined` がmacro展開で現れる (`ppext` の13単位)
 
@@ -764,12 +812,20 @@ extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 
    **[pp18](../stage017/pp18.md)で通した。**
 2. ~~harnessのppの段をOS側へ移す~~
    **`STONE_GCC17_PP=os`で移した (8.1)。13単位を測り直した結果が8.2である。**
-3. **8.3の4 (`void *(*)(long)`) —— 12単位を塞いでいる。いまはこれが
-   いちばん効く1つ**である。1が動いた結果、libcppの10単位がここに集まった
-4. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
-5. 8.3の残り5つと8 (`putc`)
-6. 8.5の`struct stat`のmember (4単位)・`sys/times.h`・`_PC_PATH_MAX`
-7. 8.6の2 (`offsetof`が定数式) —— headerでは閉じず、器に組み込みが要る
+3. ~~8.3の4 (`void *(*)(long)`) —— 12単位を塞いでいる~~
+   **[cc15w](../stage015/cc15w.md)で通した。6単位が`.o`まで出た (8.2)。**
+4. **8.3の9 (関数pointer型へのcast) —— 2単位。** 4を通した先に出た形で、
+   `symtab`と`obstack`が待っている
+5. 8.3の10 (`sizeof`を定数式に) と11 (pointerの型修飾子) —— 各1単位。
+   10は`cofs`が「会った例が無い」として保留していたもので、会った
+6. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
+7. 8.3の残り5つ (2・3・5・6・7) と8 (`putc`)
+8. 8.5の`struct stat`のmember (5単位)・`sys/times.h`・`_PC_PATH_MAX`
+9. 8.6の2 (`offsetof`が定数式) —— headerでは閉じず、器に組み込みが要る
+
+**順番は測るたびに入れ替わる。** 1を通したら「いちばん効く1つ」が8.4から
+8.3の4へ移り、その4を通したら残った4単位が9・10・11へ散った。**塞いでいる
+単位の数は、その前の壁を通すまで判らない。**
 
 **gcc/本体 (362単位) はまだ測っていない。** 生成header (`tm.h`・
-`insn-*.h`) とhost向けconfigureが要る。3と4を埋めてから同じharnessで測る。
+`insn-*.h`) とhost向けconfigureが要る。4〜6を埋めてから同じharnessで測る。
