@@ -1,0 +1,70 @@
+libiberty/regex	hdr	sys/types.h -> cap	pp 6
+libiberty/cplus-dem	hdr	sys/types.h -> ok	134848
+libiberty/cp-demangle	ok	140800
+libiberty/md5	hdr	sys/types.h -> ok	17312
+libiberty/sha1	ok	29928
+libiberty/alloca	ok	4980
+libiberty/argv	ok	11796
+libiberty/choose-temp	hdr	sys/types.h -> ok	4788
+libiberty/concat	hdr	sys/types.h -> gap	1
+libiberty/cp-demint	ok	9996
+libiberty/crc32	ok	4664
+libiberty/dyn-string	ok	11612
+libiberty/fdmatch	hdr	sys/stat.h sys/types.h -> decl	error: storage size of 'sbuf1' isn't known
+libiberty/fibheap	gap	5
+libiberty/filename_cmp	ok	1728
+libiberty/floatformat	ok	19828
+libiberty/fnmatch	ok	7284
+libiberty/fopen_unlocked	ok	4456
+libiberty/getopt	ok	19884
+libiberty/getopt1	ok	1956
+libiberty/getpwd	hdr	sys/types.h -> decl	error: storage size of 'dotstat' isn't known
+libiberty/getruntime	hdr	sys/times.h sys/types.h -> decl	error: storage size of 'tms' isn't known
+libiberty/hashtab	hdr	sys/types.h -> gap	1
+libiberty/hex	ok	3964
+libiberty/lbasename	ok	4768
+libiberty/lrealpath	decl	error: '_PC_PATH_MAX' undeclared (first use in this function)
+libiberty/make-relative-prefix	ok	10764
+libiberty/make-temp-file	hdr	sys/types.h -> ok	7300
+libiberty/objalloc	ok	4812
+libiberty/obstack	gap	1
+libiberty/partition	ok	7484
+libiberty/pexecute	ok	6380
+libiberty/physmem	hdr	sys/types.h -> ok	3852
+libiberty/pex-common	ok	19552
+libiberty/pex-one	ok	3992
+libiberty/safe-ctype	ok	2536
+libiberty/simple-object	hdr	sys/types.h -> decl	error: unknown type name 'off_t'
+libiberty/simple-object-coff	hdr	sys/types.h -> decl	error: unknown type name 'off_t'
+libiberty/simple-object-elf	hdr	sys/types.h -> decl	error: unknown type name 'off_t'
+libiberty/simple-object-mach-o	hdr	sys/types.h -> decl	error: unknown type name 'off_t'
+libiberty/sort	hdr	sys/types.h -> gap	1
+libiberty/spaces	ok	4108
+libiberty/splay-tree	ok	14848
+libiberty/stack-limit	ok	568
+libiberty/strerror	ok	8792
+libiberty/strsignal	hdr	signal.h -> ok	7572
+libiberty/timeval-utils	hdr	sys/types.h -> ok	1184
+libiberty/unlink-if-ordinary	hdr	sys/types.h -> decl	error: storage size of 'st' isn't known
+libiberty/xatexit	gap	1
+libiberty/xexit	ok	3892
+libiberty/xmalloc	gap	1
+libiberty/xmemdup	hdr	sys/types.h -> ok	3952
+libiberty/xstrdup	hdr	sys/types.h -> ok	3980
+libiberty/xstrerror	ok	3708
+libiberty/xstrndup	hdr	sys/types.h -> ok	4076
+libcpp/charset	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/directives	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/directives-only	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/errors	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/expr	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/files	hdr	dirent.h sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/identifiers	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/init	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/lex	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/line-map	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/macro	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/mkdeps	hdr	sys/types.h -> gap	5
+libcpp/pch	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/symtab	hdr	sys/types.h -> gap	1
+libcpp/traditional	hdr	sys/types.h -> ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)

@@ -646,7 +646,10 @@ where() {
     total=$(wc -l < "$o.i" | tr -d ' ')
     prev=0
     for end in $(grep -n '^}' "$o.i" | cut -d: -f1) "$total"; do
-        head -n "$end" "$o.i" > "$o.cut.i"
+        # **終端印 (0x04) を付け直す。** 切り詰めると pp16 が末尾に置いた
+        # EOT が消え，cc15v は入力の終わりを待ったまま QEMU の打ち切り
+        # (既定 900 秒) まで止まる
+        { head -n "$end" "$o.i"; printf '\004'; } > "$o.cut.i"
         if sh tools/env.sh qemu "$cc15" < "$o.cut.i" > /dev/null 2>&1; then
             rc=0
         else
