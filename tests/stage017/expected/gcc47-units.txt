@@ -2,7 +2,7 @@
 # libc=stage017/libc21/include
 # pp-engine=os
 # pp=tmp/build/pp18 (OS)
-# cc=tmp/build/cc15x.bin
+# cc=tmp/build/cc15ab.bin
 libiberty/regex	cap	pp 6
 libiberty/cplus-dem	ok	134920
 libiberty/cp-demangle	ok	140872
@@ -58,7 +58,7 @@ libiberty/xmemdup	ok	4000
 libiberty/xstrdup	ok	4028
 libiberty/xstrerror	ok	3708
 libiberty/xstrndup	ok	4124
-libcpp/charset	gap	1
+libcpp/charset	ok	63672
 libcpp/directives	ok	87472
 libcpp/directives-only	ok	20236
 libcpp/errors	ok	19460
@@ -66,10 +66,10 @@ libcpp/expr	ok	98872
 libcpp/files	decl	error: 'struct stat' has no member named 'st_mode'
 libcpp/identifiers	ok	19216
 libcpp/init	ok	31812
-libcpp/lex	gap	1
+libcpp/lex	gap	5
 libcpp/line-map	gap	5
 libcpp/macro	decl	error: 'struct stat' has no member named 'st_mtime'
 libcpp/mkdeps	gap	5
 libcpp/pch	ok	39272
-libcpp/symtab	gap	1
+libcpp/symtab	ok	19552
 libcpp/traditional	ok	41724
