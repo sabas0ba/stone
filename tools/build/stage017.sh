@@ -336,7 +336,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 pp18 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin kernel25.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -351,7 +351,7 @@ do_stage017() {
         l21_posix_sys.o l21_posix_morecore.o l21_posix_stdio.o \
         l21_posix_assert.o l21_posix_dir.o l21_posix_signal.o \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
-           stage017/pp17.sc \
+           stage017/pp17.sc stage017/pp18.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
            stage017/mk20.c \
            stage017/kernel23.c stage017/kernel24.c stage017/kernel25.c \

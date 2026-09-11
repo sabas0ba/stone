@@ -790,14 +790,26 @@ units() {
         printf 'cc=%s\n' "$cc15"
     } | tee "$m"
     echo
+    # 通すべき単位の数を先に数えておく。表と突き合わせるためである
+    want=0
+    for lib in ${1:-libiberty libcpp}; do
+        want=$((want + $(unit_list "$lib" | grep -c . || true)))
+    done
     for lib in ${1:-libiberty libcpp}; do
         for u in $(unit_list "$lib"); do
             unit "$lib/$u"
         done
     done | tee "$t"
     echo
-    echo "units: $(wc -l < "$t" | tr -d ' ') 単位"
+    got=$(wc -l < "$t" | tr -d ' ')
+    echo "units: $got 単位"
     cut -f2 "$t" | sort | uniq -c | sort -rn | sed 's/^/  /'
+    # **短い表を成功として返さない。** 左辺が die で死んでも pipeline の
+    # 終了コードは tee のものなので，途中で切れた表がそのまま残り，
+    # 呼んだ側は 0 を受け取る。実際に走行中の tmp/build/pp18 を消して
+    # しまい，17 行の表が rc 0 で出た。**表の長さは数えれば判る**
+    [ "$got" -eq "$want" ] \
+        || die "表が途中で切れている (単位 $want / 表 $got 行。$t を見る)"
 }
 
 cmd=${1:-}
