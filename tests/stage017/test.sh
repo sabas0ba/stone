@@ -1403,4 +1403,60 @@ diff -u tests/stage017/expected/ppdefined.txt "$out/ppd.out" > "$out/ppd.diff"
 report $? "run: 展開の後に残った defined を pp18 が評価する (pp17 は 4 で拒む)"
 [ -s "$out/ppd.diff" ] && sed -n '4,$p' "$out/ppd.diff"
 
+# ---------------------------------------------------------------------------
+section "第 7 部: putc をマクロとして持つ (libc22。docs/stage017-gcc.md 8.3 の 8)"
+
+# **GCC の libcpp 3 単位 (lex / line-map / mkdeps) がこの 1 つで止まって
+# いた。** C89 7.9.7.8 の putc を我々は持っておらず、しかも鎖の前置部が
+# **1 引数の putc** を primitive として持つので、関数として宣言しても
+# 器の組込みが勝つ (引数個数の不一致 5)。C89 7.9.1 が認めるマクロで置いた
+# (stage017/libc22.md)。
+
+# **鎖は変わらない。** 我々自身のソースは putc を 1 度も呼んでいないので、
+# マクロを置いても展開される場所が無い。.o がバイト一致することで示す
+ok=0
+for n in src_string src_ctype src_stdlib src_morecore src_misc15 \
+         posix_sys posix_morecore posix_stdio posix_assert posix_dir \
+         posix_signal; do
+    cmp -s "tmp/build/l21_$n.o" "tmp/build/l22_$n.o" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "build: libc22 の .o 11 本が libc21 とバイト一致 (header だけの差)"
+
+# **header を足しただけでは「訳せた」までしか言えない。** 我々の OS の
+# 上で cc19 に訳させ、走らせて、fputc へ書き換わった先が本当に書けることを
+# 見る。第 6 部と同じく像を詰めて kernel24 で起動する
+r=$out/putc
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/t"
+cp tmp/build/pp16cmd  "$r/bin/pp16"
+cp tmp/build/pp17     "$r/bin/pp17"
+# cc19 は器の位置を "/bin/cc15p" と焼き込んでいる (cc19.c 53 行)。
+# 凍結世代なので名前は変えられない。中身は最前線の cc15ab を置く
+cp tmp/build/cc15abcmd "$r/bin/cc15p"
+cp tmp/build/ld17cmd  "$r/bin/ld16"
+cp tmp/build/sh2.bin  "$r/bin/sh2"
+cp tmp/build/sh2.bin  "$r/sh2"
+cp tmp/build/cc19     "$r/cc19"
+# **ヘッダと .o は同じ世代にする** (tools/ext17.sh の反省)
+cp stage017/libc22/include/*.h     "$r/include/"
+cp stage017/libc22/include/sys/*.h "$r/include/sys/"
+for f in l22_src_string l22_src_ctype l22_src_stdlib l22_src_misc15 \
+         l22_posix_sys l22_posix_morecore l22_posix_stdio \
+         l22_posix_assert l22_posix_dir l22_posix_signal rt64 rtfp; do
+    cp "tmp/build/$f.o" "$r/lib/"
+done
+cp tests/stage017/ext/putct.c "$r/t/putct.c"
+cat > "$r/go.sh" <<'PUTCEOF'
+cc19 -o putct t/putct.c
+echo "cc $?"
+putct
+echo "run $?"
+PUTCEOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/putc.out" 33554432 1024
+diff -u tests/stage017/expected/putc.txt "$out/putc.out" > "$out/putc.diff"
+report $? "run: 我々の OS の上で putc(c, stdout) が書ける (libc22 のマクロ)"
+[ -s "$out/putc.diff" ] && sed -n '4,$p' "$out/putc.diff"
+
 summary

@@ -311,7 +311,7 @@ work="$repo_root/tmp/g17u"
 # STONE_GCC17_LIBC で差し替えられる。stage015/libc は鎖の素の側 ——
 # tools/diff17.sh の bare が測る器で，sys/ の下は time.h しか無い。
 # **どちらで測ったかで header の穴の数が変わる**ので明示する
-ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc21/include}
+ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc22/include}
 pp16=tmp/build/pp16.bin
 pp18=tmp/build/pp18
 cc15=tmp/build/cc15ab.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)

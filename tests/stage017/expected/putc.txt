@@ -1,0 +1,6 @@
+cc 0
+putc
+e
+x
+fp
+run 0

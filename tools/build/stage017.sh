@@ -48,8 +48,12 @@ build_stage017() {
     cmdlink cc15tcmd cc15t
     # 第 21 世代。複合代入の符号 (5.1)。これが最前線である
     cmdlink cc15ucmd cc15u
-    # 第 22 世代。スカラの初期化子の溢れ (5.2)。これが最前線である
+    # 第 22 世代。スカラの初期化子の溢れ (5.2)
     cmdlink cc15vcmd cc15v
+    # 第 28 世代。GCC 4.7.4 の 70 単位を測って出た 6 つを埋めた先
+    # (docs/stage017-gcc.md 8.3)。**これが最前線である。**
+    # 検査の第 7 部が OS の上で使う
+    cmdlink cc15abcmd cc15ab
     cmdlink ld16cmd ld16
     # 未定義シンボルの名前を言うリンカ (5.1)。cc19 は器の位置を
     # "/bin/ld16" と焼き込んでいるので、置くときは名前を ld16 にする
@@ -149,6 +153,24 @@ build_stage017() {
             -- libc21_run "$f" "$n"
     done
 
+    # libc の第 22 世代 (8.3 の 8)。libc21 との差は stdio.h の 1 か所 ——
+    # C89 7.9.7.8 の putc を**マクロとして**置いた。関数として宣言しても
+    # 鎖の前置部の 1 引数 putc に負けるので，pp の段で fputc へ書き換える。
+    # GCC の libcpp 3 単位 (lex / line-map / mkdeps) がこれで .o まで通る
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal; do
+        n=$(echo "$f" | tr / _)
+        step "l22_$n" "l22_$n.o" \
+            -- "stage017/libc22/$f.c" \
+               stage017/libc22/include/*.h \
+               stage017/libc22/include/sys/time.h \
+               stage017/libc22/include/sys/stat.h \
+               stage017/libc22/include/sys/types.h \
+               tmp/build/cc15k.bin tmp/build/pp.bin \
+            -- libc22_run "$f" "$n"
+    done
+
     # 前処理器の第 17 世代 (第 3 部の 3 の 2)。-I を探す道として持つ。
     # **libc を繋がない** —— sys_* は 'E' 前置部のものを直に呼ぶ
     # (docs/stage017-cc.md 17 章)
@@ -223,6 +245,18 @@ libc21_run() {
     sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l21_$2.i" \
         > "tmp/build/l21_$2.o"
     echo "built tmp/build/l21_$2.o" >&2
+}
+
+libc22_run() {
+    sh tools/bundle.sh stage017/libc22/include/*.h \
+        "sys/time.h=stage017/libc22/include/sys/time.h" \
+        "sys/stat.h=stage017/libc22/include/sys/stat.h" \
+        "sys/types.h=stage017/libc22/include/sys/types.h" \
+        "stage017/libc22/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l22_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l22_$2.i" \
+        > "tmp/build/l22_$2.o"
+    echo "built tmp/build/l22_$2.o" >&2
 }
 
 libc20_run() {
@@ -336,7 +370,7 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 pp18 mk17 mk18 mk19 mk20 stamp \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd cc15abcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 pp18 mk17 mk18 mk19 mk20 stamp \
         kernel23.bin kernel24.bin kernel25.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
@@ -350,6 +384,10 @@ do_stage017() {
         l21_src_morecore.o l21_src_misc15.o \
         l21_posix_sys.o l21_posix_morecore.o l21_posix_stdio.o \
         l21_posix_assert.o l21_posix_dir.o l21_posix_signal.o \
+        l22_src_string.o l22_src_ctype.o l22_src_stdlib.o \
+        l22_src_morecore.o l22_src_misc15.o \
+        l22_posix_sys.o l22_posix_morecore.o l22_posix_stdio.o \
+        l22_posix_assert.o l22_posix_dir.o l22_posix_signal.o \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc stage017/pp18.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
@@ -362,6 +400,8 @@ do_stage017() {
            stage017/libc20/src/*.c stage017/libc20/posix/*.c \
            stage017/libc21/include/*.h stage017/libc21/include/sys/*.h \
            stage017/libc21/src/*.c stage017/libc21/posix/*.c \
+           stage017/libc22/include/*.h stage017/libc22/include/sys/*.h \
+           stage017/libc22/src/*.c stage017/libc22/posix/*.c \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh
