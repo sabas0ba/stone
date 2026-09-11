@@ -1,5 +1,5 @@
 # source=gcc-4.7.4
-# libc=stage017/libc21/include
+# libc=stage017/libc22/include
 # pp-engine=os
 # pp=tmp/build/pp18 (OS)
 # cc=tmp/build/cc15ab.bin
@@ -66,10 +66,10 @@ libcpp/expr	ok	98872
 libcpp/files	decl	error: 'struct stat' has no member named 'st_mode'
 libcpp/identifiers	ok	19216
 libcpp/init	ok	31812
-libcpp/lex	gap	5
-libcpp/line-map	gap	5
+libcpp/lex	ok	93368
+libcpp/line-map	ok	45268
 libcpp/macro	decl	error: 'struct stat' has no member named 'st_mtime'
-libcpp/mkdeps	gap	5
+libcpp/mkdeps	ok	16028
 libcpp/pch	ok	39272
 libcpp/symtab	ok	19552
 libcpp/traditional	ok	41724

@@ -99,8 +99,8 @@ GCC 7 を訳せば案 A の目的に C++ 処理系を自作せずに届く」と
 (31〜33 章)。GCC 4.7 でも同じ形の表が出るはずで，**その表の長さが
 案 C の見積りそのもの**になる。
 
-**測った (8 章)。** libiberty と libcpp の 70 単位のうち **53 単位**が
-`.o` まで通り，表は「C 適合の穴 7 つ + libc の穴 4 つ + 器の上限 1 つ」に
+**測った (8 章)。** libiberty と libcpp の 70 単位のうち **56 単位**が
+`.o` まで通り，表は「C 適合の穴 6 つ + libc の穴 4 つ + 器の上限 1 つ」に
 なった。予想どおり同じ形の表が出ている。**表は測るたびに動く** ——
 前処理器の未対応 1 つ (`defined`) は `pp18` で，C 適合の穴の 1 つ
 (仮引数並びの抽象宣言子) は `cc15w` で埋め，そのたびに次の壁が出た。
@@ -536,16 +536,17 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 まずこの2つの書庫で測る。
 
 道具は`tools/gcc17.sh`の`configure` / `headers` / `unit` / `units` / `where`。
-器は`cc15v`と`pp18`、libcは`libc21`である。
+器は`cc15ab`と`pp18`、libcは`libc22`である (どれも最前線)。
 
 ### 8.1 どう測るか
 
 **単位の一覧を自分で選ばない。** `libiberty/Makefile.in`の
 `REQUIRED_OFILES`と`libcpp/Makefile.in`の`libcpp_a_OBJS`から取る。
 
-**どのlibcで測るかを明示する。** 既定は`libc21` —— zlib / bzip2を読んで
-足した世代で、我々が実物に向けて持っているheaderはこれが全部である
-([libc21.md](../stage017/libc21.md))。`STONE_GCC17_LIBC`で差し替えられる。
+**どのlibcで測るかを明示する。** 既定は`libc22` —— zlib / bzip2を読んで
+足した`libc21`に、GCCを読んで判った`putc`を足した世代で、我々が実物に
+向けて持っているheaderはこれが全部である
+([libc22.md](../stage017/libc22.md))。`STONE_GCC17_LIBC`で差し替えられる。
 
 > **初回は`stage015/libc`で測ってしまった。** それは鎖の素の側
 > (`tools/diff17.sh`の`bare`が測る器) で、`sys/`の下は`time.h`しか無い。
@@ -600,17 +601,18 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 3回測った。**1回に1つずつしか動かさない** —— 動いた単位の数が、その1つの
 効果そのものになる。
 
-| 結果 | 1. `cc15v` | 2. `pp18` | 3. `cc15w` | 4. `cc15x` | 5. `cc15ab` |
-|---|---:|---:|---:|---:|---:|
-| `ok` | **42** | **42** | **48** | **51** | **53** |
-| `gap` | 9 | 19 | 13 | 11 | 9 |
-| `decl` | 5 | 6 | 6 | 6 | 6 |
-| `ppext` | 13 | 0 | 0 | 0 | 0 |
-| `ext` | 0 | 1 | 1 | 0 | 0 |
-| `hdr` | 1 | 1 | 1 | 1 | 1 |
-| `cap` | 1 | 1 | 1 | 1 | 1 |
+| 結果 | 1. `cc15v` | 2. `pp18` | 3. `cc15w` | 4. `cc15x` | 5. `cc15ab` | 6. `libc22` |
+|---|---:|---:|---:|---:|---:|---:|
+| `ok` | **42** | **42** | **48** | **51** | **53** | **56** |
+| `gap` | 9 | 19 | 13 | 11 | 9 | 6 |
+| `decl` | 5 | 6 | 6 | 6 | 6 | 6 |
+| `ppext` | 13 | 0 | 0 | 0 | 0 | 0 |
+| `ext` | 0 | 1 | 1 | 0 | 0 | 0 |
+| `hdr` | 1 | 1 | 1 | 1 | 1 | 1 |
+| `cap` | 1 | 1 | 1 | 1 | 1 | 1 |
 
-1 は `pp16`+`cc15v`、2 以降は `pp18` と各世代の組である。
+1 は `pp16`+`cc15v`、2〜5 は `pp18` と各 cc 世代の組、6 はそれに
+[libc22](../stage017/libc22.md) を合わせたものである。
 
 **1→2 で動いたのは13単位ちょうどで、8.4の`ppext`と一致する。** 他の57単位は
 状態も詳細も1文字も動いていない —— pp18が変えたのは変えるつもりだったもの
@@ -651,7 +653,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 `gcc47-tree.txt` (4.5) と違い、検査が突き合わせる相手ではない。器を直せば
 変わるべき値なので、次に測ったときの比較対象として置く。
 
-### 8.3 C適合の穴 —— 7つ (`gap` の9単位)
+### 8.3 C適合の穴 —— 6つ (`gap` の6単位。すべてlibiberty)
 
 `gcc17.sh where`が、ccが落ちる最初の関数の塊まで絞る。そこから最小の形を
 作ってccに食わせた。**どれもhostはC89として通す。**
@@ -665,7 +667,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 | 5 | block scopeの`typedef` | 1 | sort |
 | 6 | block scopeの`extern`宣言 | 1 | xmalloc |
 | 7 | 関数pointerの配列 `void (*fns[32]) (void)` | 1 | xatexit |
-| 8 | `putc`がstdio.hに無い | 5 | mkdeps, **lex, line-map** |
+| 8 | ~~`putc`がstdio.hに無い~~ | 5 | **[libc22](../stage017/libc22.md)で通した** |
 | 9 | ~~関数pointer型へのcast `(void *(*) (long)) xmalloc`~~ | 1 | **[cc15x](../stage015/cc15x.md)で通した** |
 | 10 | ~~配列型の`typedef` `typedef char t[4];`~~ | 1 | **[cc15ab](../stage015/cc15ab.md)で通した** |
 | 11 | ~~pointerの型修飾子 `int (*const f)(int)`~~ | 1 | **[cc15z](../stage015/cc15z.md)で通した** |
@@ -675,19 +677,27 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 1は`ansidecl.h`の`VA_OPEN`が`{ va_list ap; va_start(ap, v); { struct Qdmy`
 と展開する形で、**可変長引数を使う単位すべてに効く**。
 
-8だけは言語ではなくlibcの穴である。C89 7.9.7.8 は
+8だけは言語ではなくlibcの穴だった。C89 7.9.7.8 は
 
 ```c
 int putc(int c, FILE *stream);
 ```
 
-と定めるが、我々の`stdio.h`は`fputc`と`putchar`しか持たない。しかも
+と定めるが、我々の`stdio.h`は`fputc`と`putchar`しか持たなかった。しかも
 **鎖の前置部が1引数の`putc`を出す** ([cc15ab.sc](../stage015/cc15ab.sc)
-6671行) ので、2引数の呼出しが引数個数の不一致 (5) になる。
-**headerを足すだけでは済まない** —— 前置部の側も見る必要がある。
+の`bireg()`) ので、関数として宣言しても器の組込みが勝ち、2引数の呼出しが
+引数個数の不一致 (5) になる。
 
-9〜13を通した後、`lex`と`line-map`がここへ合流した。**libcppで残る
-C適合の穴はこの1つだけである。**
+9〜13を通した後、`lex`と`line-map`がここへ合流して3単位になった。
+**[libc22](../stage017/libc22.md)で通した** —— C89 7.9.1 が認める
+マクロとして置き、`pp`の段で`fputc`へ書き換える。前置部の名前を替える道も
+あるが、`putc`は`getc` / `exit`と並ぶ3 primitiveの1つで、Stage 1以降の
+すべての`.o`がこの名前で未定義シンボルを持つため触らない。
+
+**限界がある** —— C89 7.9.1 が認める`(putc)(c, f)`と`&putc`はマクロが
+展開されないので5で落ちる。GCC 4.7.4はどちらも使っていない。
+
+**これでlibcppのC適合の穴は0になった。** 残る6つはすべてlibibertyである。
 
 **族を振る舞いではなく言語の規則で切る**
 ([stage017-cc.md](stage017-cc.md) 33章の反省)。4・9・11はどれも
@@ -844,8 +854,11 @@ libiberty / libcppの閉包でマクロ本体に`defined`が現れるのは`syst
 
 ### 8.5 libcの穴 —— 4つ (`decl` の6単位)
 
-`libc21`は`sys/types.h`・`sys/stat.h`・`signal.h`・`dirent.h`を既に持ち、
+`libc22`は`sys/types.h`・`sys/stat.h`・`signal.h`・`dirent.h`を既に持ち、
 `off_t`も`struct stat`も定義している。残るのは中身である。
+
+**8.3を埋め終えた今、ここがいちばん効く** —— `struct stat`のmemberだけで
+5単位、うち2単位はlibcppに残る最後の2単位である (8.7)。
 
 | 要るもの | 単位 |
 |---|---|
@@ -924,23 +937,27 @@ GCCが自分の`__builtin_offsetof`を前提にこの形を使うので、受け
    **[cc15y](../stage015/cc15y.md) / [cc15z](../stage015/cc15z.md) /
    [cc15aa](../stage015/cc15aa.md) / [cc15ab](../stage015/cc15ab.md)で
    通した。2単位が`.o`まで出て、2単位は8へ合流した (8.2)。**
-6. **8.3の8 (`putc`がstdio.hに無い) —— 3単位。libcppで残るのはこれだけ。**
-   C89 7.9.7.8 の `int putc(int c, FILE *stream);` を持っておらず、
-   鎖の前置部が**1引数の**`putc`を出すので引数個数の不一致 (5) になる。
-   **headerを足すだけでは済まない** —— 前置部の側も見る必要がある
-7. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
-8. 8.3の残り5つ (2・3・5・6・7)。どれもlibiberty 1単位ずつ
-9. 8.5の`struct stat`のmember (5単位)・`sys/times.h`・`_PC_PATH_MAX`
+6. ~~8.3の8 (`putc`がstdio.hに無い) —— 3単位~~
+   **[libc22](../stage017/libc22.md)で通した。3単位が`.o`まで出て、
+   libcppのC適合の穴は0になった (8.2)。**
+7. **8.5の`struct stat`のmember —— 5単位。いまはこれがいちばん効く。**
+   `st_dev` / `st_ino` / `st_mode` / `st_mtime`で、
+   **libcppに残る2単位もここである**。`st_ino`はsfsの表の索引が、
+   `st_mode`は`st_type`が使え、`st_mtime`は`st_mtlo`/`st_mthi`が既に
+   値を持っている。`st_dev`だけは対応するものが無い (8.5)
+8. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
+9. 8.3の残り5つ (2・3・5・6・7)。どれもlibiberty 1単位ずつ
+10. 8.5の`sys/times.h` (1単位)・`_PC_PATH_MAX` (1単位)
 
 **順番は測るたびに入れ替わる。** 1を通したら「いちばん効く1つ」が8.4から
 8.3の4へ移り、その4を通したら残った4単位が9〜13へ散り、それを通したら
-2単位が8へ合流した。**塞いでいる単位の数は、その前の壁を通すまで
-判らない。**
+2単位が8へ合流し、それを通したら**言語の穴ではなく`struct stat`が
+いちばん効く1つになった**。塞いでいる単位の数は、その前の壁を通すまで
+判らない。
 
-**libcppは15単位中10単位が`.o`まで通る。** 残る5単位は
-6の`putc` (`lex` / `line-map` / `mkdeps`) と8.5の`struct stat`
-(`files` / `macro`) だけで、**C適合の穴はもう無い**。libibertyは
-55単位中43単位で、残る12単位に8.3の1〜7が散っている。
+**libcppは15単位中13単位が`.o`まで通り、C適合の穴は0になった。**
+残る2単位 (`files` / `macro`) は8.5の`struct stat`のmemberだけである。
+libibertyは55単位中43単位で、残る12単位に8.3の6つと8.5の穴が散っている。
 
 **gcc/本体 (362単位) はまだ測っていない。** 生成header (`tm.h`・
-`insn-*.h`) とhost向けconfigureが要る。6と7を埋めてから同じharnessで測る。
+`insn-*.h`) とhost向けconfigureが要る。7と8を埋めてから同じharnessで測る。
