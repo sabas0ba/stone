@@ -1311,4 +1311,152 @@ bigsize '\377\377\377\377' "$out/neg4.out"
 grep -qx 'S' "$out/neg4.out"
 report $? "run: 2^31 を超える大きさも 'S' で拒む (符号なしで比べている)"
 
+section "第 6 部: 展開の結果に現れた defined (pp18。docs/stage017-gcc.md 8.4)"
+
+# **GCC の libcpp 13 単位すべてが，この 1 つの形で止まっていた。**
+# `system.h` 379 行が defined を含む本体のマクロを定義し，`internal.h`
+# 577 行が #if でそれを使う。dodefined() は展開より先に走るので
+# (C89 の規定)，展開してはじめて現れる defined は残ってしまい，pp17 まで
+# は識別子として 0 に潰して続く '(' で構文が壊れていた。
+#
+# **原文をそのまま置く。** 縮めて書くと「縮めた形では通る」ことしか
+# 言えない。GCC の 2 つのファイルから写した形で見る。
+#
+# 3 つ見る ——
+#   a  GCC の原文。pp17 は 4 で拒み，pp18 は通して正しい枝を選ぶ
+#   b  operand が未定義の名前。pp18 が 0 を出す
+#   c  **operand が定義済みマクロ。pp18 も 4 で拒む** (限界。下の註)
+# **記録した印は照合する。** 誰も見ない SHA-256 は註釈にすぎない
+# (docs/artifacts.md 5)
+want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage017/pp18.md | cut -d' ' -f2)
+got=$(sha256sum tmp/build/pp18); got=${got%% *}
+[ -n "$want" ] && [ "$want" = "$got" ]
+report $? "build: pp18 の SHA-256 が stage017/pp18.md の記載値と一致"
+
+r=$out/ppd
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/s"
+cp tmp/build/pp17 "$r/pp17"
+cp tmp/build/pp18 "$r/pp18"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+
+ppcase() {
+    cat > "$r/s/c.c"
+    sh tools/bundle.sh "$r/s/c.c" > "$r/$1.b"
+}
+
+ppcase a <<'CEOF'
+#define GCC_VERSION (__GNUC__ * 1000 + __GNUC_MINOR__)
+#define HAVE_DESIGNATED_INITIALIZERS \
+  (!defined(__cplusplus) \
+   && ((GCC_VERSION >= 2007) || (__STDC_VERSION__ >= 199901L)))
+#if HAVE_DESIGNATED_INITIALIZERS
+a_yes
+#else
+a_no
+#endif
+CEOF
+
+ppcase b <<'CEOF'
+#define M (defined(NOT_DEFINED_ANYWHERE))
+#if M
+b_yes
+#else
+b_no
+#endif
+CEOF
+
+# **限界。** defined の operand は，展開のときに operand 自身が展開される
+# ので，pp18 が見るときには名前が消えている。**黙って違う答を出すのでは
+# なく 4 で拒む。** GCC 4.7.4 の libiberty / libcpp の閉包でマクロ本体に
+# defined が現れるのは system.h の 1 箇所だけで，その operand は
+# __cplusplus (我々が定義しない名前) なので，この限界は当たらない
+ppcase c <<'CEOF'
+#define X 1
+#define M (defined(X))
+#if M
+c_yes
+#else
+c_no
+#endif
+CEOF
+rm -rf "$r/s"
+
+cat > "$r/go.sh" <<'EOF'
+pp17 < a.b > o17.txt
+echo "a17 $?"
+pp18 < a.b > oa.txt
+echo "a18 $?"
+grep a_no oa.txt
+echo "abranch $?"
+pp18 < b.b > ob.txt
+echo "b18 $?"
+grep b_no ob.txt
+echo "bbranch $?"
+pp18 < c.b > oc.txt
+echo "c18 $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/ppd.out" 8388608 512
+diff -u tests/stage017/expected/ppdefined.txt "$out/ppd.out" > "$out/ppd.diff"
+report $? "run: 展開の後に残った defined を pp18 が評価する (pp17 は 4 で拒む)"
+[ -s "$out/ppd.diff" ] && sed -n '4,$p' "$out/ppd.diff"
+
+# ---------------------------------------------------------------------------
+section "第 7 部: putc をマクロとして持つ (libc22。docs/stage017-gcc.md 8.3 の 8)"
+
+# **GCC の libcpp 3 単位 (lex / line-map / mkdeps) がこの 1 つで止まって
+# いた。** C89 7.9.7.8 の putc を我々は持っておらず、しかも鎖の前置部が
+# **1 引数の putc** を primitive として持つので、関数として宣言しても
+# 器の組込みが勝つ (引数個数の不一致 5)。C89 7.9.1 が認めるマクロで置いた
+# (stage017/libc22.md)。
+
+# **鎖は変わらない。** 我々自身のソースは putc を 1 度も呼んでいないので、
+# マクロを置いても展開される場所が無い。.o がバイト一致することで示す
+ok=0
+for n in src_string src_ctype src_stdlib src_morecore src_misc15 \
+         posix_sys posix_morecore posix_stdio posix_assert posix_dir \
+         posix_signal; do
+    cmp -s "tmp/build/l21_$n.o" "tmp/build/l22_$n.o" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "build: libc22 の .o 11 本が libc21 とバイト一致 (header だけの差)"
+
+# **header を足しただけでは「訳せた」までしか言えない。** 我々の OS の
+# 上で cc19 に訳させ、走らせて、fputc へ書き換わった先が本当に書けることを
+# 見る。第 6 部と同じく像を詰めて kernel24 で起動する
+r=$out/putc
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/t"
+cp tmp/build/pp16cmd  "$r/bin/pp16"
+cp tmp/build/pp17     "$r/bin/pp17"
+# cc19 は器の位置を "/bin/cc15p" と焼き込んでいる (cc19.c 53 行)。
+# 凍結世代なので名前は変えられない。中身は最前線の cc15ab を置く
+cp tmp/build/cc15abcmd "$r/bin/cc15p"
+cp tmp/build/ld17cmd  "$r/bin/ld16"
+cp tmp/build/sh2.bin  "$r/bin/sh2"
+cp tmp/build/sh2.bin  "$r/sh2"
+cp tmp/build/cc19     "$r/cc19"
+# **ヘッダと .o は同じ世代にする** (tools/ext17.sh の反省)
+cp stage017/libc22/include/*.h     "$r/include/"
+cp stage017/libc22/include/sys/*.h "$r/include/sys/"
+for f in l22_src_string l22_src_ctype l22_src_stdlib l22_src_misc15 \
+         l22_posix_sys l22_posix_morecore l22_posix_stdio \
+         l22_posix_assert l22_posix_dir l22_posix_signal rt64 rtfp; do
+    cp "tmp/build/$f.o" "$r/lib/"
+done
+cp tests/stage017/ext/putct.c "$r/t/putct.c"
+cat > "$r/go.sh" <<'PUTCEOF'
+cc19 -o putct t/putct.c
+echo "cc $?"
+putct
+echo "run $?"
+PUTCEOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/putc.out" 33554432 1024
+diff -u tests/stage017/expected/putc.txt "$out/putc.out" > "$out/putc.diff"
+report $? "run: 我々の OS の上で putc(c, stdout) が書ける (libc22 のマクロ)"
+[ -s "$out/putc.diff" ] && sed -n '4,$p' "$out/putc.diff"
+
 summary

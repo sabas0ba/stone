@@ -7,13 +7,16 @@
 #   gcc17.sh configure            libiberty / libcpp を host で configure し config.h を作る
 #   gcc17.sh headers [lib]        単位ごとに header の閉包を取り，我々の libc に無いものを数える
 #   gcc17.sh closure <lib>/<unit> 1 単位の閉包 (無い header は空の代役で埋める) を出す
-#   gcc17.sh unit <lib>/<unit>    1 単位を bundle -> pp16 -> cc15v に通し，結果を 1 行で出す
+#   gcc17.sh unit <lib>/<unit>    1 単位を bundle -> pp -> cc15v に通し，結果を 1 行で出す
 #   gcc17.sh units [lib]          全単位を通し，tmp/g17u/units.txt に表を出す (6.1 の 4)
 #   gcc17.sh where <lib>/<unit>   gap の単位で，cc が落ちる最初の関数の塊を絞る
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 # unit / units は鎖の像 (tmp/build) と QEMU を要る。STONE_ENGINE と
 # qemu-system-riscv32 は呼ぶ側の環境で与える (tools/env.sh の契約のまま)。
+#
+# STONE_GCC17_PP=os で pp の段を**我々の OS の上の pp18** に替える
+# (既定は裸の pp16)。docs/stage017-gcc.md 8.7 の 2。
 #
 # STONE_GCC47_SRC で測る木を差し替えられる。**答の判っている小さな木で
 # 算術そのものを検査するため**である (tests/stage017 第 5 部)。GCC の木が
@@ -308,11 +311,93 @@ work="$repo_root/tmp/g17u"
 # STONE_GCC17_LIBC で差し替えられる。stage015/libc は鎖の素の側 ——
 # tools/diff17.sh の bare が測る器で，sys/ の下は time.h しか無い。
 # **どちらで測ったかで header の穴の数が変わる**ので明示する
-ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc21/include}
+ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc22/include}
 pp16=tmp/build/pp16.bin
-cc15=tmp/build/cc15v.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+pp18=tmp/build/pp18
+cc15=tmp/build/cc15ab.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
+
+# pp の段をどちらの系で回すか (docs/stage017-gcc.md 8.7 の 2)。
+#
+#   bare  pp16 を裸で回す (既定)。鎖の素の側。stdin から束ねを読み，
+#         stdout へ .i を出す。QEMU の起動は 1 単位につき 1 回
+#   os    **我々の OS の上の pp18 を回す。** pp16 では測れないものが
+#         2 つある —— 展開の結果に現れた defined (pp17 以降だけが評価
+#         する) と，束ねの員 256 / アリーナ 64 KiB という広がった容量。
+#         13 単位が ppext に落ちているのはすべて前者である
+#
+# **OS 側は 1 単位あたり像を詰めて起動し直す。** pp16 を裸で回すのと
+# 比べて 1 単位あたり数十秒増える。既定を替えないのはそのためで，
+# 測り直すときだけ明示して使う。
+PP_ENGINE=${STONE_GCC17_PP:-bare}
+case "$PP_ENGINE" in
+bare|os) ;;
+*) die "STONE_GCC17_PP は bare か os (与えられた値: $PP_ENGINE)" ;;
+esac
+
+# 束ねの員の上限。pp16 は mbname 4096 バイト / 64 バイトスロットで 64 員，
+# pp17 以降は 16384 バイトで 256 員である (stage017/pp17.sc 114 行)。
+# 超えるものは走らせない —— 走らせても 6 で落ちるだけで，何も判らない
+pp_members_max() {
+    case "$PP_ENGINE" in
+    os) echo 256 ;;
+    *)  echo 64 ;;
+    esac
+}
+
+# 束ね ($1) を pp に通し，.i を $2 へ，pp の stderr を $3 へ出す。
+# 終了コードをそのまま返す
+pp_run() {
+    case "$PP_ENGINE" in
+    os) pp_run_os "$1" "$2" "$3" ;;
+    *)  sh tools/env.sh qemu "$pp16" < "$1" > "$2" 2> "$3" ;;
+    esac
+}
+
+# **我々の OS の上で pp18 に通す** (8.7 の 2)。
+#
+# tools/tcc17.sh が既に持つ形と同じである —— 作業用の根を sfs3 で詰め，
+# 記憶像の 64 MiB の位置へ置いて kernel24 を起動し，走った後の像を
+# 読み直して出来たものを取り出す。
+#
+# pp18 は OS 側の世代なので裸では走らない (ld16 の 'E' 前置きが付いて
+# いる)。素の名前は像の根からしか引けないので，pp18 も sh2 も根に置く。
+pp_root="$work/pproot"
+pp_run_os() {
+    b=$1; i=$2; e=$3
+    for f in pp18 sh2.bin kernel24.bin; do
+        [ -s "tmp/build/$f" ] || die "OS 側の像が無い: tmp/build/$f (sh tools/build.sh stage017)"
+    done
+    rm -rf "$pp_root"
+    mkdir -p "$pp_root"
+    cp tmp/build/sh2.bin "$pp_root/sh2"
+    cp "$pp18" "$pp_root/pp18"
+    cp "$b" "$pp_root/u.b"
+    printf 'pp18 < u.b > u.i\necho "rc $?"\n' > "$pp_root/go.sh"
+    printf 'sh2 go.sh\n' > "$pp_root/boot"
+    sh tools/sfs3.sh pack "$pp_root" "$work/pp.img" 33554432 1024 > /dev/null
+    rm -f "$work/pp.ram"
+    dd if=/dev/null of="$work/pp.ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$work/pp.img" of="$work/pp.ram" bs=64K oflag=seek_bytes \
+        seek=67108864 conv=notrunc 2> /dev/null
+    STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-1800} \
+        STONE_QEMU_RAMFILE="$work/pp.ram" STONE_QEMU_RAM=512M \
+        sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+        > "$e" 2>&1 || true
+    dd if="$work/pp.ram" of="$work/pp.back.img" bs=64K skip=1024 2> /dev/null
+    rm -rf "$work/pp.back"
+    sh tools/sfs3.sh unpack "$work/pp.back.img" "$work/pp.back" \
+        > /dev/null 2>&1 || true
+    : > "$i"
+    if [ -f "$work/pp.back/u.i" ]; then cp "$work/pp.back/u.i" "$i"; fi
+    # 終了コードは sh2 が出した "rc N" から読む。**行が無いのは 0 ではない**
+    # —— 起動そのものが落ちた場合と区別が付かなくなる。その場合は 125 を
+    # 返して，pp の終了コードとして現れない値で表に出す
+    rc=$(sed -n 's/^rc \([0-9][0-9]*\)$/\1/p' "$e" | tail -n 1)
+    [ -n "$rc" ] || return 125
+    return "$rc"
+}
 
 lib_dirs() {
     case $1 in
@@ -505,14 +590,27 @@ baseline_iso() {
 #         libc に無いことがほとんどである (詳細は host の最初の診断)
 #   ext   我々が拒み，host も C89 として拒む。GNU / C99 の拡張である
 #         (詳細は host の ISO C 診断)。Stage 18 の的
+#
+#         **限界: 同じものを拒んでいるとは限らない。** 我々の cc は終了
+#         コードしか言わないので，host の ISO C 診断が我々の拒む理由だと
+#         いう保証は無い。実際に libcpp/identifiers は，我々が cast の型名
+#         (8.3 の 9) で拒み，host は別の行の offsetof を ISO C 違反と言って
+#         いた。9 を通したら ok になり，offsetof の方は**我々が元から
+#         受けていた**ことが判った (docs/stage017-gcc.md 8.6)。
+#         理由を名指しするには where で 1 単位ずつ絞るしかない
 #   gap   我々だけが拒む。**我々の C89 適合の穴** (詳細は cc の終了コード)
+#   run   OS 側の pp で，走行そのものが立ち上がらなかった。適合の話ではない
 #
 # 拒んだ理由を我々の cc は終了コードでしか言わないので，**同じ .i を host
 # に読ませて**分類する (tools/diff17.sh と同じ手)。.i は我々の pp が我々の
 # header で作ったものなので，host に含めさせる header は無い
 unit() {
     lib=${1%%/*}; u=${1#*/}
-    [ -s "$pp16" ] && [ -s "$cc15" ] || die "鎖の像が無い: $pp16 / $cc15 (sh tools/build.sh all)"
+    case "$PP_ENGINE" in
+    os) [ -s "$pp18" ] || die "OS 側の像が無い: $pp18 (sh tools/build.sh stage017)" ;;
+    *)  [ -s "$pp16" ] || die "鎖の像が無い: $pp16 (sh tools/build.sh all)" ;;
+    esac
+    [ -s "$cc15" ] || die "鎖の像が無い: $cc15 (sh tools/build.sh all)"
     mkdir -p "$work/out"
     o="$work/out/$lib.$u"
     hdrs=$(closure_all "$1") || true
@@ -544,10 +642,9 @@ unit_run() {
         esac
         members="$members $name=$h"; n=$((n + 1))
     done
-    # pp16 の束ねは 64 員 (mbname 4096 バイト / 64 バイト) が上限。超える
-    # ものは走らせない (走らせても 6 で落ちるだけで，何も判らない)
-    if [ "$n" -gt 64 ]; then
-        printf 'cap\tpp members=%s\n' "$n"
+    max=$(pp_members_max)
+    if [ "$n" -gt "$max" ]; then
+        printf 'cap\tpp members=%s > %s\n' "$n" "$max"
         return 0
     fi
 
@@ -561,12 +658,21 @@ unit_run() {
     # して 1 文字も変えずに含める。config.h が読まれないと HAVE_STRING_H
     # などが立たず，<string.h> が飛ばされて size_t が無い .i になる
     printf '#define HAVE_CONFIG_H 1\n#include "%s.c"\n' "$u" > "$o.drv.c"
+    # **束ねは file に落としてから渡す。** OS 側の pp は像へ詰めるので
+    # 実体が要る。裸の pp16 も同じ file を読ませる —— 両方の系に同じ
+    # バイト列を食わせないと，違いが pp の世代のものだと言えない
     # shellcheck disable=SC2086
-    if sh tools/bundle.sh $members "$u.c=$src/$lib/$u.c" "$o.drv.c" \
-            | sh tools/env.sh qemu "$pp16" > "$o.i" 2> "$o.pp.err"; then
+    sh tools/bundle.sh $members "$u.c=$src/$lib/$u.c" "$o.drv.c" > "$o.b"
+    if pp_run "$o.b" "$o.i" "$o.pp.err"; then
         rc=0
     else
         rc=$?
+    fi
+    if [ "$rc" -eq 125 ]; then
+        # OS 側の走行そのものが立ち上がらなかった。pp の終了コードでは
+        # ないので，通った・拒んだのどちらにも数えない
+        printf 'run\tOS が rc を出さなかった (%s)\n' "$o.pp.err"
+        return 0
     fi
     if [ "$rc" -eq 6 ]; then
         # 容量超過。cc の 6 と同じで，適合の話ではなく器の大きさの話である
@@ -677,15 +783,41 @@ where() {
 
 units() {
     t="$work/units.txt"
+    m="$work/units.meta"
     : > "$t"
+    # **その表が何に対する表かを先に言う。** どの libc の header で閉包を
+    # 取ったか，pp をどちらの系で回したかで同じ単位の状態が変わる。
+    # 8 章は一度これを言わずに測って，鎖の素の側の libc の表を OS 側の
+    # 表として読んだ (docs/stage017-gcc.md 8.1)。表とは別の file にも
+    # 残すので，後から表だけを見ても基準を辿れる
+    {
+        printf 'source=%s\n' "$src_name"
+        printf 'libc=%s\n' "$ours"
+        printf 'pp-engine=%s\n' "$PP_ENGINE"
+        printf 'pp=%s\n' "$(case "$PP_ENGINE" in os) echo "$pp18 (OS)" ;; *) echo "$pp16" ;; esac)"
+        printf 'cc=%s\n' "$cc15"
+    } | tee "$m"
+    echo
+    # 通すべき単位の数を先に数えておく。表と突き合わせるためである
+    want=0
+    for lib in ${1:-libiberty libcpp}; do
+        want=$((want + $(unit_list "$lib" | grep -c . || true)))
+    done
     for lib in ${1:-libiberty libcpp}; do
         for u in $(unit_list "$lib"); do
             unit "$lib/$u"
         done
     done | tee "$t"
     echo
-    echo "units: $(wc -l < "$t" | tr -d ' ') 単位"
+    got=$(wc -l < "$t" | tr -d ' ')
+    echo "units: $got 単位"
     cut -f2 "$t" | sort | uniq -c | sort -rn | sed 's/^/  /'
+    # **短い表を成功として返さない。** 左辺が die で死んでも pipeline の
+    # 終了コードは tee のものなので，途中で切れた表がそのまま残り，
+    # 呼んだ側は 0 を受け取る。実際に走行中の tmp/build/pp18 を消して
+    # しまい，17 行の表が rc 0 で出た。**表の長さは数えれば判る**
+    [ "$got" -eq "$want" ] \
+        || die "表が途中で切れている (単位 $want / 表 $got 行。$t を見る)"
 }
 
 cmd=${1:-}

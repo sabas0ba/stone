@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15v.bin   # 台帳は最前線の世代で測る
+cc=tmp/build/cc15ab.bin  # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -61,6 +61,9 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15q.bin:stage015/cc15q.md cc15r.bin:stage015/cc15r.md \
         cc15s.bin:stage015/cc15s.md cc15t.bin:stage015/cc15t.md \
         cc15u.bin:stage015/cc15u.md cc15v.bin:stage015/cc15v.md \
+        cc15w.bin:stage015/cc15w.md cc15x.bin:stage015/cc15x.md \
+        cc15y.bin:stage015/cc15y.md cc15z.bin:stage015/cc15z.md \
+        cc15aa.bin:stage015/cc15aa.md cc15ab.bin:stage015/cc15ab.md \
         pp15.bin:stage015/pp15.md \
         pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md \
         ld17.bin:stage015/ld17.md; do
@@ -69,7 +72,7 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15v と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15ab と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
@@ -132,6 +135,60 @@ fp15vgen() {
 stable_cmp "fixpoint(cc15v)" fp15vgen tmp/build/cc15v.bin
 report $? "fixpoint: cc15v が自分自身を再生成する (B2 == B3)"
 
+fp15wgen() {
+    { cat stage015/cc15w.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15w.bin > tmp/s15/b3w.o \
+        && { cat tmp/s15/b3w.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15w)" fp15wgen tmp/build/cc15w.bin
+report $? "fixpoint: cc15w が自分自身を再生成する (B2 == B3)"
+
+fp15xgen() {
+    { cat stage015/cc15x.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15x.bin > tmp/s15/b3x.o \
+        && { cat tmp/s15/b3x.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15x)" fp15xgen tmp/build/cc15x.bin
+report $? "fixpoint: cc15x が自分自身を再生成する (B2 == B3)"
+
+fp15ygen() {
+    { cat stage015/cc15y.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15y.bin > tmp/s15/b3y.o \
+        && { cat tmp/s15/b3y.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15y)" fp15ygen tmp/build/cc15y.bin
+report $? "fixpoint: cc15y が自分自身を再生成する (B2 == B3)"
+
+fp15zgen() {
+    { cat stage015/cc15z.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15z.bin > tmp/s15/b3z.o \
+        && { cat tmp/s15/b3z.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15z)" fp15zgen tmp/build/cc15z.bin
+report $? "fixpoint: cc15z が自分自身を再生成する (B2 == B3)"
+
+fp15aagen() {
+    { cat stage015/cc15aa.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15aa.bin > tmp/s15/b3aa.o \
+        && { cat tmp/s15/b3aa.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15aa)" fp15aagen tmp/build/cc15aa.bin
+report $? "fixpoint: cc15aa が自分自身を再生成する (B2 == B3)"
+
+fp15abgen() {
+    { cat stage015/cc15ab.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15ab.bin > tmp/s15/b3ab.o \
+        && { cat tmp/s15/b3ab.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15ab)" fp15abgen tmp/build/cc15ab.bin
+report $? "fixpoint: cc15ab が自分自身を再生成する (B2 == B3)"
+
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
 for n in sh ed mk; do
@@ -141,7 +198,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15v が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15ab が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 # **ld17 は診断だけを足したもの。** 通る道が 1 ビットも変わっていない
 # ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる

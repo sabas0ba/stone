@@ -53,6 +53,50 @@ build_stage015b() {
     # いた。差分試験 (tools/diff17.sh) がホストとの食い違いで見つけた。
     # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い
     ccgen cc15v cc15u stage015/cc15v.sc
+    # 第 23 世代。仮引数並びの括弧付き抽象宣言子「T ( * ) ( 仮引数 )」を
+    # 読めなかった。名前があれば通るのに，プロトタイプで名前を省くと
+    # 1 (構文誤り) で止まる。GCC の include/obstack.h 193 行がこの形で，
+    # libcpp の 12 単位を塞いでいた (docs/stage017-gcc.md 8.3 の 4)。
+    # **鎖の成果物は変わらない** —— 既存のソースはプロトタイプで
+    # 関数ポインタの仮引数名を省いていない
+    ccgen cc15w cc15v stage015/cc15w.sc
+    # 第 24 世代。型名の中の関数ポインタ「( * ) ( 仮引数 )」を cast で
+    # 読めなかった。cc15w が仮引数並びの側だけを直し，cast の型名の側を
+    # 見ていなかった。GCC の libcpp が obstack へ関数を渡すときにこの
+    # cast を使う (docs/stage017-gcc.md 8.3 の 9)。
+    # **鎖の成果物は変わらない** —— 既存のソースは関数ポインタ型への
+    # cast を使っていない
+    ccgen cc15x cc15w stage015/cc15x.sc
+    # 第 25 世代。条件演算子の結果の型を **then 側から取っていた**。
+    # C89 6.3.15 は「一方が空ポインタ定数であれば結果は他方の型を持つ」と
+    # 書いており，順序に依存しない。(k ? 0 : p) が int になるので -> を
+    # 直に当てると型の誤り (5) になる。代入や返却では左辺の型へ変換する
+    # 道を通るので隠れていた (docs/stage017-gcc.md 8.3 の 12)。
+    # **鎖の成果物は変わらない** —— 既存のソースはこの形を使っていない
+    ccgen cc15y cc15x stage015/cc15y.sc
+    # 第 26 世代。括弧の中の宣言子「( * const 名前 )」の型修飾子を
+    # 読み飛ばしていなかった。C89 6.5.4.1 の pointer は
+    # 「* type-qualifier-list_opt」で，括弧の外は pstars() が既に同じ
+    # ことをしている —— 括弧の中だけが持っていなかった。GCC の
+    # libcpp/charset.c 455 行がこの形 (docs/stage017-gcc.md 8.3 の 11)。
+    # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い
+    ccgen cc15z cc15y stage015/cc15z.sc
+    # 第 27 世代。小数点から始まる浮動小数点定数 (.0001) を読めなかった。
+    # C89 3.1.3.1 の fractional-constant は
+    # 「digit-sequence_opt . digit-sequence」で整数部を省ける。next() が
+    # 数字で始まるときしか lexnum() へ渡していなかった。GCC の
+    # libcpp/symtab.c の approx_sqrt がこの形
+    # (docs/stage017-gcc.md 8.3 の 13)。
+    # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い。
+    # **ここで 1 文字の世代名が尽きた。以降は 2 文字へ延ばす**
+    ccgen cc15aa cc15z stage015/cc15aa.sc
+    # 第 28 世代。配列型の typedef (typedef char t[4];) を読めなかった。
+    # typedef1() だけが宣言子の後置 [n] を読んでおらず，名前の次が '['
+    # だと o_semi の検査に落ちて 1 になっていた。ふつうの宣言と同じ
+    # pdims() を呼ぶ 1 行で揃う。GCC の libcpp/lex.c 133 行が翻訳時の
+    # 表明にこの形を使う (docs/stage017-gcc.md 8.3 の 10)。
+    # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い
+    ccgen cc15ab cc15aa stage015/cc15ab.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -73,12 +117,17 @@ do_stage015b() {
         cc15p0.bin cc15p.bin cc15q0.bin cc15q.bin \
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
-        cc15v0.bin cc15v.bin \
+        cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
+        cc15x0.bin cc15x.bin cc15y0.bin cc15y.bin \
+        cc15z0.bin cc15z.bin cc15aa0.bin cc15aa.bin \
+        cc15ab0.bin cc15ab.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
-           stage015/cc15u.sc stage015/cc15v.sc \
+           stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
+           stage015/cc15x.sc stage015/cc15y.sc stage015/cc15z.sc \
+           stage015/cc15aa.sc stage015/cc15ab.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
