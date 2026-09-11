@@ -98,3 +98,12 @@ asnsign      ok   y\n
 # (docs/stage017-gcc.md 8.3 の 4)。**読めるだけでは足りない**ので，
 # 抽象宣言子で宣言した関数を実際に呼んで値を見る
 fnpabs       ok   y\n
+
+# ---- 型名の中の関数ポインタ (cc15x) ----
+#
+# cast の型名も識別子を含まない (C89 6.5.5)。宣言子は fnpabs と同じ
+# だが**通る道が別**で，cc15w は仮引数並びの側だけを直していた。
+# GCC の libcpp/symtab.c 65 行が obstack へ確保子を渡すときにこの
+# cast を使い，3 単位が止まっていた (docs/stage017-gcc.md 8.3 の 9)。
+# cast した関数ポインタを実際に呼び，呼び先が変わることまで見る
+fnpcast      ok   y\n

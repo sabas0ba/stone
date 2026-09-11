@@ -60,6 +60,13 @@ build_stage015b() {
     # **鎖の成果物は変わらない** —— 既存のソースはプロトタイプで
     # 関数ポインタの仮引数名を省いていない
     ccgen cc15w cc15v stage015/cc15w.sc
+    # 第 24 世代。型名の中の関数ポインタ「( * ) ( 仮引数 )」を cast で
+    # 読めなかった。cc15w が仮引数並びの側だけを直し，cast の型名の側を
+    # 見ていなかった。GCC の libcpp が obstack へ関数を渡すときにこの
+    # cast を使う (docs/stage017-gcc.md 8.3 の 9)。
+    # **鎖の成果物は変わらない** —— 既存のソースは関数ポインタ型への
+    # cast を使っていない
+    ccgen cc15x cc15w stage015/cc15x.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -81,11 +88,13 @@ do_stage015b() {
         cc15r0.bin cc15r.bin cc15s0.bin cc15s.bin \
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
         cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
+        cc15x0.bin cc15x.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
            stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
+           stage015/cc15x.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
