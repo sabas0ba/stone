@@ -649,7 +649,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 | 6 | block scopeの`extern`宣言 | 1 | xmalloc |
 | 7 | 関数pointerの配列 `void (*fns[32]) (void)` | 1 | xatexit |
 | 8 | `putc`がstdio.hに無い | 5 | mkdeps |
-| 9 | 関数pointer型へのcast `(void *(*) (long)) xmalloc` | 1 | symtab, obstack |
+| 9 | 関数pointer型へのcast `(void *(*) (long)) xmalloc` | 1 | symtab, obstack, init |
 | 10 | 配列の大きさの定数式に`sizeof` | 1 | lex |
 | 11 | pointerの型修飾子 `int (*const f)(int)` | 1 | charset |
 
@@ -686,6 +686,16 @@ extern int _obstack_begin (struct obstack *, int, int,
 `.o`まで出たのは`directives` / `directives-only` / `errors` / `expr` /
 `pch` / `traditional`で、残る4単位はその先の9・10・11に当たった。
 **1つ通すと次が見える。**
+
+`gcc17.sh where`で1単位ずつ絞った先は次のとおり。
+
+| 単位 | 当たった形 | `.i`の行 |
+|---|---|---|
+| `symtab` | 9 (castの型名) | 2069〜2091 |
+| `init` | 9 (castの型名) | 4134〜4228 |
+| `obstack` | 9 (castの型名) | 762〜926 |
+| `charset` | 11 (pointerの型修飾子) | 4284〜4325 |
+| `lex` | 10 (`sizeof`を定数式に) | 4052〜4081 |
 
 #### 9・10・11 —— 4を通して見えた3つ
 
@@ -814,8 +824,8 @@ extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 
    **`STONE_GCC17_PP=os`で移した (8.1)。13単位を測り直した結果が8.2である。**
 3. ~~8.3の4 (`void *(*)(long)`) —— 12単位を塞いでいる~~
    **[cc15w](../stage015/cc15w.md)で通した。6単位が`.o`まで出た (8.2)。**
-4. **8.3の9 (関数pointer型へのcast) —— 2単位。** 4を通した先に出た形で、
-   `symtab`と`obstack`が待っている
+4. **8.3の9 (関数pointer型へのcast) —— 3単位。** 4を通した先に出た形で、
+   `symtab` / `init` / `obstack`が待っている
 5. 8.3の10 (`sizeof`を定数式に) と11 (pointerの型修飾子) —— 各1単位。
    10は`cofs`が「会った例が無い」として保留していたもので、会った
 6. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
