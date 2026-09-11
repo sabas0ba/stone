@@ -1,0 +1,70 @@
+libiberty/regex	cap	pp 6
+libiberty/cplus-dem	ok	134920
+libiberty/cp-demangle	ok	140872
+libiberty/md5	ok	17312
+libiberty/sha1	ok	29976
+libiberty/alloca	ok	5056
+libiberty/argv	ok	11868
+libiberty/choose-temp	ok	4996
+libiberty/concat	gap	1
+libiberty/cp-demint	ok	10068
+libiberty/crc32	ok	4664
+libiberty/dyn-string	ok	11684
+libiberty/fdmatch	decl	error: 'struct stat' has no member named 'st_dev'
+libiberty/fibheap	gap	5
+libiberty/filename_cmp	ok	1776
+libiberty/floatformat	ok	19876
+libiberty/fnmatch	ok	7284
+libiberty/fopen_unlocked	ok	4456
+libiberty/getopt	ok	19932
+libiberty/getopt1	ok	1956
+libiberty/getpwd	decl	error: 'struct stat' has no member named 'st_ino'
+libiberty/getruntime	hdr	sys/times.h -> decl	error: storage size of 'tms' isn't known
+libiberty/hashtab	gap	1
+libiberty/hex	ok	3964
+libiberty/lbasename	ok	4768
+libiberty/lrealpath	decl	error: '_PC_PATH_MAX' undeclared (first use in this function)
+libiberty/make-relative-prefix	ok	11040
+libiberty/make-temp-file	ok	7484
+libiberty/objalloc	ok	4836
+libiberty/obstack	gap	1
+libiberty/partition	ok	7556
+libiberty/pexecute	ok	6408
+libiberty/physmem	ok	3988
+libiberty/pex-common	ok	19760
+libiberty/pex-one	ok	3992
+libiberty/safe-ctype	ok	2536
+libiberty/simple-object	ok	17664
+libiberty/simple-object-coff	ok	24460
+libiberty/simple-object-elf	ok	28312
+libiberty/simple-object-mach-o	ok	33888
+libiberty/sort	gap	1
+libiberty/spaces	ok	4108
+libiberty/splay-tree	ok	14872
+libiberty/stack-limit	ok	568
+libiberty/strerror	ok	9504
+libiberty/strsignal	ok	9004
+libiberty/timeval-utils	ok	1228
+libiberty/unlink-if-ordinary	decl	error: 'struct stat' has no member named 'st_mode'
+libiberty/xatexit	gap	1
+libiberty/xexit	ok	3916
+libiberty/xmalloc	gap	1
+libiberty/xmemdup	ok	4000
+libiberty/xstrdup	ok	4028
+libiberty/xstrerror	ok	3708
+libiberty/xstrndup	ok	4124
+libcpp/charset	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/directives	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/directives-only	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/errors	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/expr	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/files	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/identifiers	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/init	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/lex	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/line-map	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/macro	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/mkdeps	gap	5
+libcpp/pch	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/symtab	gap	1
+libcpp/traditional	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)

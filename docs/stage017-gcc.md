@@ -99,6 +99,10 @@ GCC 7 を訳せば案 A の目的に C++ 処理系を自作せずに届く」と
 (31〜33 章)。GCC 4.7 でも同じ形の表が出るはずで，**その表の長さが
 案 C の見積りそのもの**になる。
 
+**測った (8 章)。** libiberty と libcpp の 70 単位のうち 42 単位が
+`.o` まで通り，表は「C 適合の穴 8 つ + libc の穴 3 つ + 前処理器の
+未対応 1 つ + 器の上限 1 つ」になった。予想どおり同じ形の表が出ている。
+
 ### 4.2 GCC 4.7 の `configure` と `Makefile` が我々の OS で回るか
 
 Stage 16 の教訓は「**律速はコンパイラではなく OS だった**」である。
@@ -328,7 +332,7 @@ sh tools/diff17.sh <名前>   1 つだけ
 1. ~~GCC 4.7.4を固定付きで取得する。~~ 完了。
 2. ~~配布木をsfs3/kernel24の上限と比較する。~~ 完了。現在の構成には収まらない。
 3. ~~sfsの名前長とkernelのmemory mapを更新する。~~ 完了。7章 (sfs4 / kernel25)。
-4. GCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。
+4. ~~GCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。~~ libiberty / libcppは完了 (8章)。70単位のうち42単位が`.o`まで通り、C適合の穴が8つ、libcの穴が3つ、前処理器の未対応が1つ、器の上限が1つ出た。gcc/本体 (362単位) は8.7の1〜2を埋めてから測る。
 5. GCC 7のbuildに必要なC++ subsetとruntime symbolを静的に測定し、案Aの実装範囲を決める。
 
 ### 6.2 sfsと差分build
@@ -520,3 +524,155 @@ CIで回す理由は無い。
 
 **全配布木の実packはこの表に無い。** 7.5のとおり1時間半かかるためCIでは
 回さない。roadmap 6.1の4へ進む前に手で1度通す —— 2026-09-09に通した (7.5)。
+
+## 8. GCC の翻訳単位を我々の器に読ませる (6.1 の 4)
+
+tccのときと同じ測り方である (4.1) —— ソースを読ませ、**通らなかった単位と
+その理由を数える**。対象は純粋なCで書かれた **libiberty (55単位) と
+libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*.h) を
+要り、4.7.4にriscv backendが無いのでhost向けにconfigureするしかない。
+まずこの2つの書庫で測る。
+
+道具は`tools/gcc17.sh`の`configure` / `headers` / `unit` / `units` / `where`。
+器は`cc15v`と`pp16`、libcは`libc21`である。
+
+### 8.1 どう測るか
+
+**単位の一覧を自分で選ばない。** `libiberty/Makefile.in`の
+`REQUIRED_OFILES`と`libcpp/Makefile.in`の`libcpp_a_OBJS`から取る。
+
+**どのlibcで測るかを明示する。** 既定は`libc21` —— zlib / bzip2を読んで
+足した世代で、我々が実物に向けて持っているheaderはこれが全部である
+([libc21.md](../stage017/libc21.md))。`STONE_GCC17_LIBC`で差し替えられる。
+
+> **初回は`stage015/libc`で測ってしまった。** それは鎖の素の側
+> (`tools/diff17.sh`の`bare`が測る器) で、`sys/`の下は`time.h`しか無い。
+> 土台を`libc21`に替えると、閉包の閉じる単位は33から69へ、`.o`まで
+> 通る単位は38から42へ増える。**表を読む前に、その表が何に対する表かを
+> 言えなければならない。**
+
+**config.hはhostのautoconfに作らせる。** configureを我々のOSで回すのは
+4.2の別件である。ただしhostのheaderと語長で作ると、我々に無いheaderを
+「ある」と書いたconfig.hになるので2つ手当てした。
+
+1. `CPPFLAGS`でheaderの探し道を我々のlibcだけにする。`AC_CHECK_HEADERS`は
+   「そのheaderを含む試験を訳せるか」で決めるので、`HAVE_*_H`が我々の
+   headerの有無を映す
+2. 語長はautoconfのcache変数でRV32の値を与える。放っておくと
+   `SIZEOF_LONG`が8になる
+
+**拒んだ理由を、同じ入力をhostに読ませて分類する。** 我々のppもccも
+終了コードしか言わない。tccのときの`tools/diff17.sh`と同じ手である。
+
+| 状態 | 意味 |
+|---|---|
+| `ok` | `.o`ができた |
+| `hdr` | libcにheaderが無い。**空の代役で埋めて先へ進め**、その先の結果を`->`で繋ぐ |
+| `ppext` | 我々のppが拒み、hostのcppも`-pedantic-errors`で拒む。規格の外の形 |
+| `pp` | 我々のppが拒み、hostは通す。**我々のppの穴** |
+| `decl` | ppは通るがhostのgnu89が拒む。宣言か型がlibcに無い |
+| `ext` | 我々のccが拒み、hostもC89として拒む。GNU / C99の拡張 |
+| `gap` | 我々のccだけが拒む。**我々のC89適合の穴** |
+| `cap` | 器の上限 (ppの束ね64員・pp/ccの6) |
+
+我々のheader自身が出すISO診断 (`long long`) はbaselineとして引く。
+
+### 8.2 測った結果
+
+| 結果 | 単位 |
+|---|---:|
+| `ok` | **42** |
+| `ppext` | 13 |
+| `gap` | 9 |
+| `decl` | 5 |
+| `cap` | 1 |
+
+**70単位のうち42単位 (60%) が`.o`まで通った。** 最大は`cp-demangle`の
+140,800 bytesである。headerの閉包は69単位で閉じ、足りないのは
+`sys/times.h` 1つだけ (`getruntime`) である。
+
+単位ごとの結果は[gcc47-units.txt](../tests/stage017/expected/gcc47-units.txt)、
+headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.txt)
+にある。**これは期待値ではなく測定値である** ——
+`gcc47-tree.txt` (4.5) と違い、検査が突き合わせる相手ではない。器を直せば
+変わるべき値なので、次に測ったときの比較対象として置く。
+
+### 8.3 C適合の穴 —— 8つ (`gap` の9単位)
+
+`gcc17.sh where`が、ccが落ちる最初の関数の塊まで絞る。そこから最小の形を
+作ってccに食わせた。**どれもhostはC89として通す。**
+
+| | 形 | cc | 出た単位 |
+|---|---|---:|---|
+| 1 | block内の`struct tag ;` (tagだけの宣言) | 1 | concat |
+| 2 | bit-field memberへの`++` | 5 | fibheap |
+| 3 | 関数名を括弧で囲む定義・宣言 `int (f) (int x)` | 1 | hashtab |
+| 4 | prototypeの仮引数に関数pointerの抽象宣言子 `void *(*)(long)` | 1 | obstack, symtab |
+| 5 | block scopeの`typedef` | 1 | sort |
+| 6 | block scopeの`extern`宣言 | 1 | xmalloc |
+| 7 | 関数pointerの配列 `void (*fns[32]) (void)` | 1 | xatexit |
+| 8 | `putc`がstdio.hに無い | 5 | mkdeps |
+
+1は`ansidecl.h`の`VA_OPEN`が`{ va_list ap; va_start(ap, v); { struct Qdmy`
+と展開する形で、**可変長引数を使う単位すべてに効く**。
+
+8だけは言語ではなくlibcの穴である。我々は`fputc`と`putchar`を持つが
+`putc`を持たず、鎖の前置部が**1引数の**`putc`を提供しているので、
+C89の2引数の呼出しが引数個数の不一致 (5) になる。
+
+**4は2単位で出たが同じ形である。** 族を振る舞いではなく言語の規則で
+切る ([stage017-cc.md](stage017-cc.md) 33章の反省)。
+
+### 8.4 前処理器 —— `defined` がmacro展開で現れる (`ppext` の13単位)
+
+**libcppの13単位すべてが同じ1つの形で止まる。** `system.h` 379行の
+
+```c
+#define HAVE_DESIGNATED_INITIALIZERS \
+  (!defined(__cplusplus) \
+   && ((GCC_VERSION >= 2007) || (__STDC_VERSION__ >= 199901L)))
+```
+
+を`internal.h` 577行が`#if`で使う。**macro展開の結果に`defined`が現れる
+形はC89 6.8.1で未定義動作**であり、hostの`gcc -std=c89 -pedantic-errors`も
+`this use of "defined" may not be portable`で拒む。我々のppは4 (条件指令の
+誤り) で止まる。
+
+したがってこれは我々の穴ではない。**ただしGCCを組むには通す必要がある** ——
+GCCは自分自身がこの形を受けることを前提に書かれている。hostのcppに合わせて
+「展開後の`defined`を評価する」ようにするかは、Stage 18で決める。
+
+### 8.5 libcの穴 —— 3つ (`decl` の5単位)
+
+`libc21`は`sys/types.h`・`sys/stat.h`・`signal.h`・`dirent.h`を既に持ち、
+`off_t`も`struct stat`も定義している。残るのは中身である。
+
+| 要るもの | 単位 |
+|---|---|
+| `struct stat`のmember —— `st_dev` / `st_ino` / `st_mode` | fdmatch, getpwd, unlink-if-ordinary |
+| `sys/times.h`と`struct tms` | getruntime |
+| `_PC_PATH_MAX` (`pathconf`) | lrealpath |
+
+我々の`struct stat`は`st_size` / `st_mtlo` / `st_mthi` / `st_type`の4つで、
+sfsが持つ情報に合わせてある。`st_ino`はsfsの表の索引がそのまま使え、
+`st_mode`は`st_type`から作れるが、`st_dev`は**sfsに対応するものが無い** ——
+「同じファイルか」を`(st_dev, st_ino)`の組で見るソースに何を返すかは、
+足すときに決める。
+
+### 8.6 器の上限 (`cap` の1単位)
+
+`libiberty/regex.c`が`pp 6` (容量超過) で止まる。8,000行あり、自分自身を
+2度includeして`re_search`の族をwide版まで作る形である。tccのときに広げた
+pp16の器 (入力4 MiB・macro 4096) を超える。
+
+### 8.7 次の手
+
+埋める順番は、**塞いでいる単位の数**で決まる。
+
+1. 8.4の`defined` —— libcpp 13単位が一斉に動く。**いちばん効く1つ**
+2. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
+3. 8.3の残り6つと8 (`putc`)
+4. 8.5の`struct stat`のmember (3単位)・`sys/times.h`・`_PC_PATH_MAX`
+
+**gcc/本体 (362単位) はまだ測っていない。** 生成header (`tm.h`・
+`insn-*.h`) とhost向けconfigureが要る。1と2を埋めてから同じharnessで測る。
