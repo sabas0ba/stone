@@ -81,6 +81,15 @@ build_stage015b() {
     # libcpp/charset.c 455 行がこの形 (docs/stage017-gcc.md 8.3 の 11)。
     # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い
     ccgen cc15z cc15y stage015/cc15z.sc
+    # 第 27 世代。小数点から始まる浮動小数点定数 (.0001) を読めなかった。
+    # C89 3.1.3.1 の fractional-constant は
+    # 「digit-sequence_opt . digit-sequence」で整数部を省ける。next() が
+    # 数字で始まるときしか lexnum() へ渡していなかった。GCC の
+    # libcpp/symtab.c の approx_sqrt がこの形
+    # (docs/stage017-gcc.md 8.3 の 13)。
+    # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い。
+    # **ここで 1 文字の世代名が尽きた。以降は 2 文字へ延ばす**
+    ccgen cc15aa cc15z stage015/cc15aa.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -103,13 +112,14 @@ do_stage015b() {
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
         cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
         cc15x0.bin cc15x.bin cc15y0.bin cc15y.bin \
-        cc15z0.bin cc15z.bin \
+        cc15z0.bin cc15z.bin cc15aa0.bin cc15aa.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
            stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
            stage015/cc15x.sc stage015/cc15y.sc stage015/cc15z.sc \
+           stage015/cc15aa.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
