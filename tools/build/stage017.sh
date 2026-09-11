@@ -156,6 +156,13 @@ build_stage017() {
         -- stage017/pp17.sc tmp/build/cc15p.bin tmp/build/ld16.bin \
         -- pp17_run
 
+    # 前処理器の第 18 世代。**展開の結果に現れた defined を評価する**
+    # (docs/stage017-gcc.md 8.4 / stage017/pp18.md)。pp17 の全文複製で，
+    # 差は #if の式を読むところだけである
+    step pp18 pp18 \
+        -- stage017/pp18.sc tmp/build/cc15p.bin tmp/build/ld16.bin \
+        -- pp18_run
+
     # cc の第 19 世代 (第 3 部の 3 の 2)。-I を束ねず pp17 へ渡す
     step cc19 cc19 \
         -- stage017/cc19.c tmp/build/cc15p.bin tmp/build/pp16.bin \
@@ -267,6 +274,14 @@ pp17_run() {
     { printf 'E'; cat tmp/build/pp17.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/build/pp17
     echo "built tmp/build/pp17" >&2
+}
+
+pp18_run() {
+    { cat stage017/pp18.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15p.bin > tmp/build/pp18.o
+    { printf 'E'; cat tmp/build/pp18.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/build/pp18
+    echo "built tmp/build/pp18" >&2
 }
 
 kernel23_run() {

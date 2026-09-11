@@ -1311,4 +1311,96 @@ bigsize '\377\377\377\377' "$out/neg4.out"
 grep -qx 'S' "$out/neg4.out"
 report $? "run: 2^31 を超える大きさも 'S' で拒む (符号なしで比べている)"
 
+section "第 6 部: 展開の結果に現れた defined (pp18。docs/stage017-gcc.md 8.4)"
+
+# **GCC の libcpp 13 単位すべてが，この 1 つの形で止まっていた。**
+# `system.h` 379 行が defined を含む本体のマクロを定義し，`internal.h`
+# 577 行が #if でそれを使う。dodefined() は展開より先に走るので
+# (C89 の規定)，展開してはじめて現れる defined は残ってしまい，pp17 まで
+# は識別子として 0 に潰して続く '(' で構文が壊れていた。
+#
+# **原文をそのまま置く。** 縮めて書くと「縮めた形では通る」ことしか
+# 言えない。GCC の 2 つのファイルから写した形で見る。
+#
+# 3 つ見る ——
+#   a  GCC の原文。pp17 は 4 で拒み，pp18 は通して正しい枝を選ぶ
+#   b  operand が未定義の名前。pp18 が 0 を出す
+#   c  **operand が定義済みマクロ。pp18 も 4 で拒む** (限界。下の註)
+# **記録した印は照合する。** 誰も見ない SHA-256 は註釈にすぎない
+# (docs/artifacts.md 5)
+want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage017/pp18.md | cut -d' ' -f2)
+got=$(sha256sum tmp/build/pp18); got=${got%% *}
+[ -n "$want" ] && [ "$want" = "$got" ]
+report $? "build: pp18 の SHA-256 が stage017/pp18.md の記載値と一致"
+
+r=$out/ppd
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/s"
+cp tmp/build/pp17 "$r/pp17"
+cp tmp/build/pp18 "$r/pp18"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+
+ppcase() {
+    cat > "$r/s/c.c"
+    sh tools/bundle.sh "$r/s/c.c" > "$r/$1.b"
+}
+
+ppcase a <<'CEOF'
+#define GCC_VERSION (__GNUC__ * 1000 + __GNUC_MINOR__)
+#define HAVE_DESIGNATED_INITIALIZERS \
+  (!defined(__cplusplus) \
+   && ((GCC_VERSION >= 2007) || (__STDC_VERSION__ >= 199901L)))
+#if HAVE_DESIGNATED_INITIALIZERS
+a_yes
+#else
+a_no
+#endif
+CEOF
+
+ppcase b <<'CEOF'
+#define M (defined(NOT_DEFINED_ANYWHERE))
+#if M
+b_yes
+#else
+b_no
+#endif
+CEOF
+
+# **限界。** defined の operand は，展開のときに operand 自身が展開される
+# ので，pp18 が見るときには名前が消えている。**黙って違う答を出すのでは
+# なく 4 で拒む。** GCC 4.7.4 の libiberty / libcpp の閉包でマクロ本体に
+# defined が現れるのは system.h の 1 箇所だけで，その operand は
+# __cplusplus (我々が定義しない名前) なので，この限界は当たらない
+ppcase c <<'CEOF'
+#define X 1
+#define M (defined(X))
+#if M
+c_yes
+#else
+c_no
+#endif
+CEOF
+rm -rf "$r/s"
+
+cat > "$r/go.sh" <<'EOF'
+pp17 < a.b > o17.txt
+echo "a17 $?"
+pp18 < a.b > oa.txt
+echo "a18 $?"
+grep a_no oa.txt
+echo "abranch $?"
+pp18 < b.b > ob.txt
+echo "b18 $?"
+grep b_no ob.txt
+echo "bbranch $?"
+pp18 < c.b > oc.txt
+echo "c18 $?"
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot3 "$r" "$out/ppd.out" 8388608 512
+diff -u tests/stage017/expected/ppdefined.txt "$out/ppd.out" > "$out/ppd.diff"
+report $? "run: 展開の後に残った defined を pp18 が評価する (pp17 は 4 で拒む)"
+[ -s "$out/ppd.diff" ] && sed -n '4,$p' "$out/ppd.diff"
+
 summary
