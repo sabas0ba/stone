@@ -100,7 +100,7 @@ GCC 7 を訳せば案 A の目的に C++ 処理系を自作せずに届く」と
 案 C の見積りそのもの**になる。
 
 **測った (8 章)。** libiberty と libcpp の 70 単位のうち **48 単位**が
-`.o` まで通り，表は「C 適合の穴 10 つ + libc の穴 4 つ + 器の上限 2 つ」に
+`.o` まで通り，表は「C 適合の穴 11 つ + libc の穴 4 つ + 器の上限 2 つ」に
 なった。予想どおり同じ形の表が出ている。**表は測るたびに動く** ——
 前処理器の未対応 1 つ (`defined`) は `pp18` で，C 適合の穴の 1 つ
 (仮引数並びの抽象宣言子) は `cc15w` で埋め，そのたびに次の壁が出た。
@@ -634,7 +634,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 `gcc47-tree.txt` (4.5) と違い、検査が突き合わせる相手ではない。器を直せば
 変わるべき値なので、次に測ったときの比較対象として置く。
 
-### 8.3 C適合の穴 —— 10つ (`gap` の13単位)
+### 8.3 C適合の穴 —— 11つ (`gap` の13単位)
 
 `gcc17.sh where`が、ccが落ちる最初の関数の塊まで絞る。そこから最小の形を
 作ってccに食わせた。**どれもhostはC89として通す。**
@@ -652,6 +652,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 | 9 | 関数pointer型へのcast `(void *(*) (long)) xmalloc` | 1 | symtab, obstack, init |
 | 10 | 配列の大きさの定数式に`sizeof` | 1 | lex |
 | 11 | pointerの型修飾子 `int (*const f)(int)` | 1 | charset |
+| 12 | 条件式の第2項が空pointer定数 `(k ? 0 : p)->f` | 5 | line-map |
 
 1は`ansidecl.h`の`VA_OPEN`が`{ va_list ap; va_start(ap, v); { struct Qdmy`
 と展開する形で、**可変長引数を使う単位すべてに効く**。
@@ -696,8 +697,9 @@ extern int _obstack_begin (struct obstack *, int, int,
 | `obstack` | 9 (castの型名) | 762〜926 |
 | `charset` | 11 (pointerの型修飾子) | 4284〜4325 |
 | `lex` | 10 (`sizeof`を定数式に) | 4052〜4081 |
+| `line-map` | 12 (条件式の型) | 4096〜4193 |
 
-#### 9・10・11 —— 4を通して見えた3つ
+#### 9・10・11・12 —— 4を通して見えた4つ
 
 いずれもcc15wで測り直して初めて出た。最小の形はどれもhostの
 `gcc -std=c89 -pedantic-errors`が通す。
@@ -721,6 +723,34 @@ conversion_loop (int (*const one_conversion)(iconv_t, ...), ...)
 
 11は仮引数だけの話ではない。`int (*const f)(int) = 0;`という局所の宣言も
 同じく1で止まる。
+
+12は`include/line-map.h` 518行の
+
+```c
+#define INCLUDED_FROM(SET, MAP)						\
+  ((linemap_check_ordinary (MAP)->d.ordinary.included_from == -1)	\
+   ? NULL								\
+   : (&LINEMAPS_ORDINARY_MAPS (SET)[(MAP)->d.ordinary.included_from]))
+```
+
+を`line-map.c` 266行が`ORDINARY_MAP_INCLUDER_FILE_INDEX (INCLUDED_FROM
+(set, map - 1))`のように**そのまま`->`で辿る**形である。**我々は条件式の型を
+第2項から取っている**ので、第2項が空pointer定数のときに結果が`int`に
+なり、`->`が型の誤り (5) になる。C89 6.3.15は
+
+> 一方の被演算子が空ポインタ定数であれば、結果は他方の型を持つ。
+
+と書いている。**順序に依存しない規則である。**
+
+| 形 | cc15w |
+|---|---|
+| `(k ? 0 : p)->f` | **5** |
+| `(k ? p : 0)->f` | 0 |
+| `(k ? (struct m *)0 : p)->f` | 0 |
+| `q = k ? 0 : p; q->f` | 0 |
+
+**代入や返却では表に出ない** —— そちらは左辺の型へ変換する道を通るので、
+条件式の型が誤っていても結果が合う。`->`を直に当てて初めて出る。
 
 ### 8.4 前処理器 —— `defined` がmacro展開で現れる (`ppext` の13単位)
 
@@ -826,8 +856,9 @@ extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 
    **[cc15w](../stage015/cc15w.md)で通した。6単位が`.o`まで出た (8.2)。**
 4. **8.3の9 (関数pointer型へのcast) —— 3単位。** 4を通した先に出た形で、
    `symtab` / `init` / `obstack`が待っている
-5. 8.3の10 (`sizeof`を定数式に) と11 (pointerの型修飾子) —— 各1単位。
-   10は`cofs`が「会った例が無い」として保留していたもので、会った
+5. 8.3の10 (`sizeof`を定数式に)・11 (pointerの型修飾子)・12 (条件式の型)
+   —— 各1単位。10は`cofs`が「会った例が無い」として保留していたもので、
+   会った。12は**規則を取り違えていた**もので、他の11と性質が違う
 6. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
 7. 8.3の残り5つ (2・3・5・6・7) と8 (`putc`)
 8. 8.5の`struct stat`のmember (5単位)・`sys/times.h`・`_PC_PATH_MAX`
