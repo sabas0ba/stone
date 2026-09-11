@@ -99,9 +99,9 @@ GCC 7 を訳せば案 A の目的に C++ 処理系を自作せずに届く」と
 (31〜33 章)。GCC 4.7 でも同じ形の表が出るはずで，**その表の長さが
 案 C の見積りそのもの**になる。
 
-**測った (8 章)。** libiberty と libcpp の 70 単位のうち 38 単位が
-`.o` まで通り，表は「C 適合の穴 8 つ + libc の穴 5 header と 4 型 +
-前処理器の未対応 1 つ」になった。予想どおり同じ形の表が出ている。
+**測った (8 章)。** libiberty と libcpp の 70 単位のうち 42 単位が
+`.o` まで通り，表は「C 適合の穴 8 つ + libc の穴 3 つ + 前処理器の
+未対応 1 つ + 器の上限 1 つ」になった。予想どおり同じ形の表が出ている。
 
 ### 4.2 GCC 4.7 の `configure` と `Makefile` が我々の OS で回るか
 
@@ -332,7 +332,7 @@ sh tools/diff17.sh <名前>   1 つだけ
 1. ~~GCC 4.7.4を固定付きで取得する。~~ 完了。
 2. ~~配布木をsfs3/kernel24の上限と比較する。~~ 完了。現在の構成には収まらない。
 3. ~~sfsの名前長とkernelのmemory mapを更新する。~~ 完了。7章 (sfs4 / kernel25)。
-4. ~~GCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。~~ libiberty / libcppは完了 (8章)。70単位のうち38単位が`.o`まで通り、C適合の穴が8つ、libcの穴が5 header + 4型、前処理器の未対応が1つ出た。gcc/本体 (362単位) は8.8の1〜3を埋めてから測る。
+4. ~~GCC 4.7.4のC translation unitをstone toolchainへ入力し、C対応とlibcの不足を記録する。~~ libiberty / libcppは完了 (8章)。70単位のうち42単位が`.o`まで通り、C適合の穴が8つ、libcの穴が3つ、前処理器の未対応が1つ、器の上限が1つ出た。gcc/本体 (362単位) は8.7の1〜2を埋めてから測る。
 5. GCC 7のbuildに必要なC++ subsetとruntime symbolを静的に測定し、案Aの実装範囲を決める。
 
 ### 6.2 sfsと差分build
@@ -533,13 +533,23 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 要り、4.7.4にriscv backendが無いのでhost向けにconfigureするしかない。
 まずこの2つの書庫で測る。
 
-道具は`tools/gcc17.sh`の`configure` / `headers` / `unit` / `units` / `where`、
-土台は`cc15v` (main の最前線) である。
+道具は`tools/gcc17.sh`の`configure` / `headers` / `unit` / `units` / `where`。
+器は`cc15v`と`pp16`、libcは`libc21`である。
 
 ### 8.1 どう測るか
 
 **単位の一覧を自分で選ばない。** `libiberty/Makefile.in`の
 `REQUIRED_OFILES`と`libcpp/Makefile.in`の`libcpp_a_OBJS`から取る。
+
+**どのlibcで測るかを明示する。** 既定は`libc21` —— zlib / bzip2を読んで
+足した世代で、我々が実物に向けて持っているheaderはこれが全部である
+([libc21.md](../stage017/libc21.md))。`STONE_GCC17_LIBC`で差し替えられる。
+
+> **初回は`stage015/libc`で測ってしまった。** それは鎖の素の側
+> (`tools/diff17.sh`の`bare`が測る器) で、`sys/`の下は`time.h`しか無い。
+> 土台を`libc21`に替えると、閉包の閉じる単位は33から69へ、`.o`まで
+> 通る単位は38から42へ増える。**表を読む前に、その表が何に対する表かを
+> 言えなければならない。**
 
 **config.hはhostのautoconfに作らせる。** configureを我々のOSで回すのは
 4.2の別件である。ただしhostのheaderと語長で作ると、我々に無いheaderを
@@ -557,7 +567,7 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 | 状態 | 意味 |
 |---|---|
 | `ok` | `.o`ができた |
-| `hdr` | libcに headerが無い。**空の代役で埋めて先へ進め**、その先の結果を`->`で繋ぐ |
+| `hdr` | libcにheaderが無い。**空の代役で埋めて先へ進め**、その先の結果を`->`で繋ぐ |
 | `ppext` | 我々のppが拒み、hostのcppも`-pedantic-errors`で拒む。規格の外の形 |
 | `pp` | 我々のppが拒み、hostは通す。**我々のppの穴** |
 | `decl` | ppは通るがhostのgnu89が拒む。宣言か型がlibcに無い |
@@ -567,45 +577,27 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 
 我々のheader自身が出すISO診断 (`long long`) はbaselineとして引く。
 
-### 8.2 header (8.1 の `headers`。鎖もQEMUも要らない)
-
-70単位のうち**33単位は閉包が閉じ、37単位はlibcのheaderが無い**。
-無いのは5つだけである。
-
-| 無いheader | 塞いでいる単位 |
-|---|---:|
-| `sys/types.h` | 36 |
-| `sys/stat.h` | 1 (fdmatch) |
-| `sys/times.h` | 1 (getruntime) |
-| `signal.h` | 1 (strsignal) |
-| `dirent.h` | 1 (libcpp/files) |
-
-`sys/types.h`は`libcpp/system.h`190行とlibibertyの24単位が**無条件に**
-含む。我々は`size_t` / `ssize_t` / `time_t`を`stddef.h` / `unistd.h` /
-`time.h`に持っているので、**「型は在るが headerの名前が無い」**穴である。
-空の代役で埋めると36単位のうち10単位がそのまま通った。
-
-### 8.3 測った結果 (8.1 の `units`)
+### 8.2 測った結果
 
 | 結果 | 単位 |
 |---|---:|
-| `ok` | **38** |
+| `ok` | **42** |
 | `ppext` | 13 |
 | `gap` | 9 |
-| `decl` | 9 |
+| `decl` | 5 |
 | `cap` | 1 |
 
-**70単位のうち38単位 (54%) が`.o`まで通った。** 最大は`cp-demangle`の
-140,800 bytesである。
+**70単位のうち42単位 (60%) が`.o`まで通った。** 最大は`cp-demangle`の
+140,800 bytesである。headerの閉包は69単位で閉じ、足りないのは
+`sys/times.h` 1つだけ (`getruntime`) である。
 
 単位ごとの結果は[gcc47-units.txt](../tests/stage017/expected/gcc47-units.txt)、
 headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.txt)
 にある。**これは期待値ではなく測定値である** ——
-`tests/stage017/expected/gcc47-tree.txt` (4.5) と違い、検査が突き合わせる
-相手ではない。器を直せば変わるべき値なので、次に測ったときの比較対象として
-置く。`gcc17.sh units`の出力をそのまま写したものである。
+`gcc47-tree.txt` (4.5) と違い、検査が突き合わせる相手ではない。器を直せば
+変わるべき値なので、次に測ったときの比較対象として置く。
 
-### 8.4 C適合の穴 —— 8つ (`gap` の9単位)
+### 8.3 C適合の穴 —— 8つ (`gap` の9単位)
 
 `gcc17.sh where`が、ccが落ちる最初の関数の塊まで絞る。そこから最小の形を
 作ってccに食わせた。**どれもhostはC89として通す。**
@@ -629,9 +621,9 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 C89の2引数の呼出しが引数個数の不一致 (5) になる。
 
 **4は2単位で出たが同じ形である。** 族を振る舞いではなく言語の規則で
-切る (stage017-cc.md 33章の反省)。
+切る ([stage017-cc.md](stage017-cc.md) 33章の反省)。
 
-### 8.5 前処理器 —— `defined` がmacro展開で現れる (`ppext` の13単位)
+### 8.4 前処理器 —— `defined` がmacro展開で現れる (`ppext` の13単位)
 
 **libcppの13単位すべてが同じ1つの形で止まる。** `system.h` 379行の
 
@@ -650,35 +642,37 @@ C89の2引数の呼出しが引数個数の不一致 (5) になる。
 GCCは自分自身がこの形を受けることを前提に書かれている。hostのcppに合わせて
 「展開後の`defined`を評価する」ようにするかは、Stage 18で決める。
 
-### 8.6 libcの型と宣言 (`decl` の9単位)
+### 8.5 libcの穴 —— 3つ (`decl` の5単位)
 
-代役で埋めた先で、**型の中身**が要ると分かったもの。
+`libc21`は`sys/types.h`・`sys/stat.h`・`signal.h`・`dirent.h`を既に持ち、
+`off_t`も`struct stat`も定義している。残るのは中身である。
 
 | 要るもの | 単位 |
 |---|---|
-| `struct stat` | fdmatch, getpwd, unlink-if-ordinary |
-| `struct tms` | getruntime |
-| `off_t` | simple-object, simple-object-{coff,elf,mach-o} |
+| `struct stat`のmember —— `st_dev` / `st_ino` / `st_mode` | fdmatch, getpwd, unlink-if-ordinary |
+| `sys/times.h`と`struct tms` | getruntime |
 | `_PC_PATH_MAX` (`pathconf`) | lrealpath |
 
-8.2の「名前が無いだけ」とは別で、こちらは**実体が要る**。
+我々の`struct stat`は`st_size` / `st_mtlo` / `st_mthi` / `st_type`の4つで、
+sfsが持つ情報に合わせてある。`st_ino`はsfsの表の索引がそのまま使え、
+`st_mode`は`st_type`から作れるが、`st_dev`は**sfsに対応するものが無い** ——
+「同じファイルか」を`(st_dev, st_ino)`の組で見るソースに何を返すかは、
+足すときに決める。
 
-### 8.7 器の上限 (`cap` の1単位)
+### 8.6 器の上限 (`cap` の1単位)
 
 `libiberty/regex.c`が`pp 6` (容量超過) で止まる。8,000行あり、自分自身を
 2度includeして`re_search`の族をwide版まで作る形である。tccのときに広げた
 pp16の器 (入力4 MiB・macro 4096) を超える。
 
-### 8.8 次の手
+### 8.7 次の手
 
 埋める順番は、**塞いでいる単位の数**で決まる。
 
-1. `sys/types.h`を足す (36単位)。中身は既にある型の再輸出でよい
-2. 8.4の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
-3. 8.5の`defined` —— libcpp 13単位が一斉に動く
-4. 8.6の`struct stat` / `off_t` —— kernelのstatを既に持つので実体は書ける
-5. 8.4の残り6つ
+1. 8.4の`defined` —— libcpp 13単位が一斉に動く。**いちばん効く1つ**
+2. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
+3. 8.3の残り6つと8 (`putc`)
+4. 8.5の`struct stat`のmember (3単位)・`sys/times.h`・`_PC_PATH_MAX`
 
 **gcc/本体 (362単位) はまだ測っていない。** 生成header (`tm.h`・
-`insn-*.h`) とhost向けconfigureが要る。上の1〜3を埋めてから同じ
-harnessで測る。
+`insn-*.h`) とhost向けconfigureが要る。1と2を埋めてから同じharnessで測る。
