@@ -299,7 +299,16 @@ EOF
 # 書かれた 2 つの書庫で測る。
 
 work="$repo_root/tmp/g17u"
-ours="$repo_root/stage015/libc/include"
+# どの libc の header で測るか。
+#
+# **既定は libc21 である。** 実物 (zlib / bzip2) を読んで足した世代で，
+# 我々が実物に向けて持っている header はこれが全部である
+# (stage017/libc21.md)。GCC を組むときに使うのもこちらになる。
+#
+# STONE_GCC17_LIBC で差し替えられる。stage015/libc は鎖の素の側 ——
+# tools/diff17.sh の bare が測る器で，sys/ の下は time.h しか無い。
+# **どちらで測ったかで header の穴の数が変わる**ので明示する
+ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc21/include}
 pp16=tmp/build/pp16.bin
 cc15=tmp/build/cc15v.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
