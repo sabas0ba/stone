@@ -534,7 +534,7 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 まずこの2つの書庫で測る。
 
 道具は`tools/gcc17.sh`の`configure` / `headers` / `unit` / `units` / `where`。
-器は`cc15v`と`pp16`、libcは`libc21`である。
+器は`cc15v`と`pp18`、libcは`libc21`である。
 
 ### 8.1 どう測るか
 
@@ -550,6 +550,15 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 > 土台を`libc21`に替えると、閉包の閉じる単位は33から69へ、`.o`まで
 > 通る単位は38から42へ増える。**表を読む前に、その表が何に対する表かを
 > 言えなければならない。**
+
+**どちらの系でppを回すかも明示する。** `STONE_GCC17_PP=os`で前処理を
+**我々のOSの上の`pp18`**に通す (既定は裸の`pp16`)。`tools/tcc17.sh`と
+同じ形で、作業用の根をsfs3で詰め、記憶像へ置いて`kernel24`を起動し、
+走行後の像から`.i`を取り出す。1単位あたりQEMUの起動が1回増える。
+
+この2つは`units`が表の先頭と`tmp/g17u/units.meta`に書き出す。
+[gcc47-units.txt](../tests/stage017/expected/gcc47-units.txt)の頭にも
+`#`付きで残してある —— 表だけを見ても基準を辿れるようにするためである。
 
 **config.hはhostのautoconfに作らせる。** configureを我々のOSで回すのは
 4.2の別件である。ただしhostのheaderと語長で作ると、我々に無いheaderを
@@ -573,23 +582,39 @@ libcpp (15単位)**。gcc/本体はconfigureが生成するheader (tm.h・insn-*
 | `decl` | ppは通るがhostのgnu89が拒む。宣言か型がlibcに無い |
 | `ext` | 我々のccが拒み、hostもC89として拒む。GNU / C99の拡張 |
 | `gap` | 我々のccだけが拒む。**我々のC89適合の穴** |
-| `cap` | 器の上限 (ppの束ね64員・pp/ccの6) |
+| `cap` | 器の上限 (ppの束ね64員 / 256員・pp/ccの6) |
+| `run` | OS側のppで走行そのものが立ち上がらなかった。適合の話ではない |
 
 我々のheader自身が出すISO診断 (`long long`) はbaselineとして引く。
 
 ### 8.2 測った結果
 
-| 結果 | 単位 |
-|---|---:|
-| `ok` | **42** |
-| `ppext` | 13 |
-| `gap` | 9 |
-| `decl` | 5 |
-| `cap` | 1 |
+`pp16` (鎖の素の側) と`pp18` (OSの上) の両方で測った。**変わったのは
+13単位ちょうどで、8.4の`ppext`と一致する。** 他の57単位は状態も詳細も
+1文字も動いていない —— pp18が変えたのは変えるつもりだったものだけである。
 
-**70単位のうち42単位 (60%) が`.o`まで通った。** 最大は`cp-demangle`の
-140,800 bytesである。headerの閉包は69単位で閉じ、足りないのは
-`sys/times.h` 1つだけ (`getruntime`) である。
+| 結果 | `pp16` | `pp18` (OS) |
+|---|---:|---:|
+| `ok` | **42** | **42** |
+| `gap` | 9 | 19 |
+| `decl` | 5 | 6 |
+| `ppext` | 13 | 0 |
+| `ext` | 0 | 1 |
+| `hdr` | 1 | 1 |
+| `cap` | 1 | 1 |
+
+**`ok`は42のまま増えなかった。** 13単位は前処理を抜けただけで、その先の
+壁に当たっている。内訳は次のとおりで、**10単位が8.3の4という既知の1つ**に
+集まった。
+
+| 移った先 | 単位 | 原因 |
+|---|---:|---|
+| `gap 1` | 10 | 8.3の4 (`obstack.h`の`void *(*) (long)`)。既知 |
+| `decl` | 2 | `struct stat`の`st_mode` / `st_mtime` (8.5) |
+| `ext` | 1 | `offsetof`が定数式でない (8.6の2。新規) |
+
+最大は`cp-demangle`の140,800 bytesである。headerの閉包は69単位で閉じ、
+足りないのは`sys/times.h` 1つだけ (`getruntime`) である。
 
 単位ごとの結果は[gcc47-units.txt](../tests/stage017/expected/gcc47-units.txt)、
 headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.txt)
@@ -597,7 +622,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 `gcc47-tree.txt` (4.5) と違い、検査が突き合わせる相手ではない。器を直せば
 変わるべき値なので、次に測ったときの比較対象として置く。
 
-### 8.3 C適合の穴 —— 8つ (`gap` の9単位)
+### 8.3 C適合の穴 —— 8つ (`gap` の19単位)
 
 `gcc17.sh where`が、ccが落ちる最初の関数の塊まで絞る。そこから最小の形を
 作ってccに食わせた。**どれもhostはC89として通す。**
@@ -607,7 +632,7 @@ headerの閉包は[gcc47-headers.txt](../tests/stage017/expected/gcc47-headers.t
 | 1 | block内の`struct tag ;` (tagだけの宣言) | 1 | concat |
 | 2 | bit-field memberへの`++` | 5 | fibheap |
 | 3 | 関数名を括弧で囲む定義・宣言 `int (f) (int x)` | 1 | hashtab |
-| 4 | prototypeの仮引数に関数pointerの抽象宣言子 `void *(*)(long)` | 1 | obstack, symtab |
+| 4 | prototypeの仮引数に関数pointerの抽象宣言子 `void *(*)(long)` | 1 | obstack, symtab, **libcppの10単位** |
 | 5 | block scopeの`typedef` | 1 | sort |
 | 6 | block scopeの`extern`宣言 | 1 | xmalloc |
 | 7 | 関数pointerの配列 `void (*fns[32]) (void)` | 1 | xatexit |
@@ -622,6 +647,22 @@ C89の2引数の呼出しが引数個数の不一致 (5) になる。
 
 **4は2単位で出たが同じ形である。** 族を振る舞いではなく言語の規則で
 切る ([stage017-cc.md](stage017-cc.md) 33章の反省)。
+
+> **pp18で前処理を通したら、4が塞いでいる単位が2から12になった。**
+> `include/obstack.h` 193行の
+>
+> ```c
+> extern int _obstack_begin (struct obstack *, int, int,
+>                            void *(*) (long), void (*) (void *));
+> ```
+>
+> をlibcppの全単位が`include/symtab.h` 22行経由で読む。`gcc17.sh where`が
+> `charset` / `directives` / `directives-only` / `errors` / `expr` /
+> `init` / `lex` / `line-map` / `pch` / `traditional`のどれでも
+> **`.i`の同じ1843〜1989行**を指す。
+>
+> **いちばん効く1つが8.4から4へ移った。** 埋める順番は塞いでいる単位の
+> 数で決まるので、次に直すのはこれである (8.7)。
 
 ### 8.4 前処理器 —— `defined` がmacro展開で現れる (`ppext` の13単位)
 
@@ -653,18 +694,27 @@ clangも評価する側に倒しており、倒す先は1つしかない。pp17�
 libiberty / libcppの閉包でマクロ本体に`defined`が現れるのは`system.h`の
 1箇所だけで、そのoperandは`__cplusplus`、我々のppが定義しない名前である。
 
-**8.2の表はまだ変わらない。** 表を作るharnessは`pp16` (鎖の素の側) で
-測っており、pp18はOSの上でしか走らない世代だからである。13単位を測り直す
-には、harnessのppの段をOS側へ移す必要がある (8.7)。
+**測り直した。** harnessのppの段をOS側へ移し (`STONE_GCC17_PP=os`。8.1)、
+`pp18`で70単位を通し直した。**`ppext`は13から0になり、動いたのはその13単位
+だけである** —— 残る57単位は状態も詳細も1文字も変わっていない。移った先は
+8.2の表のとおりで、**10単位が8.3の4に集まった**。
 
-### 8.5 libcの穴 —— 3つ (`decl` の5単位)
+状態が同じというだけでは足りないので、`md5` / `crc32` / `symtab`の3単位で
+**同じ束ねを`pp16`と`pp18`の両方に通して`.i`をバイト単位で比べた** ——
+20,290 / 10,495 / 24,600バイトすべて一致する。
+
+`ppext`という状態そのものは残す。規格の外の形は`defined`だけではないので、
+次にgcc/本体を測るときにまた出る。
+
+### 8.5 libcの穴 —— 4つ (`decl` の6単位)
 
 `libc21`は`sys/types.h`・`sys/stat.h`・`signal.h`・`dirent.h`を既に持ち、
 `off_t`も`struct stat`も定義している。残るのは中身である。
 
 | 要るもの | 単位 |
 |---|---|
-| `struct stat`のmember —— `st_dev` / `st_ino` / `st_mode` | fdmatch, getpwd, unlink-if-ordinary |
+| `struct stat`のmember —— `st_dev` / `st_ino` / `st_mode` | fdmatch, getpwd, unlink-if-ordinary, **libcpp/files** |
+| `struct stat`のmember —— `st_mtime` | **libcpp/macro** |
 | `sys/times.h`と`struct tms` | getruntime |
 | `_PC_PATH_MAX` (`pathconf`) | lrealpath |
 
@@ -674,25 +724,52 @@ sfsが持つ情報に合わせてある。`st_ino`はsfsの表の索引がその
 「同じファイルか」を`(st_dev, st_ino)`の組で見るソースに何を返すかは、
 足すときに決める。
 
-### 8.6 器の上限 (`cap` の1単位)
+`st_mtime`はpp18で測り直して出た。**値は既に持っている** ——
+`st_mtlo` / `st_mthi`が秒とナノ秒の64 bitを2語で運んでいる (第4部の1)。
+POSIXの`time_t st_mtime`を足すかどうかは、`time_t`を32 bitにするか
+64 bitにするかと同じ判断になるので、そこで決める。
 
-`libiberty/regex.c`が`pp 6` (容量超過) で止まる。8,000行あり、自分自身を
-2度includeして`re_search`の族をwide版まで作る形である。tccのときに広げた
-pp16の器 (入力4 MiB・macro 4096) を超える。
+### 8.6 器の上限 (`cap` の1単位) と定数式
+
+1つめは`libiberty/regex.c`が`pp 6` (容量超過) で止まる。8,000行あり、
+自分自身を2度includeして`re_search`の族をwide版まで作る形である。tccの
+ときに広げたpp16の器 (入力4 MiB・macro 4096) を超える。**pp18でも同じ**
+—— pp17系はアリーナが64 KiBで束ねの員も256だが、それでも足りない。
+
+2つめはpp18で測り直して出た`ext`の1単位である。`libcpp/identifiers.c`
+113行が
+
+```c
+extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 1 : -1];
+```
+
+で翻訳時の表明を書く。我々の`offsetof`は`stddef.h` 22行の
+
+```c
+#define offsetof(t, m) ((size_t)&(((t *)0)->m))
+```
+
+で、**C89の整数定数式ではない**。6.4は整数定数式のキャストを「算術型を
+整数型へ変換するもの」に限っており、アドレスからのキャストは入らない。
+配列の大きさに使えないので、我々のccもhostの
+`-std=c89 -pedantic-errors`も拒む。GCC自身の`stddef.h`は
+`__builtin_offsetof`を使っており、**これはheaderでは閉じない** ——
+器の側に組み込みが要る。
 
 ### 8.7 次の手
 
 埋める順番は、**塞いでいる単位の数**で決まる。
 
-1. ~~8.4の`defined` —— libcpp 13単位が一斉に動く。**いちばん効く1つ**~~
+1. ~~8.4の`defined` —— libcpp 13単位が一斉に動く~~
    **[pp18](../stage017/pp18.md)で通した。**
-2. **harnessのppの段をOS側へ移す。** pp18はOSの上でしか走らない世代なので、
-   `pp16`で測っている今のharnessでは1の効果が表に出ない。`tools/tcc17.sh`が
-   既に持つ形 (作業用の像を詰めて起動し、出来たものを取り出す) をharnessにも
-   与えれば、13単位を測り直せる
-3. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
-4. 8.3の残り6つと8 (`putc`)
-5. 8.5の`struct stat`のmember (3単位)・`sys/times.h`・`_PC_PATH_MAX`
+2. ~~harnessのppの段をOS側へ移す~~
+   **`STONE_GCC17_PP=os`で移した (8.1)。13単位を測り直した結果が8.2である。**
+3. **8.3の4 (`void *(*)(long)`) —— 12単位を塞いでいる。いまはこれが
+   いちばん効く1つ**である。1が動いた結果、libcppの10単位がここに集まった
+4. 8.3の1 (`struct tag ;`) —— 可変長引数を使う単位すべてに効く
+5. 8.3の残り5つと8 (`putc`)
+6. 8.5の`struct stat`のmember (4単位)・`sys/times.h`・`_PC_PATH_MAX`
+7. 8.6の2 (`offsetof`が定数式) —— headerでは閉じず、器に組み込みが要る
 
 **gcc/本体 (362単位) はまだ測っていない。** 生成header (`tm.h`・
-`insn-*.h`) とhost向けconfigureが要る。2と3を埋めてから同じharnessで測る。
+`insn-*.h`) とhost向けconfigureが要る。3と4を埋めてから同じharnessで測る。

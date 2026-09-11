@@ -1,3 +1,8 @@
+# source=gcc-4.7.4
+# libc=stage017/libc21/include
+# pp-engine=os
+# pp=tmp/build/pp18 (OS)
+# cc=tmp/build/cc15v.bin
 libiberty/regex	cap	pp 6
 libiberty/cplus-dem	ok	134920
 libiberty/cp-demangle	ok	140872
@@ -53,18 +58,18 @@ libiberty/xmemdup	ok	4000
 libiberty/xstrdup	ok	4028
 libiberty/xstrerror	ok	3708
 libiberty/xstrndup	ok	4124
-libcpp/charset	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/directives	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/directives-only	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/errors	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/expr	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/files	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/identifiers	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/init	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/lex	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/line-map	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
-libcpp/macro	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/charset	gap	1
+libcpp/directives	gap	1
+libcpp/directives-only	gap	1
+libcpp/errors	gap	1
+libcpp/expr	gap	1
+libcpp/files	decl	error: 'struct stat' has no member named 'st_mode'
+libcpp/identifiers	ext	error: ISO C90 forbids array 'proxy_assertion_broken' whose size cannot be evaluated
+libcpp/init	gap	1
+libcpp/lex	gap	1
+libcpp/line-map	gap	1
+libcpp/macro	decl	error: 'struct stat' has no member named 'st_mtime'
 libcpp/mkdeps	gap	5
-libcpp/pch	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/pch	gap	1
 libcpp/symtab	gap	1
-libcpp/traditional	ppext	error: this use of "defined" may not be portable [-Wexpansion-to-defined] (pp 4)
+libcpp/traditional	gap	1
