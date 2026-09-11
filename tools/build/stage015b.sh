@@ -74,6 +74,13 @@ build_stage015b() {
     # 道を通るので隠れていた (docs/stage017-gcc.md 8.3 の 12)。
     # **鎖の成果物は変わらない** —— 既存のソースはこの形を使っていない
     ccgen cc15y cc15x stage015/cc15y.sc
+    # 第 26 世代。括弧の中の宣言子「( * const 名前 )」の型修飾子を
+    # 読み飛ばしていなかった。C89 6.5.4.1 の pointer は
+    # 「* type-qualifier-list_opt」で，括弧の外は pstars() が既に同じ
+    # ことをしている —— 括弧の中だけが持っていなかった。GCC の
+    # libcpp/charset.c 455 行がこの形 (docs/stage017-gcc.md 8.3 の 11)。
+    # **鎖の成果物は変わらない** —— 既存のソースにこの形は無い
+    ccgen cc15z cc15y stage015/cc15z.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -96,12 +103,13 @@ do_stage015b() {
         cc15t0.bin cc15t.bin cc15u0.bin cc15u.bin \
         cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
         cc15x0.bin cc15x.bin cc15y0.bin cc15y.bin \
+        cc15z0.bin cc15z.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
            stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
-           stage015/cc15x.sc stage015/cc15y.sc \
+           stage015/cc15x.sc stage015/cc15y.sc stage015/cc15z.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh

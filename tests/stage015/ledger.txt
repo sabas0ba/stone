@@ -118,3 +118,13 @@ fnpcast      ok   y\n
 # この形で，line-map.c がそのまま -> で辿る
 # (docs/stage017-gcc.md 8.3 の 12)。**値まで見る**
 condnull     ok   y\n
+
+# ---- 括弧の中の宣言子の型修飾子 (cc15z) ----
+#
+# C89 6.5.4.1 の pointer は「* type-qualifier-list_opt」なので
+# int (*const f)(int) は妥当である。括弧の外は pstars() が既に
+# 読み飛ばしており，括弧の中の宣言子 (fnpdec1) だけが持っていなかった。
+# GCC の libcpp/charset.c 455 行がこの形で，1 単位が止まっていた
+# (docs/stage017-gcc.md 8.3 の 11)。読み飛ばした先が正しく繋がること
+# (仮引数の位置がずれていないこと) まで見る
+fnpqual      ok   y\n
