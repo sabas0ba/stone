@@ -29,6 +29,17 @@ static void one(char *tag, double v) {
   printf("%s [%12.4g][%-12.4g][%012.4g]\n", tag, v, v, v);
 }
 
+/* NaN を書式化して**符号を落として**出す (上の註) */
+static void nanfmt(char *f, double v)
+{
+    char b[64];
+    char *p;
+    snprintf(b, sizeof b, f, v);
+    p = b;
+    if (*p == '-') p = p + 1;
+    printf("nan %s|", p);
+}
+
 int main(void) {
   /* 半端の倒し方が出る値。ホストの printf は偶数側へ倒す */
   one("half0", 0.5);
@@ -62,6 +73,34 @@ int main(void) {
   one("t2", 1.5);
   one("t3", 0.0001);
   one("t4", 1250000.0);
+
+  /* **無限と NaN** (Codex の指摘。libc23 の fpspecial)。
+   * 桁寄せの輪は無限では終わらないので，入る前に捌かなければ
+   * 走行ごと止まる。ホストは inf / -inf / nan と出す */
+  {
+    double inf;
+    double nan;
+    inf = 1e308 * 10.0;
+    nan = inf - inf;
+    printf("inf %f|%e|%g|%F|%E|%G\n", inf, inf, inf, inf, inf, inf);
+    printf("ninf %f|%e|%g\n", 0.0 - inf, 0.0 - inf, 0.0 - inf);
+    /* **NaN の符号は比べない。** IEEE 754 は `inf - inf` が返す NaN の
+     * 符号を規定していない —— ホスト (x86-64) は符号 bit を立てて
+     * `-nan` と出し，我々の実行時支援は立てない。**書式の話ではなく
+     * 算術の話**なので，ここは物差しにならない (5.1 の compile flags と
+     * 同じ筋)。先頭の '-' を落として突き合わせる */
+    nanfmt("%f", nan); nanfmt("%e", nan);
+    nanfmt("%g", nan); nanfmt("%F", nan);
+    printf("\n");
+    printf("infw |%12f|%-12e|\n", inf, inf);
+  }
+
+  /* **大きな精度** (Codex の指摘)。器の外へ書かないこと。
+   * 有効 18 桁より先は 0 で埋める約束なので，そこはホストと分かれる
+   * —— ここでは 0.0 と 2 の冪だけを見る (どちらも正確に表せる) */
+  printf("p20z %.20e|%.20f\n", 0.0, 0.0);
+  printf("p20h %.20e\n", 0.5);
+  printf("p23z %.23e|%.23f\n", 0.0, 0.0);
 
   return 0;
 }

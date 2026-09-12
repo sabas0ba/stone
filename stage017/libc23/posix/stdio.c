@@ -415,9 +415,36 @@ static int fpint(unsigned long long v, char *out) {
   return n;
 }
 
+/* **精度の上限。** 書式の精度 (`%.*e` の `*` も含む) はそのまま digs と
+ * 出力の添字になるので，青天井だと器の外へ書く。fpf は整数部が最大
+ * 309 桁になるので 309 + 1 + PRECMAX + 1 が出力の器 (512) に収まる値を
+ * 採る。**18 桁を超える所は元から 0 で埋める約束**なので (6.3 の限界)，
+ * ここを超える精度に意味は無い */
+#define FPPRECMAX 180
+
+/* 無限と NaN。**桁寄せの輪に入れてはいけない** —— w を fp10 で割っても
+ * 無限のままなので回り続ける。ホスト (glibc) と同じ字を出す */
+static int fpspecial(double v, int up, char *out) {
+  char *s;
+  int n;
+  int i;
+  n = 0;
+  if (v != v) {
+    s = up ? "NAN" : "nan";
+  } else if (v != 0.0 && v * 0.5 == v) {
+    if (v < 0) { out[n] = '-'; n = n + 1; }
+    s = up ? "INF" : "inf";
+  } else {
+    return 0 - 1;                      /* ふつうの数である */
+  }
+  for (i = 0; s[i]; i = i + 1) { out[n] = s[i]; n = n + 1; }
+  out[n] = 0;
+  return n;
+}
+
 /* 指数の形 (d.ddde±XX) */
 static int fpe(double v, int prec, int up, int alt, char *out) {
-  char digs[24];
+  char digs[FPPRECMAX + 4];
   int e;
   int i;
   int n;
@@ -430,6 +457,12 @@ static int fpe(double v, int prec, int up, int alt, char *out) {
     digs[prec + 1] = 0;
   } else {
     fpdigits(v, prec + 1, digs, &e);
+    /* fpdigits は有効 18 桁で打ち切る (6.3 の限界)。**その先を
+     * 読ませない** —— 埋めないと器の中の古い値がそのまま字になる */
+    i = 0;
+    while (i <= prec && digs[i] != 0) i = i + 1;
+    while (i <= prec) { digs[i] = '0'; i = i + 1; }
+    digs[prec + 1] = 0;
   }
   n = fpput(out, n, digs[0]);
   if (prec > 0) {
@@ -720,10 +753,14 @@ static int vfpr(FILE *f, char *fmt, va_list ap) {
       char fb[512];
       double dv;
       if (prec < 0) prec = 6;
+      if (prec > FPPRECMAX) prec = FPPRECMAX;
       dv = va_arg(ap, double);
-      if (c == 'e' || c == 'E') fpe(dv, prec, c == 'E', alt, fb);
-      else if (c == 'f' || c == 'F') fpf(dv, prec, alt, fb);
-      else fpg(dv, prec, c == 'G', alt, fb);
+      /* **無限と NaN を先に捌く。** 桁寄せの輪は無限では終わらない */
+      if (fpspecial(dv, (c == 'E' || c == 'F' || c == 'G'), fb) < 0) {
+        if (c == 'e' || c == 'E') fpe(dv, prec, c == 'E', alt, fb);
+        else if (c == 'f' || c == 'F') fpf(dv, prec, alt, fb);
+        else fpg(dv, prec, c == 'G', alt, fb);
+      }
       cnt = cnt + pdbl(f, fb, w, pad0, left, plus, space);
       i = i + 1;
       continue;
