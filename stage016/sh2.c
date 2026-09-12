@@ -26,7 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 
-/* ---- 器の大きさ ---- */
+/* ---- バッファ容量 ---- */
 #define NSRC   65536            /* 読み込む脚本の最大 */
 #define NNODE  4096             /* 構文木の節 */
 #define NWORD  8192             /* 語表 */
@@ -1937,7 +1937,7 @@ static int t_mkdir(int ac, char **av) {
 }
 
 /* 1 行が pat を含むか (grep は固定文字列としてだけ扱う)。
- * **configure が使う 4 箇所のうち 2 つは /proc/cpuinfo で，我々の OS に
+ * **configure が使う 4 箇所のうち 2 つは /proc/cpuinfo で， stone の OS に
  * その擬似ファイルは無い。** 開けないので偽になり，それが正しい */
 static int t_grep(int ac, char **av) {
   int i;
@@ -2062,7 +2062,7 @@ static int t_ln(int ac, char **av) {
   return copyfile(a[0], a[1]) < 0 ? 1 : 0;
 }
 
-/* 我々の OS の素性を答える (11.3)。configure はこれを見て targetos と
+/* stone の OS の素性を答える (11.3)。configure はこれを見て targetos と
  * cpu を決める。stone は configure の知らない名前なので既定の経路に
  * 落ちる。
  *

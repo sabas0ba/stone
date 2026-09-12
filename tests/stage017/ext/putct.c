@@ -1,4 +1,4 @@
-/* **我々の OS の上で 2 引数の putc を使う** (docs/stage017-gcc.md 8.3 の 8)。
+/* **stone の OS の上で 2 引数の putc を使う** (docs/stage017-gcc.md 8.3 の 8)。
  *
  * libc22 は putc をマクロとして置いた (C89 7.9.1 / 7.9.7.8)。
  * header を足しただけでは「訳せた」までしか言えないので、
