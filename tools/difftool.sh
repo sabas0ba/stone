@@ -81,6 +81,12 @@ wc -c < t2.txt
 wc -l t2.txt
 sort t2.txt
 sort -u t2.txt
+sort < t2.txt
+sort -u < t2.txt
+grep b < t2.txt
+head -2 < t2.txt
+wc -l < t2.txt
+cat < t2.txt
 grep -E ab+c t1.txt
 grep -E ab?c t1.txt
 grep -E ab{2}c t1.txt

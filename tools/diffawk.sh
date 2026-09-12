@@ -57,12 +57,17 @@ EOF
 
 # ---- 台本 ----
 ncase=0
+# mkcase <入力> <台本> [operand...]
+#
+# **3 番目の欄は operand である。** 変数の代入だけを operand に置く形
+# (awk '...' v=ok) は，file を 1 つも開かないので標準入力を読む
+# —— POSIX がそう定める (Codex の指摘)
 mkcase() {
     ncase=$((ncase + 1))
     n=$ncase
     [ "$n" -lt 10 ] && n="0$n"
     printf '%s\n' "$2" > "$out/root/a$n.awk"
-    printf '%s a%s.awk\n' "$1" "$n" >> "$out/cases"
+    printf '%s a%s.awk %s\n' "$1" "$n" "${3:-}" >> "$out/cases"
 }
 
 : > "$out/cases"
@@ -192,12 +197,18 @@ mkcase in1.txt '{ printf ("%s-%s\n", $1, $2) }'
 mkcase in1.txt 'BEGIN { a["k"] = "v"; a["k"] = a["k"]; print a["k"] }
 { $1 = $1; $0 = $0; print }'
 
+
+# **operand が変数の代入だけのとき**は標準入力を読む (POSIX。Codex の指摘)
+mkcase in1.txt '{ print v, $1 }' 'v=ok'
+mkcase in1.txt 'BEGIN { print v } { print v, NR }' 'v=1 w=2'
+mkcase in1.txt '{ print v, $1 }' 'v=a in1.txt'
+
 pass=0
 fail=0
 
 # ---- ホスト側の答 ----
-while read -r inf prog; do
-    ( cd "$out/root" && "$HOSTAWK" -f "$prog" < "$inf" ) \
+while read -r inf prog rest; do
+    ( cd "$out/root" && "$HOSTAWK" -f "$prog" $rest < "$inf" ) \
         > "$out/host.$prog" 2> /dev/null
     echo "rc=$?" >> "$out/host.$prog"
 done < "$out/cases"
@@ -228,8 +239,8 @@ if [ "$mode" = host ]; then
         exit 1
     fi
     ours=$(CDPATH= cd -- "$(dirname -- "$OURS")" && pwd)/$(basename -- "$OURS")
-    while read -r inf prog; do
-        ( cd "$out/root" && "$ours" -f "$prog" < "$inf" ) \
+    while read -r inf prog rest; do
+        ( cd "$out/root" && "$ours" -f "$prog" $rest < "$inf" ) \
             > "$out/ours.$prog" 2> /dev/null
         echo "rc=$?" >> "$out/ours.$prog"
         cmpcase "$prog"
@@ -242,9 +253,9 @@ else
     cp "${STONE_OSAWK:-tmp/build/awk1}" "$out/root/awk"
     cp tmp/build/sh2.bin "$out/root/sh2"
     : > "$out/root/go.sh"
-    while read -r inf prog; do
+    while read -r inf prog rest; do
         printf 'echo @@%s\n' "$prog" >> "$out/root/go.sh"
-        printf 'awk -f %s < %s\n' "$prog" "$inf" >> "$out/root/go.sh"
+        printf 'awk -f %s %s < %s\n' "$prog" "$rest" "$inf" >> "$out/root/go.sh"
         printf 'echo rc=$?\n' >> "$out/root/go.sh"
     done < "$out/cases"
     printf 'echo @@end\n' >> "$out/root/go.sh"
@@ -263,7 +274,7 @@ else
         echo "FAIL 走行が最後まで届かなかった ($out/run.out を見よ)"
         exit 1
     fi
-    while read -r inf prog; do
+    while read -r inf prog rest; do
         awk -v n="@@$prog" '
             $0 == n { on = 1; next }
             /^@@/   { on = 0 }

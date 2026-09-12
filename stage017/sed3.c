@@ -302,18 +302,56 @@ static FILE *infp;
 static char nextbuf[MAXLINE];
 static int havenext;
 
-/* 1 行読む。改行は落とす。読めなければ 0 */
+/* **file operand は 1 本の流れである** (POSIX)。
+ *
+ * 以前はファイルごとに runfile() を呼び，そのたびに lineno と `$` を
+ * 立て直していた。`sed -n '=;$p' a b` が b で行番号を 1 へ戻し，`$` を
+ * 両方の末尾に当ててしまう。ホストの sed は operand を繋いだ 1 本の
+ * 流れとして扱う。
+ *
+ * 繋ぎ目は**入力層で**越える —— 上の層 (nextline の先読みと `$`) は
+ * ファイルの境を知らなくてよい */
+static char **infiles;
+static int ninfiles;
+static int infidx;
+
+/* 次のファイルを開く。開けたら 1 */
+static int innext(void) {
+  while (infidx < ninfiles) {
+    char *nm;
+    nm = infiles[infidx];
+    infidx = infidx + 1;
+    if (strcmp(nm, "-") == 0) { infp = stdin; return 1; }
+    infp = fopen(nm, "r");
+    if (infp == 0) die("cannot open", nm);
+    return 1;
+  }
+  return 0;
+}
+
+/* 1 行読む。改行は落とす。読めなければ 0。
+ * **ファイルの終わりでは次の operand へ移る** */
 static int readline(char *buf) {
   int c;
   int n;
   n = 0;
-  c = fgetc(infp);
-  if (c == EOF) return 0;
+  /* 流れは尽きている。**ここを塞がないと NULL を読む** */
+  if (infp == 0) return 0;
+  for (;;) {
+    c = fgetc(infp);
+    if (c != EOF) break;
+    if (infp != stdin) fclose(infp);
+    infp = 0;
+    if (!innext()) return 0;
+  }
   while (c != EOF && c != '\n') {
     if (n + 1 >= MAXLINE) die("line too long", 0);
     buf[n] = (char)c;
     n = n + 1;
     c = fgetc(infp);
+    /* 行の途中でファイルが尽きた。改行の無い最後の行である ——
+     * **次のファイルの頭と繋いではいけない** (行は繋がらない) */
+    if (c == EOF && n > 0) break;
   }
   buf[n] = 0;
   return 1;
@@ -594,6 +632,8 @@ static int runline(void) {
   return 0;
 }
 
+/* 流れを 1 本通す。**呼ぶのは 1 度だけ**で，ファイルの繋ぎ目は
+ * readline() が越える */
 static int runfile(void) {
   char buf[MAXLINE];
   int r;
@@ -676,17 +716,18 @@ int main(int argc, char **argv) {
   }
   parsescript();
   if (nfile == 0) {
+    infiles = 0;
+    ninfiles = 0;
+    infidx = 0;
     infp = stdin;
-    runfile();
   } else {
-    int k;
-    for (k = 0; k < nfile; k = k + 1) {
-      infp = fopen(files[k], "r");
-      if (infp == 0) die("cannot open", files[k]);
-      runfile();
-      fclose(infp);
-      if (exitq) break;
-    }
+    infiles = files;
+    ninfiles = nfile;
+    infidx = 0;
+    if (!innext()) return 0;
   }
+  /* **1 度だけ呼ぶ。** 行番号も `$` も流れ全体で数える */
+  runfile();
+  if (infp != 0 && infp != stdin) fclose(infp);
   return 0;
 }

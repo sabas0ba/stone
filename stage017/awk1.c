@@ -1825,6 +1825,11 @@ static int closef(char *nm) {
 /* ---- 主入力 ---- */
 static char **avfiles;
 static int navfiles;
+/* **実体のある operand を 1 つでも開いたか。** operand が変数の代入
+ * だけだったとき (awk '...' v=ok) は，file を 1 つも読んでいないので
+ * 標準入力を読む —— POSIX はそう定める。navfiles を見るだけだと
+ * 「operand はあった」で標準入力を諦めてしまう */
+static int sawfile;
 static int avidx;
 static FILE *mainfp;
 static int maindone;
@@ -1880,7 +1885,7 @@ static int nextmain(char *buf, int max) {
       if (avidx >= navfiles) {
         if (maindone) return 0;
         maindone = 1;
-        if (navfiles == 0) {
+        if (!sawfile) {
           mainfp = stdin;
           setvstr(SV_FILENAME, "", 0);
           vtyp[SV_FNR] = V_NUM;
@@ -1895,6 +1900,7 @@ static int nextmain(char *buf, int max) {
         mainfp = fopen(avfiles[avidx], "r");
         if (mainfp == 0) die("cannot open", avfiles[avidx]);
       }
+      sawfile = 1;
       setvstr(SV_FILENAME, avfiles[avidx], 0);
       vtyp[SV_FNR] = V_NUM;
       vnum[SV_FNR] = 0;

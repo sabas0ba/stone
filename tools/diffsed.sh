@@ -155,16 +155,42 @@ mkcase in3.txt 0 's/[^[:print:]]/?/g'
 mkcase in3.txt 0 's/ab\+/P/'
 mkcase in3.txt 0 's/ab\?/Q/g'
 
+# **file operand は 1 本の流れである** (POSIX)。行番号を数え直したり
+# `$` を各ファイルの末尾に当てたりしないこと (Codex の指摘)
+mkcase in2.txt+in3.txt 1 '='
+mkcase in2.txt+in3.txt 1 '$p'
+mkcase in2.txt+in3.txt 1 '$='
+mkcase in2.txt+in3.txt 1 '1p'
+mkcase in2.txt+in3.txt 0 '2q'
+mkcase in2.txt+in3.txt 0 's/a/A/'
+
 pass=0
 fail=0
 
+# 入力の欄は `a.txt` か `a.txt+b.txt` である。**+ を含む件は operand
+# として渡す** —— file operand は 1 本の流れになる約束で、そこは
+# `< file` では測れない (行番号と `$` が流れ全体で数えられるか)
+hostin() {
+    case $1 in
+    *+*) printf '%s %s' "$out/root/${1%%+*}" "$out/root/${1#*+}" ;;
+    *)   printf '%s' "$out/root/$1" ;;
+    esac
+}
+osin() {
+    case $1 in
+    *+*) printf '%s %s' "${1%%+*}" "${1#*+}" ;;
+    *)   printf '%s' "$1" ;;
+    esac
+}
+
 # ---- ホスト側の答を作る ----
 while read -r inf q scr; do
+    # shellcheck disable=SC2046
     if [ "$q" = 1 ]; then
-        "$HOSTSED" -n -f "$out/root/$scr" < "$out/root/$inf" \
+        "$HOSTSED" -n -f "$out/root/$scr" $(hostin "$inf") \
             > "$out/host.$scr" 2> /dev/null
     else
-        "$HOSTSED" -f "$out/root/$scr" < "$out/root/$inf" \
+        "$HOSTSED" -f "$out/root/$scr" $(hostin "$inf") \
             > "$out/host.$scr" 2> /dev/null
     fi
 done < "$out/cases"
@@ -194,11 +220,12 @@ if [ "$mode" = host ]; then
         exit 1
     fi
     while read -r inf q scr; do
+        # shellcheck disable=SC2046
         if [ "$q" = 1 ]; then
-            "$OURS" -n -f "$out/root/$scr" < "$out/root/$inf" \
+            "$OURS" -n -f "$out/root/$scr" $(hostin "$inf") \
                 > "$out/ours.$scr" 2> /dev/null
         else
-            "$OURS" -f "$out/root/$scr" < "$out/root/$inf" \
+            "$OURS" -f "$out/root/$scr" $(hostin "$inf") \
                 > "$out/ours.$scr" 2> /dev/null
         fi
         cmpcase "$scr"
@@ -217,9 +244,9 @@ else
     while read -r inf q scr; do
         printf 'echo @@%s\n' "$scr" >> "$out/root/go.sh"
         if [ "$q" = 1 ]; then
-            printf 'sed -n -f %s < %s\n' "$scr" "$inf" >> "$out/root/go.sh"
+            printf 'sed -n -f %s %s\n' "$scr" "$(osin "$inf")" >> "$out/root/go.sh"
         else
-            printf 'sed -f %s < %s\n' "$scr" "$inf" >> "$out/root/go.sh"
+            printf 'sed -f %s %s\n' "$scr" "$(osin "$inf")" >> "$out/root/go.sh"
         fi
     done < "$out/cases"
     printf 'echo @@end\n' >> "$out/root/go.sh"

@@ -2083,6 +2083,33 @@ int main(int argc, char **argv) {
  */
 
 /* ファイルを丸ごと読んで返す。長さを *np へ。開けなければ 0 */
+/* 現在の入力を丸ごと読む。**file operand が無いときはここから読む** ——
+ * POSIX はどの道具も「FILE が無いか - なら標準入力を読む」と定める。
+ * curin が立っていればそこから，無ければ fd 0 から。器は readall と
+ * 同じ sarena である */
+static char *readin(int *np) {
+  int fd;
+  int n;
+  char *out;
+  if (curin == 0) fd = 0;
+  else {
+    fd = open(curin, O_RDONLY);
+    if (fd < 0) return 0;
+  }
+  out = sarena + nsa;
+  for (;;) {
+    if (nsa + 4096 + 1 > NSTR) { fputs("sh2: out of string space\n", stderr); exit(2); }
+    n = read(fd, sarena + nsa, 4096);
+    if (n <= 0) break;
+    nsa = nsa + n;
+  }
+  if (fd != 0) close(fd);
+  *np = (int)(sarena + nsa - out);
+  sarena[nsa] = 0;
+  nsa = nsa + 1;
+  return out;
+}
+
 static char *readall(char *path, int *np) {
   int fd;
   int n;
@@ -2152,8 +2179,9 @@ static int t_head(int ac, char **av) {
     lines = atoi(av[i] + 1);
     i = i + 1;
   }
-  if (i >= ac) return 1;
-  b = readall(av[i], &n);
+  /* FILE が無ければ標準入力を読む (POSIX) */
+  if (i >= ac) b = readin(&n);
+  else b = readall(av[i], &n);
   if (b == 0) return 1;
   k = 0;
   for (i = 0; i < n && k < lines; i = i + 1)
@@ -2254,8 +2282,12 @@ static int t_grep(int ac, char **av) {
     return 2;
   }
   st = 1;
+  /* FILE が無ければ標準入力を読む (POSIX)。**configure は
+   * `grep pat < file` の形を絶え間なく使う** */
+  if (i >= ac) { i = 0 - 1; }
   for (; i < ac; i = i + 1) {
-    b = readall(av[i], &n);
+    if (i < 0) b = readin(&n);
+    else b = readall(av[i], &n);
     if (b == 0) continue;
     ls = 0;
     for (;;) {
@@ -2682,6 +2714,7 @@ static int t_sort(int ac, char **av) {
   int n;
   int i;
   int uniq;
+  int nfile;
   char *lines[4096];
   int nline;
   int k;
@@ -2689,12 +2722,27 @@ static int t_sort(int ac, char **av) {
   char *t;
   uniq = 0;
   nline = 0;
+  /* FILE が無ければ標準入力を読む (POSIX)。旗だけの呼出し
+   * (`sort -u < f` や `... | sort`) がここに来る */
+  nfile = 0;
   for (i = 1; i < ac; i = i + 1) {
-    if (av[i][0] == '-' && av[i][1] != 0) {
+    if (av[i][0] == '-' && av[i][1] != 0) continue;
+    nfile = nfile + 1;
+  }
+  if (nfile == 0) i = 0; else i = 1;
+  for (; i < ac; i = i + 1) {
+    if (i > 0 && av[i][0] == '-' && av[i][1] != 0) {
       if (strchr(av[i], 'u')) uniq = 1;
       continue;
     }
-    b = readall(av[i], &n);
+    if (i == 0) {
+      int j2;
+      for (j2 = 1; j2 < ac; j2 = j2 + 1)
+        if (av[j2][0] == '-' && av[j2][1] != 0 && strchr(av[j2], 'u')) uniq = 1;
+      b = readin(&n);
+    } else {
+      b = readall(av[i], &n);
+    }
     if (b == 0) continue;
     k = 0;
     while (k < n) {
