@@ -1,0 +1,2162 @@
+/// @file occ.sc
+/// @brief 現代化した sc コンパイラ (IR + 最適化 + レジスタ割付)。
+///
+/// 設計は docs/stage007-occ.md，入力言語の仕様は docs/stage005-sc.md 2 章
+/// (Stage 5 から変更なし)。字句解析・構文解析・記号表は Stage 6 実装
+/// (scc.sc) を継承し，コード生成のみを多段構成へ置き換えたものである。
+///
+/// @section pipeline 処理の流れ
+/// 入力 1 本を読み切り，関数単位で以下を回してフラットバイナリを吐く。
+///
+///   ソース -> 字句 -> 再帰下降構文解析 -> IR 構築
+///          -> fold (定数畳み込み) -> dce (不要コード削除)
+///          -> regalloc (線形走査割付け) -> emitfn (命令出力)
+///
+/// scc までは構文解析が直接命令を吐いていた (テンプレート展開) ため，
+/// 式の値は常にメモリ上のデータスタックを往復していた。occ は一旦 IR に
+/// 落とすことで，(1) 定数式をコンパイル時に潰し，(2) 一時値をレジスタに
+/// 載せられる。関数間 ABI は scc と同一に保つので，生成物は従来の
+/// ランタイム前置部でそのまま動く。
+///
+/// @section why_sc なぜ sc 言語で書かれているか
+/// occ 自身は sc 言語で書かれ，前段 scc でブートストラップされる
+/// (B1 = scc(occ.sc))。その B1 が occ.sc を再コンパイルしたものが正本
+/// (B2)であり，B2 == B3 の固定点が Stage 7 の完了条件である。
+/// このため occ.sc は「scc がコンパイルできる範囲」で書く必要がある。
+/// 特に scc の条件分岐は B-type (±4KiB) を距離検査なしで吐くため，
+/// 巨大なループ本体を書くと B1 が壊れる。fold を foldins に分けている
+/// のはこの制約への対処である (docs/stage007-occ.md 3 章)。
+///
+/// @section limits sc 言語側の制約に由来する書き方
+/// sc には構造体配列・列挙型・定数構文がないため，
+/// - 表はすべて添字を共有する「並行配列」で表現する
+/// - 種別定数は大域変数として init() で設定する
+/// - 「見つからない」は -1 で表す (0 は正当な添字なので使えない)
+
+// ---- 領域: 入出力バッファと記号表 ----
+// 記号表はいずれも並行配列で，同じ添字 e が 1 エントリを指す。
+
+char src[262144];         ///< 入力ソース全体 (EOT 0x04 まで読み込む)
+char ob[524288];          ///< 生成バイナリ。後埋め (backpatch) するため一旦ここに溜める
+
+char gname[32768];        ///< 大域記号の名前 (16 バイト固定スロット x 2048)
+int gkind[2048];          ///< 種別: 0 = 変数, 1 = 関数
+int gty[2048];            ///< 型 (変数は自身の型，関数は返却型)
+int gval[2048];           ///< 変数: 絶対アドレス / 関数: 定義済みならコード位置，未定義なら未解決呼出しリストの先頭
+int gdef[2048];           ///< 1 = 定義済み。0 のまま入力が終われば未解決の前方参照 (エラー 2)
+int garr[2048];           ///< 1 = 配列。式中では先頭要素へのポインタに退化する
+int gna[2048];            ///< 引数個数。-1 = 未知 (前方参照で個数がまだ判らない)
+int gcnt;                 ///< 大域記号の登録数
+
+char lname[4096];         ///< ローカル記号の名前 (16 バイト x 256)。関数ごとに作り直す
+int lty[256];             ///< 型
+int loff[256];            ///< フレームポインタ x8 からのオフセット
+int larr[256];            ///< 1 = 配列
+int lcnt;                 ///< ローカル記号の登録数
+
+char sname[4096];         ///< 構造体名 (16 バイト x 256)
+int ssize[256];           ///< 構造体のサイズ (4 バイト境界へ切り上げ済み)
+int scnt;                 ///< 構造体の登録数
+
+char mname[32768];        ///< メンバ名 (16 バイト x 2048)。全構造体のメンバを 1 本の表に持つ
+int msid[2048];           ///< 所属する構造体の番号。探索はこれで絞り込む
+int mty[2048];            ///< メンバの型
+int moff[2048];           ///< 構造体先頭からのオフセット
+int marr[2048];           ///< 1 = 配列メンバ
+int mcnt;                 ///< メンバの登録数
+
+char tname[16];           ///< 直近に読んだ識別子。記号表の探索はすべてこれを鍵にする
+char snam[16];            ///< struct 名の退避先 (tname はメンバ名の解析で上書きされるため)
+char sbuf[256];           ///< 文字列リテラルの組立てバッファ
+int slen;                 ///< sbuf の有効長
+
+int pos;                  ///< src 内の読取り位置
+int tok;                  ///< 現在のトークン種別
+int tval;                 ///< 現在のトークンの値 (数値・文字リテラル)
+int outp;                 ///< ob への書込み位置 (= 生成コードのオフセット)
+int bssp;                 ///< 大域変数の割付けポインタ (0x8010_0000 から上向き)
+
+int ety;                  ///< 直前に解析した式の型
+int elv;                  ///< 1 = その式は左辺値 (値ではなくアドレスが手元にある)
+int cloff;                ///< 解析中の関数のローカル割付けポインタ
+int cna;                  ///< 解析中の関数の引数個数
+int cty;                  ///< 解析中の宣言の型
+int mainok;               ///< 1 = main を定義済み
+int mainoff;              ///< main のコード位置 (ランタイム前置部から呼ぶために保持)
+int *wp;                  ///< char 配列 ob へ語単位で書くための作業ポインタ
+
+// ---- IR (関数単位。関数を 1 つ処理するたびに作り直す) ----
+//
+// 3 番地コードの列。命令 i は高々 1 個の値を定義し，その値は「定義した命令の
+// 番号 i」そのもので参照する。つまり値番号と命令番号が一致する。式の一時値は
+// 構文上ちょうど一度しか定義されないので，この IR は φ 関数を持たない SSA に
+// なっている (制御フローを跨ぐ値は変数と同じくメモリ経由にしてあるため，
+// 合流点で複数定義が出会うことがない。&& / || が隠しスロットを使うのはこの
+// 性質を保つためである)。
+//
+// iop[i] が c_bin 以上なら二項演算で，演算種別は iop[i] - c_bin。
+// ia/ib の意味は命令種別ごとに異なる:
+//   CONST      ia = 即値
+//   LADDR      ia = フレームオフセット      GADDR ia = 絶対アドレス
+//   GSTR       ia = 文字列プール内オフセット
+//   LOADW/B    ia = アドレスの値番号
+//   STOREW/B   ia = アドレスの値番号, ib = 格納する値番号
+//   NEG/NOT    ia = 値番号
+//   ARG/RET    ia = 値番号
+//   CALL       ia = 記号番号, ib = 実引数の個数
+//   LABEL/JMP  ia = ラベル番号
+//   BZ/BNZ     ia = 条件の値番号, ib = 飛び先ラベル
+//   BIN        ia, ib = 両オペランドの値番号
+
+int iop[8192];            ///< 命令種別 (c_* のいずれか。c_bin 以上は二項演算)
+int ia[8192];             ///< 第 1 オペランド (意味は命令種別による。上表参照)
+int ib[8192];             ///< 第 2 オペランド (同上)
+int icnt;                 ///< 命令数
+
+int lastu[8192];          ///< 値が最後に使われる命令位置。-1 = 一度も使われない
+int vreg[8192];           ///< 割付け結果: >= 0 レジスタ番号 / -1 未割付 / -2-n スピルスロット n
+int live[8192];           ///< dce の結果: 1 = 生存 (出力する)
+
+int labpos[1024];         ///< ラベル番号 -> 出力オフセット。-1 = 未確定 (まだ現れていない)
+int labcnt;               ///< ラベル数
+int lfix[2048];           ///< 前方ラベル参照の後埋め: 命令を書いた出力位置
+int lflab[2048];          ///< 同上: 参照先のラベル番号
+int lfixn;                ///< 後埋め待ちの件数
+
+char spool[8192];         ///< 文字列リテラルの実体 (関数単位。本体の後ろへ出力する)
+int spcnt;                ///< spool の有効長
+int spfix[256];           ///< 文字列アドレスの後埋め: li を書いた出力位置 (lui 側)
+int spofs[256];           ///< 同上: spool 内オフセット
+int spfn;                 ///< 後埋め待ちの件数
+
+int hcnt;                 ///< 隠しスロットの数。&& / || の結果を一旦メモリに置くために使う
+int nspill;               ///< スピルスロットの数
+
+int rheld[32];            ///< 割付け作業用: レジスタ -> 現在保持している値番号 (-1 = 空き)
+int rused[32];            ///< 1 = この関数で使った。プロローグで退避する対象になる
+
+// フレームの配置 (x8 = フレームポインタ基準，低位から):
+//   [0] 戻り先 ra  [4] 旧 x8  [8..] 引数  [..] ローカル  [spbase..] スピル  [svbase..] 退避レジスタ
+int fnf;                  ///< フレーム総サイズ
+int spbase;               ///< スピル領域の先頭オフセット
+int svbase;               ///< レジスタ退避領域の先頭オフセット
+
+// ---- トークン種別・IR 命令種別 ----
+//
+// sc に定数構文がないため大域変数として持ち，init() で値を入れる。
+// t_* トークンの大分類, k_* 予約語, o_* 演算子・記号,
+// c_* IR 命令種別, b_* 二項演算の種別 (c_bin からの差分)。
+
+int eot;
+int t_eof; int t_num; int t_str; int t_id;
+int k_int; int k_char; int k_struct; int k_if; int k_else; int k_while; int k_return;
+int o_asn; int o_lt; int o_gt; int o_add; int o_sub; int o_mul; int o_div; int o_mod;
+int o_amp; int o_or; int o_xor; int o_not; int o_lp; int o_rp; int o_lb; int o_rb;
+int o_lc; int o_rc; int o_semi; int o_comma; int o_dot;
+int o_eq; int o_ne; int o_le; int o_ge; int o_shl; int o_shr; int o_aa; int o_oo; int o_arrow;
+int c_const; int c_laddr; int c_gaddr; int c_gstr;
+int c_loadw; int c_loadb; int c_stw; int c_stb;
+int c_neg; int c_not; int c_arg; int c_call; int c_ret;
+int c_lab; int c_jmp; int c_bz; int c_bnz; int c_bin;
+int b_add; int b_sub; int b_mul; int b_div; int b_rem;
+int b_and; int b_or; int b_xor; int b_sll; int b_srl;
+int b_slt; int b_sgt; int b_sle; int b_sge; int b_seq; int b_sne;
+
+int init() {
+  eot = 4;
+  t_eof = 0; t_num = 1; t_str = 2; t_id = 3;
+  k_int = 10; k_char = 11; k_struct = 12; k_if = 13; k_else = 14; k_while = 15; k_return = 16;
+  o_asn = 30; o_lt = 31; o_gt = 32; o_add = 33; o_sub = 34; o_mul = 35; o_div = 36; o_mod = 37;
+  o_amp = 38; o_or = 39; o_xor = 40; o_not = 41; o_lp = 42; o_rp = 43; o_lb = 44; o_rb = 45;
+  o_lc = 46; o_rc = 47; o_semi = 48; o_comma = 49; o_dot = 50;
+  o_eq = 51; o_ne = 52; o_le = 53; o_ge = 54; o_shl = 55; o_shr = 56; o_aa = 57; o_oo = 58; o_arrow = 59;
+  c_const = 1; c_laddr = 2; c_gaddr = 3; c_gstr = 4;
+  c_loadw = 5; c_loadb = 6; c_stw = 7; c_stb = 8;
+  c_neg = 9; c_not = 10; c_arg = 11; c_call = 12; c_ret = 13;
+  c_lab = 14; c_jmp = 15; c_bz = 16; c_bnz = 17; c_bin = 18;
+  b_add = 0; b_sub = 1; b_mul = 2; b_div = 3; b_rem = 4;
+  b_and = 5; b_or = 6; b_xor = 7; b_sll = 8; b_srl = 9;
+  b_slt = 10; b_sgt = 11; b_sle = 12; b_sge = 13; b_seq = 14; b_sne = 15;
+  return 0;
+}
+
+// ---- 名前操作 ----
+// 記号表の名前は 16 バイト固定スロットに 0 詰めで格納する。可変長にすると
+// 領域管理が要るのに対し，識別子は 15 バイト以下と仕様で決めてあるため。
+
+/// @brief NUL 終端文字列の同値判定。
+/// @param a 比較元
+/// @param b 比較先
+/// @return 1 = 一致, 0 = 不一致
+int streq(char *a, char *b) {
+  int i;
+  i = 0;
+  while (a[i] == b[i]) {
+    if (a[i] == 0) return 1;
+    i = i + 1;
+  }
+  return 0;
+}
+/// @brief 名前スロットの複写 (常に 16 バイト固定)。
+/// @param d 複写先スロット
+/// @param s 複写元スロット
+/// @return 常に 0
+int copyn(char *d, char *s) {
+  int i;
+  i = 0;
+  while (i < 16) { d[i] = s[i]; i = i + 1; }
+  return 0;
+}
+
+// ---- 字句解析 (scc と同一) ----
+// 1 文字先読みのみで済む単純な字句。トークンは tok / tval / tname に入る。
+
+/// @brief 現在位置の 1 文字を返す (消費しない)。
+int getch() { return src[pos]; }
+/// @brief 読取り位置を 1 進める。
+int adv() { pos = pos + 1; return 0; }
+
+/// @brief 空白か (SP TAB CR LF)。
+int isws(int c) { return c == 32 || c == 9 || c == 13 || c == 10; }
+/// @brief 10 進数字か。
+int isdig(int c) { return c >= '0' && c <= '9'; }
+/// @brief 識別子の先頭に置ける文字か (英小文字と _)。大文字は仕様で不可。
+int isidh(int c) { return (c >= 'a' && c <= 'z') || c == '_'; }
+/// @brief 識別子の 2 文字目以降に置ける文字か。
+int isidc(int c) { return isdig(c) || isidh(c); }
+/// @brief 16 進数字か (小文字のみ)。
+int ishex(int c) { return isdig(c) || (c >= 'a' && c <= 'f'); }
+
+/// @brief 16 進数字を数値へ。
+/// @param c '0'..'9' または 'a'..'f'
+/// @return 0..15。'a' は 97 なので 87 を引くと 10 になる
+int hexv(int c) {
+  if (c > '9') return c - 87;
+  return c - '0';
+}
+
+/// @brief エスケープ文字を値へ変換する。
+/// @param c 逆斜線の次の 1 文字
+/// @return 対応する文字コード。未対応の文字は構文エラー (終了コード 1) で停止する
+int escv(int c) {
+  if (c == 'n') return 10;
+  if (c == 't') return 9;
+  if (c == '0') return 0;
+  if (c == 92) return 92;
+  if (c == 39) return 39;
+  if (c == 34) return 34;
+  exit(1);
+  return 0;
+}
+
+/// @brief 空白と行コメント (// 以降) を読み飛ばす。
+/// @return 常に 0
+/// @note コメント中に EOT が来た場合はそこで打ち切る。打ち切らないと
+///       終端のないコメントで src の末尾を越えて走り続けてしまう。
+int skipwc() {
+  int c;
+  c = getch();
+  while (isws(c) || (c == '/' && src[pos + 1] == '/')) {
+    if (isws(c)) adv();
+    else {
+      while (getch() != 10) {
+        if (getch() == eot) return 0;
+        adv();
+      }
+    }
+    c = getch();
+  }
+  return 0;
+}
+
+/// @brief 整数リテラルを読み tval へ入れる (10 進 / 0x 16 進)。
+/// @return 常に 0
+int lexnum() {
+  tval = 0;
+  if (getch() == '0' && src[pos + 1] == 'x') {
+    adv(); adv();
+    if (!ishex(getch())) exit(1);
+    while (ishex(getch())) { tval = tval * 16 + hexv(getch()); adv(); }
+  } else {
+    while (isdig(getch())) { tval = tval * 10 + getch() - '0'; adv(); }
+  }
+  tok = t_num;
+  return 0;
+}
+
+/// @brief 識別子を読んで tname へ格納し，予約語ならその種別を tok に入れる。
+/// @return 常に 0
+/// @note 予約語は独立した表を持たず，読み終えた後に streq で突き合わせる。
+///       語数が 7 個と少なく，表を引くより短く済むため。
+int lexid() {
+  int n;
+  n = 0;
+  while (isidc(getch())) {
+    if (n == 15) exit(1);
+    tname[n] = getch();
+    n = n + 1;
+    adv();
+  }
+  while (n < 16) { tname[n] = 0; n = n + 1; }
+  if (streq(tname, "int")) { tok = k_int; return 0; }
+  if (streq(tname, "char")) { tok = k_char; return 0; }
+  if (streq(tname, "struct")) { tok = k_struct; return 0; }
+  if (streq(tname, "if")) { tok = k_if; return 0; }
+  if (streq(tname, "else")) { tok = k_else; return 0; }
+  if (streq(tname, "while")) { tok = k_while; return 0; }
+  if (streq(tname, "return")) { tok = k_return; return 0; }
+  tok = t_id;
+  return 0;
+}
+
+/// @brief 文字リテラルを読み，その文字コードを tval へ入れる。
+/// @return 常に 0
+int lexchr() {
+  adv();
+  if (getch() == eot) exit(1);
+  if (getch() == 92) { adv(); tval = escv(getch()); }
+  else tval = getch();
+  adv();
+  if (getch() != 39) exit(1);
+  adv();
+  tok = t_num;
+  return 0;
+}
+
+/// @brief 文字列リテラルを読み sbuf / slen へ入れる。
+/// @return 常に 0
+/// @note 末尾に 0 を 4 個書くのは，後段が語単位で 4 バイト境界まで
+///       切り上げて出力するため。境界埋めの分まで確実に 0 にしておく。
+int lexstr() {
+  int c;
+  adv();
+  slen = 0;
+  while (getch() != 34) {
+    if (getch() == eot) exit(1);
+    if (slen == 255) exit(6);
+    if (getch() == 92) { adv(); c = escv(getch()); }
+    else c = getch();
+    sbuf[slen] = c;
+    adv();
+    slen = slen + 1;
+  }
+  adv();
+  sbuf[slen] = 0;
+  sbuf[slen + 1] = 0;
+  sbuf[slen + 2] = 0;
+  sbuf[slen + 3] = 0;
+  tok = t_str;
+  return 0;
+}
+
+/// @brief 演算子・区切り記号を読んで tok に入れる。
+/// @return 常に 0
+/// @note 2 文字演算子 (== != <= >= << >> && ||) は，1 文字目を消費した後に
+///       次の文字を覗いて分岐する。先に長い方を試すのが要点で，例えば
+///       '<' を見た時点で o_lt を確定してしまうと "<=" が壊れる。
+int lexop() {
+  int c;
+  c = getch();
+  adv();
+  if (c == '=') {
+    if (getch() == '=') { adv(); tok = o_eq; } else tok = o_asn;
+    return 0;
+  }
+  if (c == '!') {
+    if (getch() == '=') { adv(); tok = o_ne; } else tok = o_not;
+    return 0;
+  }
+  if (c == '<') {
+    if (getch() == '=') { adv(); tok = o_le; return 0; }
+    if (getch() == '<') { adv(); tok = o_shl; return 0; }
+    tok = o_lt;
+    return 0;
+  }
+  if (c == '>') {
+    if (getch() == '=') { adv(); tok = o_ge; return 0; }
+    if (getch() == '>') { adv(); tok = o_shr; return 0; }
+    tok = o_gt;
+    return 0;
+  }
+  if (c == '&') {
+    if (getch() == '&') { adv(); tok = o_aa; return 0; }
+    tok = o_amp;
+    return 0;
+  }
+  if (c == '|') {
+    if (getch() == '|') { adv(); tok = o_oo; return 0; }
+    tok = o_or;
+    return 0;
+  }
+  if (c == '-') {
+    if (getch() == '>') { adv(); tok = o_arrow; return 0; }
+    tok = o_sub;
+    return 0;
+  }
+  if (c == '+') { tok = o_add; return 0; }
+  if (c == '*') { tok = o_mul; return 0; }
+  if (c == '/') { tok = o_div; return 0; }
+  if (c == '%') { tok = o_mod; return 0; }
+  if (c == '^') { tok = o_xor; return 0; }
+  if (c == '(') { tok = o_lp; return 0; }
+  if (c == ')') { tok = o_rp; return 0; }
+  if (c == '[') { tok = o_lb; return 0; }
+  if (c == ']') { tok = o_rb; return 0; }
+  if (c == '{') { tok = o_lc; return 0; }
+  if (c == '}') { tok = o_rc; return 0; }
+  if (c == ';') { tok = o_semi; return 0; }
+  if (c == ',') { tok = o_comma; return 0; }
+  if (c == '.') { tok = o_dot; return 0; }
+  exit(1);
+  return 0;
+}
+
+/// @brief トークンを 1 個読み進める。結果は tok / tval / tname に入る。
+/// @return 常に 0
+int next() {
+  int c;
+  skipwc();
+  c = getch();
+  if (c == eot) { tok = t_eof; return 0; }
+  if (isdig(c)) return lexnum();
+  if (isidh(c)) return lexid();
+  if (c == 39) return lexchr();
+  if (c == 34) return lexstr();
+  return lexop();
+}
+
+// ---- 出力バッファ ----
+// 生成コードは UART へ直接流さず ob へ溜める。前方分岐や前方参照の呼出しを
+// 後から書き戻す (backpatch) 必要があり，一度流したものは直せないため。
+// sc には語単位で char 配列を触る構文がないので，int ポインタ wp を経由する。
+
+/// @brief 現在位置へ 1 語書き，位置を 4 進める。
+/// @param w 書き込む命令語
+/// @return 常に 0
+int outw(int w) {
+  wp = ob + outp;
+  *wp = w;
+  outp = outp + 4;
+  return 0;
+}
+
+/// @brief 現在位置へ 1 バイト書く (文字列リテラルの実体出力に使う)。
+/// @param b 書き込むバイト
+/// @return 常に 0
+int outbyte(int b) {
+  ob[outp] = b;
+  outp = outp + 1;
+  return 0;
+}
+
+/// @brief 既に書いた位置へ語を上書きする (後埋め)。
+/// @param w 新しい語
+/// @param off 上書きする出力オフセット
+/// @return 常に 0
+int patw(int w, int off) {
+  wp = ob + off;
+  *wp = w;
+  return 0;
+}
+
+/// @brief 既に書いた語を読み出す。
+/// @param off 読み出す出力オフセット
+/// @return その位置の語
+int getw(int off) {
+  wp = ob + off;
+  return *wp;
+}
+
+// ---- 命令語の組立て ----
+// RV32I の即値は形式ごとに命令語中へ散らばって配置される。ここではその
+// 詰め替えだけを行い，opcode/funct を含む「素の語」は呼び手が base で渡す。
+
+/// @brief J 形式の即値を命令語のビット位置へ散らす。
+/// @param rel 相対変位 (バイト単位, 偶数)
+/// @return base と OR して使う即値部分
+/// @note 配置は imm[20] -> bit31, imm[10:1] -> bit30:21, imm[11] -> bit20,
+///       imm[19:12] -> bit19:12。bit0 は常に 0 なので符号化されない。
+int jenc(int rel) {
+  return (((rel >> 20) & 1) << 31) | (((rel >> 1) & 1023) << 21)
+       | (((rel >> 11) & 1) << 20) | (((rel >> 12) & 255) << 12);
+}
+
+/// @brief B 形式の即値を命令語のビット位置へ散らす。
+/// @param rel 相対変位 (バイト単位, 偶数)
+/// @return base と OR して使う即値部分
+/// @note 表現範囲は ±4KiB しかない。occ が条件分岐をこの形式で直接
+///       出さないのはそのため (lrefj の @note を参照)。
+int benc(int rel) {
+  return (((rel >> 12) & 1) << 31) | (((rel >> 5) & 63) << 25)
+       | (((rel >> 1) & 15) << 8) | (((rel >> 11) & 1) << 7);
+}
+
+/// @brief R 形式 (レジスタ 3 つ) の命令語を組み立てる。
+/// @param base opcode と funct3/funct7 を含む素の語
+/// @param rd 書込み先レジスタ番号
+/// @param rs1 第 1 入力レジスタ番号
+/// @param rs2 第 2 入力レジスタ番号
+/// @return 完成した命令語
+int rw3(int base, int rd, int rs1, int rs2) {
+  return base | (rd << 7) | (rs1 << 15) | (rs2 << 20);
+}
+
+/// @brief I 形式 (レジスタ 2 つ + 即値) の命令語を組み立てる。
+/// @param base opcode と funct3 を含む素の語
+/// @param rd 書込み先レジスタ番号
+/// @param rs1 入力レジスタ番号
+/// @param imm 12 bit 即値 (呼び手が範囲内に収めること)
+/// @return 完成した命令語
+int iw3(int base, int rd, int rs1, int imm) {
+  return base | (rd << 7) | (rs1 << 15) | (imm << 20);
+}
+
+/// @brief S 形式 (ストア) の命令語を組み立てる。
+/// @param base opcode と funct3 を含む素の語
+/// @param rs1 アドレスを保持するレジスタ番号
+/// @param rs2 格納する値のレジスタ番号
+/// @param imm 12 bit 変位。上位 7 bit と下位 5 bit に分かれて配置される
+/// @return 完成した命令語
+int sw3(int base, int rs1, int rs2, int imm) {
+  return base | (((imm >> 5) & 127) << 25) | ((imm & 31) << 7) | (rs1 << 15) | (rs2 << 20);
+}
+
+/// @brief 任意の 32 bit 定数をレジスタへ置く (lui + addi の 2 語)。
+/// @param rd 書込み先レジスタ番号
+/// @param v 置きたい値
+/// @return 常に 0
+/// @note addi の即値は符号拡張されるため，下位 12 bit の最上位が立つ値では
+///       上位側が 1 足りなくなる。lui へ渡す前に +2048 しておくことで
+///       この目減りを相殺している。
+int liw(int rd, int v) {
+  outw((((v + 2048) & 0xfffff000) | 0x37) | (rd << 7));
+  outw(iw3(0x13, rd, rd, v & 4095));
+  return 0;
+}
+
+// ---- 記号表 (scc と同一) ----
+// いずれも線形探索。規模 (大域 2048 / ローカル 256) では十分で，
+// ハッシュを持つと表の初期化と衝突処理の分だけ実装が増えるため採らない。
+// 探索の鍵は常に直近に読んだ識別子 tname である。
+// 見つからない場合は -1 を返す。0 は正当な添字なので不可を表せない。
+
+/// @brief tname と一致する大域記号を探す。
+/// @return エントリ添字。見つからなければ -1
+int gfind() {
+  int i;
+  i = 0;
+  while (i < gcnt) {
+    if (streq(gname + i * 16, tname)) return i;
+    i = i + 1;
+  }
+  return -1;
+}
+/// @brief tname で大域記号を新規登録する (名前のみ設定。属性は呼び手が埋める)。
+/// @return 新しいエントリ添字。表が満杯なら終了コード 6 で停止する
+int gnew() {
+  int e;
+  if (gcnt > 2047) exit(6);
+  e = gcnt;
+  gcnt = gcnt + 1;
+  copyn(gname + e * 16, tname);
+  return e;
+}
+/// @brief tname と一致するローカル記号 (引数・ローカル変数) を探す。
+/// @return エントリ添字。見つからなければ -1
+/// @note ローカルを先に引き，無ければ大域を引く。これが名前の遮蔽になる。
+int lfind() {
+  int i;
+  i = 0;
+  while (i < lcnt) {
+    if (streq(lname + i * 16, tname)) return i;
+    i = i + 1;
+  }
+  return -1;
+}
+/// @brief tname でローカル記号を新規登録する。
+/// @return 新しいエントリ添字。表が満杯なら終了コード 6 で停止する
+int lnew() {
+  int e;
+  if (lcnt > 255) exit(6);
+  e = lcnt;
+  lcnt = lcnt + 1;
+  copyn(lname + e * 16, tname);
+  return e;
+}
+/// @brief tname と一致する構造体を探す。
+/// @return 構造体番号。見つからなければ -1
+int sfind() {
+  int i;
+  i = 0;
+  while (i < scnt) {
+    if (streq(sname + i * 16, tname)) return i;
+    i = i + 1;
+  }
+  return -1;
+}
+/// @brief snam (退避した struct 名) と一致する構造体を探す。
+/// @return 構造体番号。見つからなければ -1
+/// @note sfind と同じ処理だが鍵が違う。"struct foo bar;" の解析では
+///       tname が既に変数名 bar で上書きされているため，型名は snam から引く。
+int sfind2() {
+  int i;
+  i = 0;
+  while (i < scnt) {
+    if (streq(sname + i * 16, snam)) return i;
+    i = i + 1;
+  }
+  return -1;
+}
+/// @brief 構造体 k のメンバのうち tname と一致するものを探す。
+/// @param k 構造体番号
+/// @return メンバ表の添字。見つからなければ -1
+/// @note メンバは全構造体で 1 本の表に並べ，msid で所属を絞る。
+///       構造体ごとに表を分けるより添字管理が簡単で済む。
+int mfind(int k) {
+  int i;
+  i = 0;
+  while (i < mcnt) {
+    if (msid[i] == k) {
+      if (streq(mname + i * 16, tname)) return i;
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+/// @brief 未解決だった前方参照の呼出しを，確定した関数アドレスで埋める。
+/// @param d 関数の実アドレス (出力オフセット)
+/// @param h 未解決リストの先頭 (0 = なし)
+/// @return 常に 0
+/// @note 未解決の呼出しは、まだ書けない jal の語そのものに「1 つ前の
+///       未解決位置」を書き込んで数珠つなぎにしてある。別途リスト用の
+///       配列を持たずに済ませるための手である。ここではその鎖を辿りながら
+///       各位置を本物の jal で上書きしていく。
+int patchcalls(int d, int h) {
+  int nx;
+  while (h) {
+    nx = getw(h);
+    patw(jenc(d - h) | 0xef, h);
+    h = nx;
+  }
+  return 0;
+}
+
+// ---- 型の解析 (scc と同一) ----
+//
+// 型は 1 個の int に詰める:  ty = (ポインタ深さ << 16) | 基底
+//   基底 0 = char, 1 = int, 2+k = 構造体 k
+// この表現なら「* を 1 つ被せる/剥がす」が 65536 の加減算になり，
+// ポインタかどうかの判定が (ty >> 16) で済む。型表を別に持たなくてよい。
+
+/// @brief 基底型 (int / char / struct 名) を読む。
+/// @return 基底型の番号。型として不正なら終了コード 1，未知の構造体なら 2 で停止する
+int ptype() {
+  int k;
+  if (tok == k_int) { next(); return 1; }
+  if (tok == k_char) { next(); return 0; }
+  if (tok == k_struct) {
+    next();
+    if (tok != t_id) exit(1);
+    k = sfind();
+    if (k < 0) exit(2);
+    next();
+    return k + 2;
+  }
+  exit(1);
+  return 0;
+}
+/// @brief 基底型に続く '*' を読み，ポインタ深さを足し込む。
+/// @param b 基底型
+/// @return 完全な型
+int pstars(int b) {
+  while (tok == o_mul) { b = b + 65536; next(); }
+  return b;
+}
+
+/// @brief 型が指す実体 1 個の大きさ (バイト)。ポインタ演算のスケール係数になる。
+/// @param t 型
+/// @return バイト数
+int tsize(int t) {
+  if ((t >> 16) != 0) return 4;
+  if (t == 0) return 1;
+  if (t == 1) return 4;
+  return ssize[t - 2];
+}
+/// @brief その型の記憶域へアクセスする幅 (バイト)。1 なら lbu/sb, 4 なら lw/sw。
+/// @param t 型
+/// @return 1 または 4
+/// @note tsize と違い構造体でも 4 を返す。構造体そのものを 1 命令で読み書き
+///       することはなく，この関数はスカラのロード/ストア幅の選択にしか使わない。
+int bytesz(int t) {
+  if ((t >> 16) != 0) return 4;
+  if (t == 0) return 1;
+  return 4;
+}
+
+// ---- IR 構築 ----
+
+/// @brief IR 命令を 1 個追加する。
+/// @param op 命令種別 (c_*。二項演算は c_bin + b_*)
+/// @param a 第 1 オペランド
+/// @param b 第 2 オペランド
+/// @return 追加した命令の番号。これがそのまま「その命令が定義する値」の番号になる
+int emit(int op, int a, int b) {
+  if (icnt > 8191) exit(6);
+  iop[icnt] = op;
+  ia[icnt] = a;
+  ib[icnt] = b;
+  icnt = icnt + 1;
+  return icnt - 1;
+}
+/// @brief 新しいラベル番号を確保する。
+/// @return ラベル番号
+int newlab() {
+  if (labcnt > 1023) exit(6);
+  labcnt = labcnt + 1;
+  return labcnt - 1;
+}
+
+/// @brief 名前を持たない一時変数をフレーム上に 1 語確保する。
+/// @return フレームオフセット
+/// @note && と || の結果に使う。この IR は値を「定義した命令番号」で指すので，
+///       分岐で合流した先に 2 つの定義が届く形にはできない (φ 関数がない)。
+///       そこで両方の経路からメモリへ書き，合流後に読み直すことで
+///       1 命令 1 定義の性質を保っている。
+int hslot() {
+  hcnt = hcnt + 1;
+  return cloff + (hcnt - 1) * 4;
+}
+
+// ---- 式 (いずれも「値番号」を返す) ----
+//
+// 式の解析結果は 2 つの大域で伝える:
+//   ety … その式の型
+//   elv … 1 なら「左辺値」= 返した値番号は値そのものではなくアドレス
+//
+// 変数を読んだ直後は elv = 1 (アドレスだけ判っている状態) にしておき，
+// 実際に値が要る場面で rv() を通してロードを発行する。こうすると
+// 代入の左辺や & の対象では余計なロードを出さずに済む。
+// 「値が要る」側の演算子はすべて自分でオペランドを rv() に通す責任を持つ。
+
+/// @brief 左辺値なら値へ変換する (必要ならロードを発行する)。
+/// @param v 式が返した値番号
+/// @return 値そのものを保持する値番号。elv が 0 なら v をそのまま返す
+int rv(int v) {
+  if (elv) {
+    if (bytesz(ety) == 1) v = emit(c_loadb, v, 0);
+    else v = emit(c_loadw, v, 0);
+    elv = 0;
+  }
+  return v;
+}
+
+/// @brief 文字列リテラルを文字列プールへ積み，その先頭アドレスを表す値を作る。
+/// @return 値番号 (型は char *)
+/// @note 実体は関数本体の後ろにまとめて出力する。アドレスはその時点まで
+///       決まらないので，ここでは GSTR にプール内オフセットだけ持たせ，
+///       emitfn の末尾で実アドレスへ書き換える。
+int estr2() {
+  int p; int a; int i;
+  p = (slen + 4) & 0xfffffffc;
+  if (spcnt + p > 8191) exit(6);
+  a = spcnt;
+  i = 0;
+  while (i < p) { spool[spcnt] = sbuf[i]; spcnt = spcnt + 1; i = i + 1; }
+  ety = 65536;
+  elv = 0;
+  next();
+  return emit(c_gstr, a, 0);
+}
+
+/// @brief メンバ参照 (. および ->) を解析し，メンバのアドレスを表す値を作る。
+/// @param k 構造体番号
+/// @param v 構造体の先頭アドレスを保持する値番号
+/// @return メンバのアドレスを保持する値番号
+/// @note 呼び出し時点でトークンは '.' か '->' を指している。
+///       配列メンバは先頭要素へのポインタに退化させるので elv = 0 とし，
+///       スカラメンバは左辺値 (elv = 1) のままにしてロードを遅延させる。
+int emember(int k, int v) {
+  int m; int c;
+  next();
+  if (tok != t_id) exit(1);
+  m = mfind(k);
+  if (m < 0) exit(5);
+  next();
+  if (moff[m] != 0) {
+    c = emit(c_const, moff[m], 0);
+    v = emit(c_bin + b_add, v, c);
+  }
+  if (marr[m]) { ety = mty[m] + 65536; elv = 0; }
+  else { ety = mty[m]; elv = 1; }
+  return v;
+}
+
+/// @brief 関数呼出しの実引数並びを解析し，CALL を発行する。
+/// @param e 呼び出す関数の大域記号番号
+/// @return 返却値を保持する値番号
+/// @note 実引数は左から順に ARG で積む (データスタック経由の受渡しは
+///       scc と同じ ABI)。gna が -1 のときは前方参照でまだ個数が
+///       判らないので個数検査を省く。判っていて食い違えば型エラー (5)。
+int ecallseq(int e) {
+  int n; int v;
+  next();
+  n = 0;
+  if (tok != o_rp) {
+    v = rv(expr());
+    emit(c_arg, v, 0);
+    n = 1;
+    while (tok == o_comma) {
+      next();
+      v = rv(expr());
+      emit(c_arg, v, 0);
+      n = n + 1;
+    }
+  }
+  if (tok != o_rp) exit(1);
+  next();
+  if (gna[e] >= 0 && gna[e] != n) exit(5);
+  ety = gty[e];
+  elv = 0;
+  return emit(c_call, e, n);
+}
+
+/// @brief 識別子を解決する (ローカル -> 大域 -> 未知なら前方参照の関数呼出し)。
+/// @return 値番号
+/// @note 未知の名前は「これから定義される関数の呼出し」としてのみ許す。
+///       直後が '(' でなければ未定義識別子 (エラー 2)。仮登録した記号は
+///       gdef = 0 のままなので，最後まで定義されなければ main が検出する。
+int eident() {
+  int e;
+  e = lfind();
+  if (e >= 0) {
+    if (larr[e]) { ety = lty[e] + 65536; elv = 0; }
+    else { ety = lty[e]; elv = 1; }
+    next();
+    return emit(c_laddr, loff[e], 0);
+  }
+  e = gfind();
+  if (e >= 0) {
+    if (gkind[e] == 1) {
+      next();
+      if (tok != o_lp) exit(1);
+      return ecallseq(e);
+    }
+    if (garr[e]) { ety = gty[e] + 65536; elv = 0; }
+    else { ety = gty[e]; elv = 1; }
+    next();
+    return emit(c_gaddr, gval[e], 0);
+  }
+  next();
+  if (tok != o_lp) exit(2);
+  e = gnew();
+  gkind[e] = 1; gty[e] = 1; gval[e] = 0; gdef[e] = 0; garr[e] = 0; gna[e] = -1;
+  return ecallseq(e);
+}
+
+/// @brief 一次式 (リテラル・識別子・括弧) を解析する。
+/// @return 値番号
+int eprim() {
+  int v;
+  if (tok == t_num) {
+    v = emit(c_const, tval, 0);
+    elv = 0; ety = 1;
+    next();
+    return v;
+  }
+  if (tok == t_str) return estr2();
+  if (tok == o_lp) {
+    next();
+    v = expr();
+    if (tok != o_rp) exit(1);
+    next();
+    return v;
+  }
+  if (tok == t_id) return eident();
+  exit(1);
+  return 0;
+}
+
+/// @brief 後置演算 (添字 [] ・メンバ . ・アロー ->) を左から畳み込む。
+/// @return 値番号
+/// @note a[i] は *(a + i) と同義に展開する。添字は指し先の大きさで
+///       スケールし，結果は左辺値 (elv = 1) として返すので，
+///       代入の左辺にも読み出しにも使える。
+int epost() {
+  int v; int i; int pt; int k; int sz; int c;
+  v = eprim();
+  while (tok == o_lb || tok == o_dot || tok == o_arrow) {
+    if (tok == o_lb) {
+      v = rv(v);
+      if ((ety >> 16) == 0) exit(5);
+      pt = ety;
+      next();
+      i = rv(expr());
+      if (tok != o_rb) exit(1);
+      next();
+      sz = tsize(pt - 65536);
+      if (sz != 1) {
+        c = emit(c_const, sz, 0);
+        i = emit(c_bin + b_mul, i, c);
+      }
+      v = emit(c_bin + b_add, v, i);
+      ety = pt - 65536;
+      elv = 1;
+    } else if (tok == o_dot) {
+      if (elv == 0) exit(5);
+      if ((ety >> 16) != 0) exit(5);
+      if (ety < 2) exit(5);
+      v = emember(ety - 2, v);
+    } else {
+      v = rv(v);
+      if ((ety >> 16) != 1) exit(5);
+      k = ety & 65535;
+      if (k < 2) exit(5);
+      v = emember(k - 2, v);
+    }
+  }
+  return v;
+}
+
+/// @brief 単項演算 (- ! * &) を解析する。
+/// @return 値番号
+/// @note * と & は elv の付け外しだけで済む。* は「値として得たアドレス」を
+///       左辺値に変える操作 (elv = 1)，& は「左辺値のアドレス」をそのまま
+///       値に変える操作 (elv = 0) であり，どちらも命令を生まない。
+int euna() {
+  int v;
+  if (tok == o_sub) {
+    next();
+    v = rv(euna());
+    ety = 1;
+    return emit(c_neg, v, 0);
+  }
+  if (tok == o_not) {
+    next();
+    v = rv(euna());
+    ety = 1;
+    return emit(c_not, v, 0);
+  }
+  if (tok == o_mul) {
+    next();
+    v = rv(euna());
+    if ((ety >> 16) == 0) exit(5);
+    ety = ety - 65536;
+    elv = 1;
+    return v;
+  }
+  if (tok == o_amp) {
+    next();
+    v = euna();
+    if (elv == 0) exit(5);
+    elv = 0;
+    ety = ety + 65536;
+    return v;
+  }
+  return epost();
+}
+
+// 以降の二項演算子は優先順位ごとに 1 関数を割り当てた再帰下降で，
+// 低い優先順位の関数が高い方を呼ぶ。いずれも「同じ優先順位が続く限り
+// while で左から畳み込む」形なので，自然に左結合になる。
+
+/// @brief 乗除算 (* / %) を解析する。
+/// @return 値番号
+int emul() {
+  int v; int r; int op;
+  v = euna();
+  while (tok == o_mul || tok == o_div || tok == o_mod) {
+    op = tok;
+    v = rv(v);
+    next();
+    r = rv(euna());
+    if (op == o_mul) v = emit(c_bin + b_mul, v, r);
+    else if (op == o_div) v = emit(c_bin + b_div, v, r);
+    else v = emit(c_bin + b_rem, v, r);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief 値を要素サイズ倍する (ポインタ演算のスケーリング)。
+/// @param v スケールしたい値番号
+/// @param sz 要素サイズ (バイト)
+/// @return スケール後の値番号。sz が 1 なら命令を出さず v をそのまま返す
+/// @note ここで作る CONST は fold の対象になるので，両辺が定数なら
+///       乗算そのものがコンパイル時に消える。
+int escale2(int v, int sz) {
+  int c;
+  if (sz == 1) return v;
+  c = emit(c_const, sz, 0);
+  return emit(c_bin + b_mul, v, c);
+}
+
+/// @brief 加減算 (+ -) を解析する。ポインタ演算のスケーリングもここで行う。
+/// @return 値番号
+/// @note C と同じ規則を実装する:
+///       ポインタ ± 整数 -> 整数側を要素サイズ倍し，型はポインタのまま
+///       整数 + ポインタ -> 可換なので同様に整数側をスケール
+///       ポインタ - ポインタ -> バイト差を要素サイズで割り，型は int
+int eadd() {
+  int v; int r; int op; int lt;
+  v = emul();
+  while (tok == o_add || tok == o_sub) {
+    op = tok;
+    v = rv(v);
+    lt = ety;
+    next();
+    r = rv(emul());
+    if (op == o_add) {
+      if ((lt >> 16) != 0 && (ety >> 16) == 0) {
+        r = escale2(r, tsize(lt - 65536));
+        v = emit(c_bin + b_add, v, r);
+        ety = lt;
+      } else if ((lt >> 16) == 0 && (ety >> 16) != 0) {
+        v = escale2(v, tsize(ety - 65536));
+        v = emit(c_bin + b_add, v, r);
+      } else {
+        v = emit(c_bin + b_add, v, r);
+        ety = lt;
+      }
+    } else {
+      if ((lt >> 16) != 0 && (ety >> 16) == 0) {
+        r = escale2(r, tsize(lt - 65536));
+        v = emit(c_bin + b_sub, v, r);
+        ety = lt;
+      } else if ((lt >> 16) != 0 && (ety >> 16) != 0) {
+        v = emit(c_bin + b_sub, v, r);
+        r = emit(c_const, tsize(lt - 65536), 0);
+        if (tsize(lt - 65536) != 1) v = emit(c_bin + b_div, v, r);
+        ety = 1;
+      } else {
+        v = emit(c_bin + b_sub, v, r);
+        ety = lt;
+      }
+    }
+    elv = 0;
+  }
+  return v;
+}
+
+/// @brief シフト (<< >>) を解析する。>> は論理右シフト。
+/// @return 値番号
+int eshift() {
+  int v; int r; int op;
+  v = eadd();
+  while (tok == o_shl || tok == o_shr) {
+    op = tok;
+    v = rv(v);
+    next();
+    r = rv(eadd());
+    if (op == o_shl) v = emit(c_bin + b_sll, v, r);
+    else v = emit(c_bin + b_srl, v, r);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief 大小比較 (< > <= >=) を解析する。結果は 1 / 0。
+/// @return 値番号
+int erel() {
+  int v; int r; int op;
+  v = eshift();
+  while (tok == o_lt || tok == o_gt || tok == o_le || tok == o_ge) {
+    op = tok;
+    v = rv(v);
+    next();
+    r = rv(eshift());
+    if (op == o_lt) v = emit(c_bin + b_slt, v, r);
+    else if (op == o_gt) v = emit(c_bin + b_sgt, v, r);
+    else if (op == o_le) v = emit(c_bin + b_sle, v, r);
+    else v = emit(c_bin + b_sge, v, r);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief 等値比較 (== !=) を解析する。結果は 1 / 0。
+/// @return 値番号
+int eeq() {
+  int v; int r; int op;
+  v = erel();
+  while (tok == o_eq || tok == o_ne) {
+    op = tok;
+    v = rv(v);
+    next();
+    r = rv(erel());
+    if (op == o_eq) v = emit(c_bin + b_seq, v, r);
+    else v = emit(c_bin + b_sne, v, r);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief ビット AND (&) を解析する。
+/// @return 値番号
+int eband() {
+  int v; int r;
+  v = eeq();
+  while (tok == o_amp) {
+    v = rv(v);
+    next();
+    r = rv(eeq());
+    v = emit(c_bin + b_and, v, r);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief ビット XOR (^) を解析する。
+/// @return 値番号
+int exor() {
+  int v; int r;
+  v = eband();
+  while (tok == o_xor) {
+    v = rv(v);
+    next();
+    r = rv(eband());
+    v = emit(c_bin + b_xor, v, r);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief ビット OR (|) を解析する。
+/// @return 値番号
+int ebor() {
+  int v; int r;
+  v = exor();
+  while (tok == o_or) {
+    v = rv(v);
+    next();
+    r = rv(exor());
+    v = emit(c_bin + b_or, v, r);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief 論理 AND (&&) を解析する。左辺が偽なら右辺を評価しない (短絡)。
+/// @return 値番号 (1 / 0)
+/// @note 展開の形:
+///         左辺が 0 なら l1 へ飛ぶ
+///         右辺を評価し，!! で 1/0 に正規化して隠しスロットへ格納 -> l2 へ
+///       l1: スロットへ 0 を格納
+///       l2: スロットを読み直したものが式の値
+///       合流点で 1 つの定義に見せるためにメモリを経由する (hslot 参照)。
+int ecand() {
+  int v; int r; int off; int l1; int l2; int t;
+  v = ebor();
+  while (tok == o_aa) {
+    v = rv(v);
+    off = hslot();
+    l1 = newlab();
+    l2 = newlab();
+    emit(c_bz, v, l1);
+    next();
+    r = rv(ebor());
+    t = emit(c_not, r, 0);
+    t = emit(c_not, t, 0);
+    emit(c_stw, emit(c_laddr, off, 0), t);
+    emit(c_jmp, l2, 0);
+    emit(c_lab, l1, 0);
+    emit(c_stw, emit(c_laddr, off, 0), emit(c_const, 0, 0));
+    emit(c_lab, l2, 0);
+    v = emit(c_loadw, emit(c_laddr, off, 0), 0);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief 論理 OR (||) を解析する。左辺が真なら右辺を評価しない (短絡)。
+/// @return 値番号 (1 / 0)
+/// @note 構造は ecand と対称で，飛び先で格納する定数が 1 になる。
+int ecor() {
+  int v; int r; int off; int l1; int l2; int t;
+  v = ecand();
+  while (tok == o_oo) {
+    v = rv(v);
+    off = hslot();
+    l1 = newlab();
+    l2 = newlab();
+    emit(c_bnz, v, l1);
+    next();
+    r = rv(ecand());
+    t = emit(c_not, r, 0);
+    t = emit(c_not, t, 0);
+    emit(c_stw, emit(c_laddr, off, 0), t);
+    emit(c_jmp, l2, 0);
+    emit(c_lab, l1, 0);
+    emit(c_stw, emit(c_laddr, off, 0), emit(c_const, 1, 0));
+    emit(c_lab, l2, 0);
+    v = emit(c_loadw, emit(c_laddr, off, 0), 0);
+    ety = 1; elv = 0;
+  }
+  return v;
+}
+
+/// @brief 式を解析する (代入を含む最上位)。
+/// @return 値番号
+/// @note 代入だけは右結合なので while ではなく自分自身を再帰呼出しする。
+///       左辺は左辺値でなければならず (elv = 1)，そうでなければ型エラー (5)。
+///       代入式の値は「格納した値」なので，b = (a = 1) が書ける。
+int expr() {
+  int v; int r; int t;
+  v = ecor();
+  if (tok == o_asn) {
+    if (elv == 0) exit(5);
+    t = ety;
+    elv = 0;
+    next();
+    r = rv(expr());
+    if (bytesz(t) == 1) emit(c_stb, v, r);
+    else emit(c_stw, v, r);
+    ety = t;
+    return r;
+  }
+  return v;
+}
+
+// ---- 文 ----
+
+/// @brief 文を 1 個解析して IR を積む。
+/// @return 常に 0
+/// @note 分岐先はここでは番号 (ラベル) で置くだけで，実アドレスの解決は
+///       出力段に任せる。構文解析の時点で飛距離を知る必要がないので，
+///       前方参照のための後戻りが要らない。
+int stmt() {
+  int c; int l1; int l2; int l0;
+  if (tok == o_lc) {
+    next();
+    while (tok != o_rc) stmt();
+    next();
+    return 0;
+  }
+  if (tok == k_if) {
+    next();
+    if (tok != o_lp) exit(1);
+    next();
+    c = rv(expr());
+    if (tok != o_rp) exit(1);
+    next();
+    l1 = newlab();
+    emit(c_bz, c, l1);
+    stmt();
+    if (tok == k_else) {
+      next();
+      l2 = newlab();
+      emit(c_jmp, l2, 0);
+      emit(c_lab, l1, 0);
+      stmt();
+      emit(c_lab, l2, 0);
+    } else emit(c_lab, l1, 0);
+    return 0;
+  }
+  if (tok == k_while) {
+    next();
+    if (tok != o_lp) exit(1);
+    next();
+    l0 = newlab();
+    l1 = newlab();
+    emit(c_lab, l0, 0);
+    c = rv(expr());
+    if (tok != o_rp) exit(1);
+    next();
+    emit(c_bz, c, l1);
+    stmt();
+    emit(c_jmp, l0, 0);
+    emit(c_lab, l1, 0);
+    return 0;
+  }
+  if (tok == k_return) {
+    next();
+    if (tok == o_semi) emit(c_ret, emit(c_const, 0, 0), 0);
+    else {
+      c = rv(expr());
+      if (tok != o_semi) exit(1);
+      emit(c_ret, c, 0);
+    }
+    next();
+    return 0;
+  }
+  if (tok == o_semi) { next(); return 0; }
+  expr();
+  if (tok != o_semi) exit(1);
+  next();
+  return 0;
+}
+
+// ---- 最適化パス ----
+// いずれも IR 配列上のその場書き換え。適用順は fold -> dce -> regalloc。
+// fold が定数を潰すと使われなくなる値が出るので，dce はその後に置く。
+
+/// @brief 二項演算命令か。
+/// @param i 命令番号
+/// @return 1 = 二項演算
+int isbin(int i) { return iop[i] >= c_bin; }
+
+/// @brief 副作用を持たない (削除してよい) 命令か。
+/// @param i 命令番号
+/// @return 1 = 純粋
+/// @note ロードも純粋として扱う。この言語では I/O が getc/putc に限られ，
+///       読むだけで意味が変わるアドレスが無いため。副作用があるのは
+///       ストア・呼出し・分岐・返却で，これらは常に残す。
+int ispure(int i) {
+  if (isbin(i)) return 1;
+  if (iop[i] == c_const || iop[i] == c_laddr || iop[i] == c_gaddr || iop[i] == c_gstr) return 1;
+  if (iop[i] == c_loadw || iop[i] == c_loadb) return 1;
+  if (iop[i] == c_neg || iop[i] == c_not) return 1;
+  return 0;
+}
+
+/// @brief 二項演算をコンパイル時に計算する。
+/// @param k 演算種別 (b_*)
+/// @param x 左オペランドの値
+/// @param y 右オペランドの値
+/// @return 演算結果
+/// @note occ 自身が動く環境と生成コードが動く環境は同じ RV32 なので，
+///       ここでの計算結果は実行時の結果と一致する。
+int foldbin(int k, int x, int y) {
+  if (k == b_add) return x + y;
+  if (k == b_sub) return x - y;
+  if (k == b_mul) return x * y;
+  if (k == b_div) return x / y;
+  if (k == b_rem) return x % y;
+  if (k == b_and) return x & y;
+  if (k == b_or) return x | y;
+  if (k == b_xor) return x ^ y;
+  if (k == b_sll) return x << y;
+  if (k == b_srl) return x >> y;
+  if (k == b_slt) return x < y;
+  if (k == b_sgt) return x > y;
+  if (k == b_sle) return x <= y;
+  if (k == b_sge) return x >= y;
+  if (k == b_seq) return x == y;
+  return x != y;
+}
+
+/// @brief 命令 1 個に定数畳み込みを試みる。
+/// @param i 命令番号
+/// @return 常に 0
+/// @note オペランドが CONST なら結果を計算し，命令自体を CONST へ書き換える。
+///       値番号は命令番号のままなので参照側を直す必要がない。
+///       除数 0 は畳み込まない (コンパイル時に落ちてしまうため，
+///       実行時の挙動に委ねる)。条件分岐は，条件が定数なら
+///       無条件ジャンプか「何もしない CONST」に化ける。
+///
+///       fold から切り出してあるのは可読性のためだけではない。occ.sc は
+///       まず scc でコンパイルされるが，scc の条件分岐は B-type (±4KiB) を
+///       距離検査せずに吐くため，1 関数の本体が大きすぎるとブートストラップ
+///       段のバイナリが壊れる (docs/stage007-occ.md 3 章)。
+int foldins(int i) {
+  int k;
+  if (isbin(i)) {
+    if (iop[ia[i]] == c_const && iop[ib[i]] == c_const) {
+      k = iop[i] - c_bin;
+      if (!((k == b_div || k == b_rem) && ia[ib[i]] == 0)) {
+        ia[i] = foldbin(k, ia[ia[i]], ia[ib[i]]);
+        iop[i] = c_const;
+        ib[i] = 0;
+      }
+    }
+    return 0;
+  }
+  if (iop[i] == c_neg) {
+    if (iop[ia[i]] == c_const) { ia[i] = 0 - ia[ia[i]]; iop[i] = c_const; }
+    return 0;
+  }
+  if (iop[i] == c_not) {
+    if (iop[ia[i]] == c_const) { ia[i] = ia[ia[i]] == 0; iop[i] = c_const; }
+    return 0;
+  }
+  if (iop[i] == c_bz) {
+    if (iop[ia[i]] == c_const) {
+      if (ia[ia[i]] == 0) { iop[i] = c_jmp; ia[i] = ib[i]; ib[i] = 0; }
+      else { iop[i] = c_const; ia[i] = 0; ib[i] = 0; }
+    }
+    return 0;
+  }
+  if (iop[i] == c_bnz) {
+    if (iop[ia[i]] == c_const) {
+      if (ia[ia[i]] != 0) { iop[i] = c_jmp; ia[i] = ib[i]; ib[i] = 0; }
+      else { iop[i] = c_const; ia[i] = 0; ib[i] = 0; }
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/// @brief 定数畳み込みパス。IR を先頭から 1 回走査する。
+/// @return 常に 0
+/// @note 1 回で足りるのは，値が必ず定義より後で使われるため。前から
+///       順に潰していけば，オペランドは自分の番が来る前に確定している。
+int fold() {
+  int i;
+  i = 0;
+  while (i < icnt) {
+    foldins(i);
+    i = i + 1;
+  }
+  return 0;
+}
+
+/// @brief 値 v とその計算に必要な値を再帰的に生存として印を付ける。
+/// @param v 値番号
+/// @return 常に 0
+/// @note 既に印が付いていれば即座に戻る。これが再帰の停止条件であり，
+///       同じ部分式を共有していても指数的に辿らずに済む。
+int markv(int v) {
+  if (live[v]) return 0;
+  live[v] = 1;
+  if (isbin(v)) { markv(ia[v]); markv(ib[v]); return 0; }
+  if (iop[v] == c_loadw || iop[v] == c_loadb || iop[v] == c_neg || iop[v] == c_not) {
+    markv(ia[v]);
+    return 0;
+  }
+  return 0;
+}
+
+/// @brief 不要コード削除パス。
+/// @return 常に 0
+/// @note 副作用のある命令を根として，そこから到達できる値だけを生存にする。
+///       印の付かなかった純粋な値は出力段が読み飛ばす (命令列からは
+///       取り除かず live で表す。詰めると値番号がずれてしまうため)。
+int dce() {
+  int i;
+  i = 0;
+  while (i < icnt) { live[i] = 0; i = i + 1; }
+  i = 0;
+  while (i < icnt) {
+    if (!ispure(i)) {
+      live[i] = 1;
+      if (iop[i] == c_stw || iop[i] == c_stb) { markv(ia[i]); markv(ib[i]); }
+      else if (iop[i] == c_arg || iop[i] == c_ret) markv(ia[i]);
+      else if (iop[i] == c_bz || iop[i] == c_bnz) markv(ia[i]);
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+// ---- レジスタ割付け (線形走査) ----
+//
+// 割付対象は x13..x27 の 15 本で，すべて callee-saved として扱う。
+// 呼び出す側ではなく呼ばれた側が退避するので，CALL を跨いで生きる値が
+// あっても呼出しの前後で退避・復元を挟まなくてよい。使ったレジスタだけを
+// プロローグ/エピローグでまとめて出し入れする。
+// x10 / x11 は割付けから外し，ロード・ストアとスピルの作業用に空けておく。
+
+/// @brief 値 v の最終使用位置を i まで延ばす。
+/// @param v 値番号
+/// @param i 使用している命令番号
+/// @return 常に 0
+int usemark(int v, int i) {
+  if (lastu[v] < i) lastu[v] = i;
+  return 0;
+}
+
+/// @brief 線形走査でレジスタを割り付ける。結果は vreg に入る。
+/// @return 常に 0
+/// @note 手順は 3 段階:
+///       1. 全命令を走査して各値の最終使用位置 lastu を求める
+///       2. 先頭から進みながら，最終使用を過ぎた値のレジスタを解放する
+///       3. 値を定義する命令に空きレジスタを与える。空きが無ければスピル
+///
+///       IR が SSA (1 値 1 定義) なので生存区間は「定義位置から lastu まで」
+///       の 1 本の区間になり，区間の分割や合流を考えなくてよい。これが
+///       線形走査で足りる理由である。
+///
+///       定義した直後に死ぬ値 (lastu <= i) にはレジスタを与えない。
+///       出力段はそれを見て命令自体を省く。
+int regalloc() {
+  int i; int r; int f;
+  i = 0;
+  while (i < icnt) { lastu[i] = -1; vreg[i] = -1; i = i + 1; }
+  i = 0;
+  while (i < icnt) {
+    if (live[i]) {
+      if (isbin(i)) { usemark(ia[i], i); usemark(ib[i], i); }
+      else if (iop[i] == c_loadw || iop[i] == c_loadb || iop[i] == c_neg || iop[i] == c_not) usemark(ia[i], i);
+      else if (iop[i] == c_stw || iop[i] == c_stb) { usemark(ia[i], i); usemark(ib[i], i); }
+      else if (iop[i] == c_arg || iop[i] == c_ret) usemark(ia[i], i);
+      else if (iop[i] == c_bz || iop[i] == c_bnz) usemark(ia[i], i);
+    }
+    i = i + 1;
+  }
+  r = 13;
+  while (r < 28) { rheld[r] = -1; rused[r] = 0; r = r + 1; }
+  nspill = 0;
+  i = 0;
+  while (i < icnt) {
+    // この位置が最終使用の値を解放する
+    r = 13;
+    while (r < 28) {
+      if (rheld[r] >= 0) {
+        if (lastu[rheld[r]] <= i) rheld[r] = -1;
+      }
+      r = r + 1;
+    }
+    // 値を定義する命令に割り付ける
+    if (live[i] && lastu[i] > i) {
+      if (ispure(i) || iop[i] == c_call) {
+        f = -1;
+        r = 13;
+        while (r < 28) {
+          if (f < 0 && rheld[r] < 0) f = r;
+          r = r + 1;
+        }
+        if (f >= 0) {
+          vreg[i] = f;
+          rheld[f] = i;
+          rused[f] = 1;
+        } else {
+          vreg[i] = -2 - nspill;
+          nspill = nspill + 1;
+        }
+      }
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+// ---- コード出力 ----
+// 割付け結果 (vreg) を見ながら IR を 1 命令ずつ命令語へ落とす。
+// スピルされた値は読むときに x10/x11 へ載せ，書いたら即座に書き戻す
+// (レジスタに置き続けられないからスピルなので，保持はしない)。
+
+/// @brief 値 v を読み出すレジスタ番号を得る。スピルなら作業レジスタへロードする。
+/// @param v 値番号
+/// @param sc2 スピル時に使う作業レジスタ (x10 か x11)
+/// @return 実際に値が入っているレジスタ番号
+/// @note 二項演算では左右で別の作業レジスタを渡す必要がある。同じものを
+///       渡すと後のロードが前の値を潰す。
+int oreg(int v, int sc2) {
+  if (vreg[v] >= 0) return vreg[v];
+  outw(iw3(0x2003, sc2, 8, spbase + (0 - 2 - vreg[v]) * 4));
+  return sc2;
+}
+
+/// @brief 値 v を書き込む先のレジスタ番号を得る。
+/// @param v 値番号
+/// @return レジスタ番号。スピル値は一旦 x10 に作ってから dstore で書き戻す
+int dreg(int v) {
+  if (vreg[v] >= 0) return vreg[v];
+  return 10;
+}
+
+/// @brief 直前に x10 へ作った値が，スピル対象ならフレームへ書き戻す。
+/// @param v 値番号
+/// @return 常に 0
+/// @note vreg が -1 (未割付 = 誰も使わない値) のときは何もしない。
+int dstore(int v) {
+  if (vreg[v] >= 0) return 0;
+  if (vreg[v] == -1) return 0;
+  outw(sw3(0x2023, 8, 10, spbase + (0 - 2 - vreg[v]) * 4));
+  return 0;
+}
+
+/// @brief ラベルへのジャンプを出力する。前方参照なら後埋めに登録する。
+/// @param l ラベル番号
+/// @return 常に 0
+/// @note 分岐に必ず jal (±1MiB) を使うのが occ の要点である。scc までは
+///       条件分岐を B-type で直接吐いていたが，B-type の変位は ±4KiB しか
+///       なく，しかも距離検査をしていなかったため，本体が 4KiB を超える
+///       if / while を黙って誤ったアドレスへ飛ぶコードにしていた
+///       (Stage 7 の開発中に発見)。occ は条件分岐を
+///       「逆条件で 2 語先へ飛ぶ B-type + jal」に分解することで，
+///       条件付きでも距離の制約を受けないようにしている。
+int lrefj(int l) {
+  if (labpos[l] >= 0) outw(0x6f | jenc(labpos[l] - outp));
+  else {
+    if (lfixn > 2047) exit(6);
+    lfix[lfixn] = outp;
+    lflab[lfixn] = l;
+    lfixn = lfixn + 1;
+    outw(0x6f);
+  }
+  return 0;
+}
+
+/// @brief 二項演算種別に対応する RV32IM の素の命令語を返す。
+/// @param k 演算種別 (b_*)
+/// @return opcode と funct を含む語
+/// @note 比較系 (b_sgt 以降) はここでは slt を返し，
+///       オペランドの入替えや後続の補正命令は emitins 側で行う。
+int binbase(int k) {
+  if (k == b_add) return 0x33;
+  if (k == b_sub) return 0x40000033;
+  if (k == b_mul) return 0x02000033;
+  if (k == b_div) return 0x02004033;
+  if (k == b_rem) return 0x02006033;
+  if (k == b_and) return 0x7033;
+  if (k == b_or) return 0x6033;
+  if (k == b_xor) return 0x4033;
+  if (k == b_sll) return 0x1033;
+  if (k == b_srl) return 0x5033;
+  return 0x2033;                     // slt (比較系の基本)
+}
+
+/// @brief IR 命令 1 個を命令語へ落とす。
+/// @param i 命令番号
+/// @return 1 = 直後にエピローグを出す必要がある (RET だった)。それ以外は 0
+/// @note 値を定義する命令は，dce で死んでいるか割付けが無い (誰も使わない)
+///       場合に丸ごと省かれる。
+///
+///       比較演算は RV32I に等値比較の命令が無いため合成する:
+///         a >  b : slt の左右を入れ替える
+///         a <= b : (b < a) を xor 1 で反転
+///         a >= b : (a < b) を xor 1 で反転
+///         a == b : 差を取り sltiu ..,1 (差が 0 なら 1)
+///         a != b : 差を取り sltu x0,.. (差が 0 以外なら 1)
+int emitins(int i) {
+  int k; int d; int a; int b;
+  k = iop[i];
+  if (k == c_const) {
+    if (!live[i]) return 0;
+    if (vreg[i] == -1) return 0;
+    d = dreg(i);
+    if (ia[i] >= (0 - 2048) && ia[i] < 2048) outw(iw3(0x13, d, 0, ia[i] & 4095));
+    else liw(d, ia[i]);
+    return dstore(i);
+  }
+  if (k == c_laddr) {
+    if (!live[i]) return 0;
+    if (vreg[i] == -1) return 0;
+    d = dreg(i);
+    outw(iw3(0x13, d, 8, ia[i]));
+    return dstore(i);
+  }
+  if (k == c_gaddr) {
+    if (!live[i]) return 0;
+    if (vreg[i] == -1) return 0;
+    d = dreg(i);
+    liw(d, ia[i]);
+    return dstore(i);
+  }
+  if (k == c_gstr) {
+    if (!live[i]) return 0;
+    if (vreg[i] == -1) return 0;
+    d = dreg(i);
+    if (spfn > 255) exit(6);
+    spfix[spfn] = outp;
+    spofs[spfn] = ia[i];
+    spfn = spfn + 1;
+    liw(d, 0);
+    return dstore(i);
+  }
+  if (k == c_loadw || k == c_loadb) {
+    if (!live[i]) return 0;
+    if (vreg[i] == -1) return 0;
+    a = oreg(ia[i], 10);
+    d = dreg(i);
+    if (k == c_loadb) outw(iw3(0x4003, d, a, 0));
+    else outw(iw3(0x2003, d, a, 0));
+    return dstore(i);
+  }
+  if (k == c_stw || k == c_stb) {
+    a = oreg(ia[i], 10);
+    b = oreg(ib[i], 11);
+    if (k == c_stb) outw(sw3(0x23, a, b, 0));
+    else outw(sw3(0x2023, a, b, 0));
+    return 0;
+  }
+  if (k == c_neg) {
+    if (!live[i]) return 0;
+    if (vreg[i] == -1) return 0;
+    a = oreg(ia[i], 10);
+    d = dreg(i);
+    outw(rw3(0x40000033, d, 0, a));
+    return dstore(i);
+  }
+  if (k == c_not) {
+    if (!live[i]) return 0;
+    if (vreg[i] == -1) return 0;
+    a = oreg(ia[i], 10);
+    d = dreg(i);
+    outw(iw3(0x3013, d, a, 1));
+    return dstore(i);
+  }
+  if (k == c_arg) {
+    a = oreg(ia[i], 10);
+    outw(0xffc48493);
+    outw(sw3(0x2023, 9, a, 0));
+    return 0;
+  }
+  if (k == c_call) {
+    b = ia[i];                       // 記号番号
+    if (gdef[b]) outw(jenc(gval[b] - outp) | 0xef);
+    else {
+      a = gval[b];
+      gval[b] = outp;
+      outw(a);
+    }
+    d = 10;
+    if (live[i] && vreg[i] != -1) d = dreg(i);
+    outw(iw3(0x2003, d, 9, 0));
+    outw(0x00448493);
+    if (live[i] && vreg[i] != -1) return dstore(i);
+    return 0;
+  }
+  if (k == c_ret) {
+    a = oreg(ia[i], 10);
+    outw(0xffc48493);
+    outw(sw3(0x2023, 9, a, 0));
+    return 1;                        // エピローグを出す印
+  }
+  if (k == c_lab) {
+    labpos[ia[i]] = outp;
+    return 0;
+  }
+  if (k == c_jmp) return lrefj(ia[i]);
+  if (k == c_bz) {
+    // 逆条件で 1 語跳び越え + jal (B-type の ±4KiB 制限を受けない)
+    a = oreg(ia[i], 10);
+    outw(0x1463 | (a << 15));
+    return lrefj(ib[i]);
+  }
+  if (k == c_bnz) {
+    a = oreg(ia[i], 10);
+    outw(0x463 | (a << 15));
+    return lrefj(ib[i]);
+  }
+  // 二項演算
+  if (!live[i]) return 0;
+  if (vreg[i] == -1) return 0;
+  a = oreg(ia[i], 10);
+  b = oreg(ib[i], 11);
+  d = dreg(i);
+  k = iop[i] - c_bin;
+  if (k == b_sgt || k == b_sle) outw(rw3(0x2033, d, b, a));
+  else if (k == b_seq || k == b_sne) outw(rw3(0x40000033, d, a, b));
+  else outw(rw3(binbase(k), d, a, b));
+  if (k == b_sle || k == b_sge) outw(iw3(0x4013, d, d, 1));
+  else if (k == b_seq) outw(iw3(0x3013, d, d, 1));
+  else if (k == b_sne) outw(rw3(0x3033, d, 0, d));
+  return dstore(i);
+}
+
+/// @brief エピローグ (退避レジスタの復元・フレーム解放・復帰) を出力する。
+/// @return 常に 0
+/// @note 返却値はデータスタックに積んだ状態で来る。RET のたびに出力するので
+///       1 つの関数に複数回現れうる。
+int epilog2() {
+  int r; int o;
+  o = svbase;
+  r = 13;
+  while (r < 28) {
+    if (rused[r]) { outw(iw3(0x2003, r, 8, o)); o = o + 4; }
+    r = r + 1;
+  }
+  outw(0x00012083);
+  outw(0x00412403);
+  outw(iw3(0x13, 2, 2, fnf));
+  outw(0x00008067);
+  return 0;
+}
+
+/// @brief 構築済みの IR を最適化・割付けし，関数 1 個分のコードを出力する。
+/// @param e この関数の大域記号番号
+/// @return 常に 0
+/// @note 全体の段取り:
+///       1. fold -> dce -> regalloc (ここで初めてスピル数と使用レジスタが判る)
+///       2. フレーム配置を確定する。スピル領域とレジスタ退避領域の大きさは
+///          割付けの結果に依存するので，この順序でなければ決められない
+///       3. 関数アドレスを確定し，溜まっていた前方参照呼出しを解決する
+///       4. プロローグ -> 本体 -> ラベル後埋め -> 文字列プール，の順に出力
+///
+///       引数はデータスタックに積まれて来るので，プロローグで逆順に
+///       取り出してフレームへ移す。以降は普通のローカル変数として扱える。
+int emitfn(int e) {
+  int i; int r; int o; int h; int nsv;
+  // 割付けとフレームレイアウト
+  fold();
+  dce();
+  regalloc();
+  nsv = 0;
+  r = 13;
+  while (r < 28) { if (rused[r]) nsv = nsv + 1; r = r + 1; }
+  spbase = cloff + hcnt * 4;
+  svbase = spbase + nspill * 4;
+  fnf = svbase + nsv * 4;
+  if (fnf > 2040) exit(6);
+  // 関数アドレスの確定と前方参照の解決
+  h = gval[e];
+  gval[e] = outp;
+  gdef[e] = 1;
+  patchcalls(outp, h);
+  if (streq(gname + e * 16, "main")) { mainoff = outp; mainok = 1; }
+  // プロローグ
+  outw((((0 - fnf) & 4095) << 20) | 0x10113);
+  outw(0x00112023);
+  outw(0x00812223);
+  outw(0x00010413);
+  o = svbase;
+  r = 13;
+  while (r < 28) {
+    if (rused[r]) { outw(sw3(0x2023, 8, r, o)); o = o + 4; }
+    r = r + 1;
+  }
+  i = cna;
+  while (i) {
+    i = i - 1;
+    outw(iw3(0x2003, 10, 9, 0));
+    outw(0x00448493);
+    outw(sw3(0x2023, 8, 10, 8 + i * 4));
+  }
+  // 本体
+  i = 0;
+  while (i < labcnt) { labpos[i] = -1; i = i + 1; }
+  lfixn = 0;
+  spfn = 0;
+  i = 0;
+  while (i < icnt) {
+    if (emitins(i)) epilog2();
+    i = i + 1;
+  }
+  // ラベルの後埋め (すべて jal)
+  i = 0;
+  while (i < lfixn) {
+    patw(getw(lfix[i]) | jenc(labpos[lflab[i]] - lfix[i]), lfix[i]);
+    i = i + 1;
+  }
+  // 文字列プールの出力と参照の後埋め
+  o = outp;
+  i = 0;
+  while (i < spcnt) { outbyte(spool[i]); i = i + 1; }
+  i = 0;
+  while (i < spfn) {
+    r = 0x80000000 + o + spofs[i];
+    patw((getw(spfix[i]) & 4095) | ((r + 2048) & 0xfffff000), spfix[i]);
+    patw((getw(spfix[i] + 4) & 0xfffff) | ((r & 4095) << 20), spfix[i] + 4);
+    i = i + 1;
+  }
+  return 0;
+}
+
+// ---- 宣言 ----
+
+/// @brief 構造体メンバを 1 個解析して登録する。
+/// @param se 所属する構造体番号
+/// @param t メンバの型
+/// @return 常に 0
+/// @note オフセットは宣言順に積む。char 配列だけは詰めて置き，
+///       それ以外は 4 バイト境界へ揃える。ワード単位のロード/ストアが
+///       境界を跨がないようにするためである。
+int memb(int se, int t) {
+  int m;
+  if ((t >> 16) == 0 && (t & 65535) > 1) exit(5);
+  if (tok != t_id) exit(1);
+  if (mfind(se) >= 0) exit(4);
+  if (mcnt > 2047) exit(6);
+  m = mcnt;
+  mcnt = mcnt + 1;
+  msid[m] = se;
+  copyn(mname + m * 16, tname);
+  mty[m] = t;
+  next();
+  if (tok == o_lb) {
+    next();
+    if (tok != t_num) exit(1);
+    marr[m] = 1;
+    if (mty[m] == 0) {
+      moff[m] = ssize[se];
+      ssize[se] = ssize[se] + tval;
+    } else {
+      moff[m] = (ssize[se] + 3) & 0xfffffffc;
+      ssize[se] = moff[m] + tval * 4;
+    }
+    next();
+    if (tok != o_rb) exit(1);
+    next();
+  } else {
+    marr[m] = 0;
+    moff[m] = (ssize[se] + 3) & 0xfffffffc;
+    ssize[se] = moff[m] + 4;
+  }
+  if (tok != o_semi) exit(1);
+  next();
+  return 0;
+}
+
+/// @brief 構造体定義 (struct 名 { ... };) を解析して登録する。
+/// @return 常に 0
+/// @note 先に空の構造体として登録してからメンバを読む。こうすると
+///       メンバに自分自身へのポインタ (連結リストの next など) を書ける。
+int structdef() {
+  int se;
+  copyn(tname, snam);
+  if (sfind() >= 0) exit(4);
+  if (scnt > 255) exit(6);
+  se = scnt;
+  scnt = scnt + 1;
+  copyn(sname + se * 16, tname);
+  ssize[se] = 0;
+  next();
+  while (tok != o_rc) memb(se, pstars(ptype()));
+  next();
+  if (tok != o_semi) exit(1);
+  next();
+  ssize[se] = (ssize[se] + 3) & 0xfffffffc;
+  return 0;
+}
+
+/// @brief 仮引数を 1 個解析してローカル記号に登録する。
+/// @return 常に 0
+/// @note 引数はフレームの [8] から順に置く。[0] は戻り先，[4] は旧 x8。
+int pparam() {
+  int b; int i;
+  b = pstars(ptype());
+  if (tok != t_id) exit(1);
+  if (lfind() >= 0) exit(4);
+  i = lnew();
+  lty[i] = b;
+  loff[i] = 8 + cna * 4;
+  larr[i] = 0;
+  cna = cna + 1;
+  next();
+  return 0;
+}
+
+/// @brief ローカル変数宣言を 1 個解析して登録する。
+/// @return 常に 0
+/// @note 宣言は関数本体の先頭にまとめる仕様なので，走査の途中で
+///       フレームサイズが後戻りすることがない。
+int plocal() {
+  int b; int i;
+  b = pstars(ptype());
+  if ((b >> 16) == 0 && (b & 65535) > 1) exit(5);
+  if (tok != t_id) exit(1);
+  if (lfind() >= 0) exit(4);
+  i = lnew();
+  lty[i] = b;
+  loff[i] = cloff;
+  next();
+  if (tok == o_lb) {
+    next();
+    if (tok != t_num) exit(1);
+    larr[i] = 1;
+    if (lty[i] == 0) cloff = cloff + ((tval + 3) & 0xfffffffc);
+    else cloff = cloff + tval * 4;
+    next();
+    if (tok != o_rb) exit(1);
+    next();
+  } else {
+    larr[i] = 0;
+    cloff = cloff + 4;
+  }
+  if (tok != o_semi) exit(1);
+  next();
+  return 0;
+}
+
+/// @brief 関数定義を解析し，IR を構築して出力まで行う。
+/// @return 常に 0
+/// @note 既に記号がある場合は前方参照で仮登録されたものなので，
+///       関数であること・未定義であることを確かめてから引き継ぐ。
+///       本体末尾には無条件に「return 0」相当を足す。return を通らずに
+///       関数の終わりへ到達した場合の返却値を仕様どおり 0 にするため。
+int funcdef() {
+  int e;
+  e = gfind();
+  if (e >= 0) {
+    if (gkind[e] != 1) exit(4);
+    if (gdef[e]) exit(4);
+  } else {
+    e = gnew();
+    gkind[e] = 1;
+    gval[e] = 0;
+    garr[e] = 0;
+  }
+  gty[e] = cty;
+  lcnt = 0;
+  cna = 0;
+  next();
+  if (tok != o_rp) {
+    pparam();
+    while (tok == o_comma) { next(); pparam(); }
+  }
+  if (tok != o_rp) exit(1);
+  next();
+  gna[e] = cna;
+  if (tok != o_lc) exit(1);
+  next();
+  cloff = 8 + cna * 4;
+  while (tok == k_int || tok == k_char || tok == k_struct) plocal();
+  // 本体を IR として構築し，最適化・割付けの後に出力する
+  icnt = 0;
+  labcnt = 0;
+  spcnt = 0;
+  hcnt = 0;
+  while (tok != o_rc) stmt();
+  next();
+  emit(c_ret, emit(c_const, 0, 0), 0);
+  return emitfn(e);
+}
+
+/// @brief 型を読んだ後の宣言を処理する (関数定義か大域変数かをここで分ける)。
+/// @param b 基底型
+/// @return 常に 0
+/// @note 名前の次が '(' なら関数，そうでなければ大域変数。
+///       大域変数には bssp から順にアドレスを与える。実体はバイナリに
+///       含めず，実行時の BSS 領域を指すだけである。
+int dcont(int b) {
+  int e;
+  cty = pstars(b);
+  if (tok != t_id) exit(1);
+  next();
+  if (tok == o_lp) return funcdef();
+  if (gfind() >= 0) exit(4);
+  e = gnew();
+  gkind[e] = 0;
+  gty[e] = cty;
+  gval[e] = bssp;
+  gdef[e] = 1;
+  gna[e] = 0;
+  if (tok == o_lb) {
+    next();
+    if (tok != t_num) exit(1);
+    garr[e] = 1;
+    if (cty == 0) bssp = bssp + ((tval + 3) & 0xfffffffc);
+    else bssp = bssp + tval * 4;
+    next();
+    if (tok != o_rb) exit(1);
+    next();
+  } else {
+    garr[e] = 0;
+    bssp = bssp + ((tsize(cty) + 3) & 0xfffffffc);
+  }
+  if (tok != o_semi) exit(1);
+  next();
+  return 0;
+}
+
+/// @brief トップレベルの宣言を 1 個処理する。
+/// @return 常に 0
+/// @note "struct 名 {" なら定義，"struct 名 名前" なら既存の構造体型を
+///       使った宣言。1 トークン先読みするために型名を snam へ退避する。
+int topdecl() {
+  int k;
+  if (tok == k_struct) {
+    next();
+    if (tok != t_id) exit(1);
+    copyn(snam, tname);
+    next();
+    if (tok == o_lc) return structdef();
+    k = sfind2();
+    if (k < 0) exit(2);
+    return dcont(k + 2);
+  }
+  return dcont(ptype());
+}
+
+// ---- 組込み関数の登録 ----
+
+/// @brief 組込み関数を定義済みの大域記号として登録する。
+/// @param nm 名前
+/// @param v ランタイム前置部の中のアドレス (出力オフセット)
+/// @param na 引数個数
+/// @return 常に 0
+int biadd(char *nm, int v, int na) {
+  int e; int i;
+  i = 0;
+  while (nm[i]) { tname[i] = nm[i]; i = i + 1; }
+  while (i < 16) { tname[i] = 0; i = i + 1; }
+  e = gnew();
+  gkind[e] = 1;
+  gty[e] = 1;
+  gval[e] = v;
+  gdef[e] = 1;
+  garr[e] = 0;
+  gna[e] = na;
+  return 0;
+}
+/// @brief getc / putc / exit を登録する。
+/// @return 常に 0
+/// @note アドレスはランタイム前置部の中の固定位置で，普通の関数と同じく
+///       jal で呼べる。前置部は必ず出力の先頭に置くので位置は不変である。
+int bireg() {
+  biadd("getc", 68, 0);
+  biadd("putc", 96, 1);
+  biadd("exit", 124, 1);
+  return 0;
+}
+
+// ---- 駆動部 ----
+
+/// @brief コンパイラ本体。標準入力からソースを読み，標準出力へバイナリを書く。
+/// @return 常に 0 (異常時は exit で終了コードを返して停止する)
+/// @note 段取り:
+///       1. EOT (0x04) までソースを読み切る。UART には EOF がないため
+///          明示的な終端文字を使う
+///       2. ランタイム前置部 32 語を出力する。scc と同一の内容で，
+///          レジスタ初期化・main 呼出し・getc/putc/exit を含む。
+///          main のアドレスはこの時点で未定なので 5 語目は 0 で埋め，
+///          全体を読み終えてから後埋めする
+///       3. トップレベル宣言を順に処理する
+///       4. main の存在と，前方参照のまま定義されなかった関数がないことを検査
+///       5. 溜めたバイナリを 1 バイトずつ書き出す
+int main() {
+  int c; int i;
+  init();
+  pos = 0;
+  c = getc();
+  while (c != eot) {
+    src[pos] = c;
+    pos = pos + 1;
+    c = getc();
+  }
+  src[pos] = c;
+  pos = 0;
+  outp = 0; gcnt = 0; scnt = 0; mcnt = 0; lcnt = 0; mainok = 0;
+  bssp = 0x80100000;
+  // ランタイム前置部 (32 語。scc と同一。語 4 = jal x1 main は後で patch)
+  outw(0x87f004b7);
+  outw(0x87800137);
+  outw(0x100002b7);
+  outw(0x00100337);
+  outw(0);
+  outw(0x0004a503);
+  outw(0x00448493);
+  outw(0x00050c63);
+  outw(0x01051513);
+  outw(0x000035b7);
+  outw(0x33358593);
+  outw(0x00b56533);
+  outw(0x00c0006f);
+  outw(0x00005537);
+  outw(0x55550513);
+  outw(0x00a32023);
+  outw(0x0000006f);
+  outw(0x0052c503);
+  outw(0x00157513);
+  outw(0xfe050ce3);
+  outw(0x0002c503);
+  outw(0xffc48493);
+  outw(0x00a4a023);
+  outw(0x00008067);
+  outw(0x0052c583);
+  outw(0x0205f593);
+  outw(0xfe058ce3);
+  outw(0x0004a503);
+  outw(0x00a28023);
+  outw(0x0004a023);
+  outw(0x00008067);
+  outw(0xf99ff06f);
+  bireg();
+  next();
+  while (tok != t_eof) topdecl();
+  if (mainok == 0) exit(3);
+  patw(jenc(mainoff - 16) | 0xef, 16);
+  i = 0;
+  while (i < gcnt) {
+    if (gkind[i] == 1 && gdef[i] == 0) exit(2);
+    i = i + 1;
+  }
+  i = 0;
+  while (i < outp) {
+    putc(ob[i]);
+    i = i + 1;
+  }
+  return 0;
+}
