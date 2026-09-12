@@ -315,7 +315,7 @@ r=$?
 report $? "run: 組込みの道具が kernel22 の上で本物と同じ結果を出す"
 [ -s "$out/toolprobe.diff" ] && sed -n '4,$p' "$out/toolprobe.diff"
 
-# uname だけは参照シェルで期待値を作れない。**我々の OS の素性を
+# uname だけは参照シェルで期待値を作れない。**stone の OS の素性を
 # 答えるものだからである。** 並び順が本物と同じであることは，本物の
 # uname が -m -s に sysname を先に返すのを見て決めた (11.3)
 urt=$out/uroot
@@ -344,16 +344,16 @@ report $? "ref: 本物の uname も -m -s に sysname を先に並べる"
 
 section "configure を我々の OS の上で走らせる (docs/stage016-os.md 11.6)"
 
-# 第 4 部の完了条件。tcc の configure (768 行) を我々の OS で走らせ，
+# 第 4 部の完了条件。tcc の configure (768 行) を stone の OS で走らせ，
 # 本物の POSIX シェルの結果と突き合わせる。
 #
 # 参照実行には身代わりを 2 つ通す (tests/stage016/refbin)。
 #   sh2    -> 本物の sh。probe を 2 通り書き分けないため
-#   uname  -> 我々の OS の素性。**機種を答えるものなので，教えないと
+#   uname  -> stone の OS の素性。**機種を答えるものなので，教えないと
 #             比べようがない**
 #
 # 唯一そろえられないのが「Source path」の行である。configure は
-# pwd をそこへ書く。我々の OS では / だが，参照実行は作業用の
+# pwd をそこへ書く。 stone の OS では / だが，参照実行は作業用の
 # ディレクトリになる。**その 1 行だけを揃えてから比べる**
 #
 # **素材が無ければ飛ばす。** 外部ソースは repo に取り込まない決まりで

@@ -1,6 +1,6 @@
 /* cc17.c --- コンパイラの駆動役 (Stage 17 第 1 部の試作)
  *
- * 我々の OS の上で `cc -o out in.c` と書けるようにする。中で
+ * stone の OS の上で `cc -o out in.c` と書けるようにする。中で
  * pp16 -> cc15p -> ld16 を順に呼ぶ。
  *
  *   cc [-c] [-o OUT] [-W...] [-x c] [FILE | -]
@@ -35,7 +35,7 @@
 #define INC  "/include"
 #define LIB  "/lib"
 
-/* 作業用の名前。**同じディレクトリに作る。** 我々の OS に /tmp は
+/* 作業用の名前。**同じディレクトリに作る。** stone の OS に /tmp は
  * 無く，configure は作業ディレクトリを掘って回るので，そこへ置く */
 #define TB "_cc.b"
 #define TI "_cc.i"

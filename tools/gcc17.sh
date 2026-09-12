@@ -12,10 +12,10 @@
 #   gcc17.sh where <lib>/<unit>   gap の単位で，cc が落ちる最初の関数の塊を絞る
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
-# unit / units は鎖の像 (tmp/build) と QEMU を要る。STONE_ENGINE と
+# unit / units はビルドチェーンで生成したバイナリ (tmp/build) と QEMU を要る。STONE_ENGINE と
 # qemu-system-riscv32 は呼ぶ側の環境で与える (tools/env.sh の契約のまま)。
 #
-# STONE_GCC17_PP=os で pp の段を**我々の OS の上の pp18** に替える
+# STONE_GCC17_PP=os で pp の段を**stone の OS の上の pp18** に替える
 # (既定は裸の pp16)。docs/stage017-gcc.md 8.7 の 2。
 #
 # STONE_GCC47_SRC で測る木を差し替えられる。**答の判っている小さな木で
@@ -290,11 +290,11 @@ paths=$packed_paths
 EOF
 }
 
-# ---- 翻訳単位を我々の器に読ませる (6.1 の 4) ----
+# ---- 翻訳単位を stone の処理系に読ませる (6.1 の 4) ----
 #
 # tcc のときと同じ測り方である (docs/stage017-gcc.md 4.1) —— ソースを
 # 読ませ，**通らなかった単位とその理由を数える**。その表の長さが，
-# 我々の器と GCC の C との距離になる。
+# stone の処理系と GCC の C との距離になる。
 #
 # 対象は libiberty と libcpp である。GCC 本体 (gcc/) は configure が
 # 生成する header (tm.h / insn-*.h) を要り，しかも 4.7.4 には riscv の
@@ -308,7 +308,7 @@ work="$repo_root/tmp/g17u"
 # 我々が実物に向けて持っている header はこれが全部である
 # (stage017/libc21.md)。GCC を組むときに使うのもこちらになる。
 #
-# STONE_GCC17_LIBC で差し替えられる。stage015/libc は鎖の素の側 ——
+# STONE_GCC17_LIBC で差し替えられる。stage015/libc はベアメタル実行側 ——
 # tools/diff17.sh の bare が測る器で，sys/ の下は time.h しか無い。
 # **どちらで測ったかで header の穴の数が変わる**ので明示する
 ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc22/include}
@@ -320,9 +320,9 @@ HOSTCC=${CC:-gcc}
 
 # pp の段をどちらの系で回すか (docs/stage017-gcc.md 8.7 の 2)。
 #
-#   bare  pp16 を裸で回す (既定)。鎖の素の側。stdin から束ねを読み，
+#   bare  pp16 を裸で回す (既定)。ベアメタル実行側。stdin から束ねを読み，
 #         stdout へ .i を出す。QEMU の起動は 1 単位につき 1 回
-#   os    **我々の OS の上の pp18 を回す。** pp16 では測れないものが
+#   os    **stone の OS の上の pp18 を回す。** pp16 では測れないものが
 #         2 つある —— 展開の結果に現れた defined (pp17 以降だけが評価
 #         する) と，束ねの員 256 / アリーナ 64 KiB という広がった容量。
 #         13 単位が ppext に落ちているのはすべて前者である
@@ -355,7 +355,7 @@ pp_run() {
     esac
 }
 
-# **我々の OS の上で pp18 に通す** (8.7 の 2)。
+# **stone の OS の上で pp18 に通す** (8.7 の 2)。
 #
 # tools/tcc17.sh が既に持つ形と同じである —— 作業用の根を sfs3 で詰め，
 # 記憶像の 64 MiB の位置へ置いて kernel24 を起動し，走った後の像を
@@ -409,7 +409,7 @@ lib_dirs() {
 
 # config.h を host で作る。
 #
-# **configure を我々の OS で回すのは 4.2 の別件である。** ここで要るのは
+# **configure を stone の OS で回すのは 4.2 の別件である。** ここで要るのは
 # 単位を読むための config.h だけなので，host の autoconf に作らせる。
 # ただし host の header と語長で作ると，我々に無い header を「ある」と
 # 書いた config.h になる。2 つ手当てする。
@@ -675,7 +675,7 @@ unit_run() {
         return 0
     fi
     if [ "$rc" -eq 6 ]; then
-        # 容量超過。cc の 6 と同じで，適合の話ではなく器の大きさの話である
+        # 容量超過。cc の 6 と同じで，適合の話ではなくバッファ容量の話である
         printf 'cap\tpp 6\n'
         return 0
     fi
@@ -787,7 +787,7 @@ units() {
     : > "$t"
     # **その表が何に対する表かを先に言う。** どの libc の header で閉包を
     # 取ったか，pp をどちらの系で回したかで同じ単位の状態が変わる。
-    # 8 章は一度これを言わずに測って，鎖の素の側の libc の表を OS 側の
+    # 8 章は一度これを言わずに測って，ベアメタル実行側の libc の表を OS 側の
     # 表として読んだ (docs/stage017-gcc.md 8.1)。表とは別の file にも
     # 残すので，後から表だけを見ても基準を辿れる
     {

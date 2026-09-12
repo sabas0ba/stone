@@ -1,4 +1,4 @@
-/* bzip2 を **我々の器で組んで，我々の OS の上で走らせる** (5.1)。
+/* bzip2 を **stone の処理系で組んで， stone の OS の上で走らせる** (5.1)。
  *
  * BZ2_bzBuffToBuffCompress / Decompress は blocksort.c /
  * huffman.c / compress.c / decompress.c / crctable.c / randtable.c /

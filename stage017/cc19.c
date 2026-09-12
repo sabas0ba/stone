@@ -415,7 +415,7 @@ int main(int argc, char **argv) {
        * ヘッダの上に書かれる** (cc18 にこの誤りがある。19.3)。
        * しかも壊した先を自分で読み直すので**辻褄が合い，リンクは
        * 通って走ってしまう**。我々が繰り返し踏んでいる型である
-       * (docs/dev-notes.md の「大域の器を跨いで渡さない」) */
+       * (docs/dev-notes.md の「大域バッファを跨いで渡さない」) */
       char tmpo[64];
       sprintf(tmpo, "_t%d.o", i);
       compile1(ins[i], tmpo);
