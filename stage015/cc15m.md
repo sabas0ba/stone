@@ -60,6 +60,6 @@ SHA-256: 8e53c3e79a030f148adf944710ab0bfc24656cebe4e30833666b06910e515bd5
 - 固定点: cc15m(cc15m.sc) == cc15m0(cc15m.sc) (B2 == B3)
 - 回帰: sh / ed / mk と rt64.c / rtfp.c の `.o` が変わらない
 - 台帳: [gap15m](../tests/stage015/probe/gap15m.c) が 33 検査すべて通る
-- **tcc**: T1 (この cc が作った tcc) が我々の OS 上で C を翻訳し，
+- **tcc**: T1 (この cc が作った tcc) が stone の OS 上で C を翻訳し，
   出力 `.o` がホストの gcc で作った riscv32-tcc の出力と**バイト一致**
   する ([stage015-tcc.md](../docs/stage015-tcc.md) 12.9)

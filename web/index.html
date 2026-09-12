@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>stone — lineage of a bootstrap</title>
+<title>stone — a compiler bootstrap, stage by stage</title>
 <meta name="description"
-      content="A bootstrap chain that grows from a 256-byte hand-encoded seed into an assembler, a C compiler, a libc and a homemade OS with directories and 256 MB of heap — far enough that tcc rebuilds itself on it. Every generation's artifact runs in your browser on a RV32 emulator.">
+      content="Explore a compiler bootstrap from a 256-byte hand-encoded binary to an assembler, C compiler, libc, and OS. Read each stage's specification and run its artifacts in an RV32 browser emulator.">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23282433'/%3E%3Ctext x='8' y='12' font-size='10' text-anchor='middle' fill='%23e8b04b' font-family='monospace'%3E石%3C/text%3E%3C/svg%3E">
 </head>
@@ -14,11 +14,11 @@
 <header class="site-head">
   <div class="wrap">
     <h1>stone</h1>
-    <p class="lede">From a hand-encoded <strong>256-byte</strong> seed to an assembler, a C
-      compiler, a libc and a homemade OS — each generation built <strong>only from the artifacts
-      of the one before</strong>. Sixteen generations in, the chain's <strong>tcc</strong> rebuilds
-      itself on our own OS, <strong>byte-identical</strong> to the tcc GCC builds. Every artifact
-      here runs in your browser on a RV32 emulator.</p>
+    <p class="lede">stone builds an assembler, a C compiler, libc, and an OS from a hand-encoded
+      <strong>256-byte</strong> binary. Each stage uses artifacts from earlier stages.
+      The toolchain also builds <strong>tcc</strong>; successive tcc self-builds on stone's OS are
+      <strong>byte-identical</strong> to each other and to the cross-compiled reference.
+      Explore sixteen stages and run the examples in an RV32 browser emulator.</p>
     <nav class="site-links">
       <a id="repo-link" href="#" rel="noopener">Repository</a>
       <span id="build-info"></span>
@@ -132,7 +132,7 @@
 
   <section class="accordions">
     <details class="acc" id="acc-spec">
-      <summary>Specification digest — the full picture</summary>
+      <summary>Language, execution model, and implementation</summary>
       <div class="md" id="st-summary"></div>
     </details>
     <details class="acc" id="acc-cov">
@@ -155,7 +155,7 @@
       </div>
     </details>
     <details class="acc" id="acc-trivia">
-      <summary>Field notes — how it actually went</summary>
+      <summary>Implementation and verification notes</summary>
       <p class="trivia" id="st-trivia"></p>
     </details>
   </section>

@@ -1,12 +1,12 @@
 #!/bin/sh
-# 実物 (zlib / bzip2) を **我々の器で，我々の OS の上で** 組む
+# 実物 (zlib / bzip2) を **stone の処理系で， stone の OS の上で** 組む
 # (docs/stage017-gcc.md 5.1)。
 #
 # Stage 14 はこの 2 つを**ホストの鎖**で訳した (tests/stage014 第 8〜9 部)。
-# ここは **自作 OS の上で自作の器 (cc19 + cc15v) が**訳す。それが一段先の
+# ここは **自作 OS の上で自作の処理系 (cc19 + cc15v) が**訳す。それが一段先の
 # 指標になる。
 #
-# **外部の器は使わない。** 一度 tcc に組ませたが，それでは tcc の成熟度を
+# **外部の処理系は使わない。** 一度 tcc に組ませたが，それでは tcc の成熟度を
 # 測ることになり我々の値が出ない (docs/artifacts.md 3 章 /
 # docs/stage017-cc.md 34 章)。的を道具に使わない。
 #
@@ -17,11 +17,11 @@
 #
 # **訳せることと動くことは別である。** 22/22 訳せても，それは「構文を
 # 拒まなかった」でしかない。run は出来た .o を我々の ar でまとめ，
-# 我々の cc19 で繋ぎ，我々の OS の上で圧縮・伸長させて**元に戻ること**を
+# 我々の cc19 で繋ぎ， stone の OS の上で圧縮・伸長させて**元に戻ること**を
 # 見る。
 #
 # 見るのは「何単位通ったか」ではなく **通らなかった単位とその理由**である。
-# tcc のときはそれが「C 適合の誤り 4 つ + libc の穴 6 つ」という表になった。
+# tcc のときはそれが「C 適合の誤り 4 つ + libc の未実装機能・不具合 6 つ」という表になった。
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -86,7 +86,7 @@ do_root() {
     for f in docs/external/zlib/*.c docs/external/zlib/*.h; do cp "$f" "$root/z/"; done
     for f in docs/external/bzip2/*.c docs/external/bzip2/*.h; do cp "$f" "$root/bz/"; done
     # 駆動は**我々が書いたもの**である (tests/stage017/ext/)。外部の
-    # ソースは素材であって，測るのは我々の器と我々の OS である
+    # ソースは素材であって，測るのは stone の処理系と stone の OS である
     cp tests/stage017/ext/zt.c  "$root/z/"
     cp tests/stage017/ext/bzt.c "$root/bz/"
     # **zlib 自身の検査も入力として読む。** 我々が書いた駆動 (zt.c) は
@@ -135,7 +135,7 @@ $(( $(echo $Z_UNITS | wc -w) + $(echo $BZ_UNITS | wc -w) )) ----" >&2
 }
 
 # **書庫にまとめ，駆動を繋いで走らせる。** ここまでやって初めて
-# 「我々の器が zlib / bzip2 を組めた」と言える。ar も cc19 も走行も
+# 「 stone の処理系が zlib / bzip2 を組めた」と言える。ar も cc19 も走行も
 # 全部 OS の中である —— ホストの ar / ld を使ったら測っているものが
 # 変わる (tools/tcc17.sh do_link と同じ理由)
 do_run() {

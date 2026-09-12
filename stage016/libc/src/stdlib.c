@@ -384,7 +384,7 @@ double strtod(const char *s, char **endptr)
         if (sig < 922337203685477580ULL)
             sig = sig * 10ULL + (unsigned long long)(*s - '0');
         else
-            fdig = fdig - 1;    /* 器に入らない桁は指数へ送る (下の e で戻す) */
+            fdig = fdig - 1;    /* 累積値に保持できない桁は指数へ送る (下の e で戻す) */
         s = s + 1;
     }
     if (*s == '.') {

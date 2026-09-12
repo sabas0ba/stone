@@ -1,5 +1,5 @@
 #!/bin/sh
-# tcc の翻訳単位を**我々の OS の上で**1 本ずつ訳す (第 3 部の 3 の 2)。
+# tcc の翻訳単位を**stone の OS の上で**1 本ずつ訳す (第 3 部の 3 の 2)。
 #
 #   tcc17.sh root          作業用の像の元 (tmp/s17/root) を組む
 #   tcc17.sh unit <名前>   翻訳単位を 1 本訳し，.o を tmp/s17/obj へ出す
@@ -21,7 +21,7 @@
 #
 # docs/external/tcc (tools/fetch.sh tcc) と，そこへ patch を当てた
 # tmp/tcc/src (tools/tcc.sh src)。tccdefs_.h はホストの tcc が作った
-# ものを使う —— これを我々の OS の上で作るのは 16.3 の別件である。
+# ものを使う —— これを stone の OS の上で作るのは 16.3 の別件である。
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -141,7 +141,7 @@ do_unit() {
     #  1. 印は $root の中身を見る。作り直さないと，直前に mk や lib を
     #     走らせたかどうかで中身が変わり (mk_scaffold が t/include を
     #     足す)，同じことをしても印が変わって QEMU を回し直すことになる
-    #  2. STONE_CC15P で差し替えた器を確実に置く。ここが
+    #  2. STONE_CC15P で差し替えたコンパイラを確実に置く。ここが
     #     `[ -d "$root" ] || do_root` だったせいで，差し替えても古い
     #     bin/cc15p がそのまま使われ「差し替えたのに何も変わらない」と
     #     いう測り違いをした。do_link では同じ誤りを既に直していたのに，
@@ -190,7 +190,7 @@ do_unit() {
 #   ar rcs libtcc.a libtcc.o tccpp.o ... riscv64-asm.o
 #   cc -o tcc tcc.o libtcc.a ...
 #
-# **これも OS の上でやる。** ホストの ar / ld を使ったら，我々の OS の
+# **これも OS の上でやる。** ホストの ar / ld を使ったら， stone の OS の
 # 上で組めたことにならない。
 LIBOBJS="libtcc tccpp tccgen tccdbg tccelf tccasm tccrun riscv64-gen riscv64-link riscv64-asm"
 
@@ -317,7 +317,7 @@ mk_scaffold() {
     # config.mak にある —— **片方だけでは意味がない**
     cp stage017/tcc/config-stone.h "$root/t/config.h"
     cat > "$root/t/config.mak" <<'CFEOF'
-# 我々の OS 向けの config.mak (docs/stage017-cc.md 21 章)。
+# stone の OS 向けの config.mak (docs/stage017-cc.md 21 章)。
 # 上流の configure はホストでしか動かないので手で固定する
 CC=cc19
 CC_NAME=cc19
@@ -393,7 +393,7 @@ do_mk() {
     echo "Makefile から tcc ができた ($(wc -c < "$out/tcc-mk") バイト)" >&2
 }
 
-# **libtcc1.a を我々の OS の上で作る** (第 3 部の 3 の 3)。
+# **libtcc1.a を stone の OS の上で作る** (第 3 部の 3 の 3)。
 #
 # ここで使う翻訳器は cc19 ではなく **我々が作った tcc 自身**である
 # (lib/Makefile の $(TCC) = ../tcc)。.S が 3 本あり，tcc 自身の

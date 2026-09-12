@@ -36,7 +36,7 @@ else if (op == b_srl) { if (!isuar(t)) op = b_sra; }
 ## 見つかり方: zlib の adler32 が誤った値を返した
 
 [docs/stage017-gcc.md](../docs/stage017-gcc.md) 5.1 の測定である。
-`zlib` を我々の器で組んで我々の OS の上で走らせ，**ホストの GCC で
+`zlib` を stone の処理系で組んで stone の OS の上で走らせ，**ホストの GCC で
 同じソース・同じ駆動を組んだものと値を突き合わせた**。
 
 ```

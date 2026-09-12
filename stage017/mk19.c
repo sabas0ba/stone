@@ -562,7 +562,7 @@ static int callfn1(char *name, char *body, char *out, int cap,
     return 1;
   }
   if (strcmp(name, "wildcard") == 0) {
-    /* **並べ替えはしない。** 我々の OS には glob が無く，ここでは
+    /* **並べ替えはしない。** stone の OS には glob が無く，ここでは
      * 「その名前が在るか」だけを見る。型は扱わない —— 扱えないものを
      * 扱えるふりをすると，空に展開されて黙って違う結果になる */
     if (strchr(a0, '*') != 0 || strchr(a0, '?') != 0)
