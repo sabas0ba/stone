@@ -1,0 +1,924 @@
+/* stdio.c --- 入出力 (C89 7.9)
+ *
+ * 設計は docs/stage012-os.md 6.4。libc の環境部であり，read / write /
+ * open / close (lib/posix/sys.c) の上に立つ。
+ *
+ * バッファリングはしないので，fflush は何もしない。書式は %d %u %x %c %s
+ * %% と最小の幅指定 (0 詰めを含む) だけを実装する。
+ */
+#include <stddef.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#define NFILE 16
+
+static FILE files[NFILE];
+static int inited;
+
+/* 標準の 3 本は fd 0 / 1 / 2 に結ぶ。初期値つきの大域構造体を使わず，
+ * 最初の呼出しで組み立てる (.bss は 0 で始まるので inited が印になる) */
+FILE *__stdfile(int i) {
+  int k;
+  if (!inited) {
+    inited = 1;
+    for (k = 0; k < NFILE; k++) {
+      files[k].fd = -1;
+      files[k].back = -1;
+      files[k].app = 0;
+    }
+    files[0].fd = 0;
+    files[1].fd = 1;
+    files[2].fd = 2;
+  }
+  return &files[i];
+}
+
+/* 追記の流れは**書く前に必ず末尾へ寄せる** (第 21 世代)。
+ *
+ * カーネルに O_APPEND が無いので libc の側でやる。単一の走行なので
+ * (spawn は子の終わりを待つ)，これで POSIX の O_APPEND と同じ意味に
+ * なる。**寄せられなければ書かない** —— 書くと先頭を潰すからである
+ * (docs/stage017-cc.md 32 章)。
+ */
+static int wr(FILE *f, void *buf, int n) {
+  if (f->app && lseek(f->fd, 0, SEEK_END) < 0) {
+    f->err = 1;
+    return -1;
+  }
+  return write(f->fd, buf, n);
+}
+
+FILE *fopen(char *path, char *mode) {
+  FILE *f;
+  int k;
+  int fd;
+  int flags;
+  int app;
+
+  __stdfile(0);                         /* 表の初期化を済ませる */
+  app = 0;
+  if (mode[0] == 'r') flags = O_RDONLY;
+  else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
+  /* **O_APPEND は渡さない。** カーネルが知らない旗を黙って捨てるので，
+   * 渡しても効かない —— そして open() はそれを拒む (fcntl.h の註)。
+   * 追記はここ (libc) で実装する。印だけ立てて，書く前に末尾へ寄せる */
+  else if (mode[0] == 'a') { flags = O_WRONLY | O_CREAT; app = 1; }
+  else return NULL;
+  fd = open(path, flags);
+  if (fd < 0) return NULL;
+  for (k = 3; k < NFILE; k++) {
+    if (files[k].fd < 0) {
+      f = &files[k];
+      f->fd = fd;
+      f->back = -1;
+      f->eof = 0;
+      f->err = 0;
+      f->app = app;
+      return f;
+    }
+  }
+  close(fd);
+  return NULL;
+}
+
+int fclose(FILE *f) {
+  int r;
+  if (f == NULL || f->fd < 0) return EOF;
+  r = close(f->fd);
+  f->fd = -1;
+  return r;
+}
+
+int fgetc(FILE *f) {
+  char c;
+  int n;
+
+  if (f->back >= 0) {
+    n = f->back;
+    f->back = -1;
+    return n;
+  }
+  n = read(f->fd, &c, 1);
+  if (n < 0) { f->err = 1; return EOF; }
+  if (n == 0) { f->eof = 1; return EOF; }
+  return c & 255;
+}
+
+int fputc(int c, FILE *f) {
+  char b;
+  b = c;
+  if (wr(f, &b, 1) != 1) { f->err = 1; return EOF; }
+  return c & 255;
+}
+
+/* 押し戻せるのは 1 バイトまで (C89 が保証するのもそこまで) */
+int ungetc(int c, FILE *f) {
+  if (c == EOF || f->back >= 0) return EOF;
+  f->back = c & 255;
+  f->eof = 0;
+  return c & 255;
+}
+
+size_t fread(void *buf, size_t size, size_t n, FILE *f) {
+  size_t i;
+  size_t tot;
+  int c;
+  char *p;
+
+  p = (char *)buf;
+  tot = size * n;
+  for (i = 0; i < tot; i++) {
+    c = fgetc(f);
+    if (c == EOF) break;
+    p[i] = c;
+  }
+  if (size == 0) return 0;
+  return i / size;
+}
+
+size_t fwrite(void *buf, size_t size, size_t n, FILE *f) {
+  size_t tot;
+  int w;
+
+  tot = size * n;
+  if (tot == 0) return 0;
+  w = wr(f, buf, tot);
+  if (w < 0) { f->err = 1; return 0; }
+  if (size == 0) return 0;
+  return (size_t)w / size;
+}
+
+/* 改行まで (改行を含む) 読み，NUL で終端する。1 バイトも読めなければ NULL。
+ *
+ * **「読めなかった」と「読む余地が無かった」は別である** (第 22 世代。
+ * docs/stage017-gcc.md 5.4)。C89 7.9.7.2 が NULL を返せと言うのは
+ * 終端か誤りに当たったときだけで，`n == 1` は 1 バイトも要求されて
+ * いないだけだから，終端を書いて s を返す。第 21 世代は両方を
+ * 「i == 0」で一括りにしていたので，`fgets(b, 1, f)` が NULL を返して
+ * いた —— 呼び手からは終端に見える。 */
+char *fgets(char *s, int n, FILE *f) {
+  int i;
+  int c;
+
+  if (n <= 0) return NULL;
+  i = 0;
+  while (i < n - 1) {
+    c = fgetc(f);
+    if (c == EOF) break;
+    s[i] = c;
+    i = i + 1;
+    if (c == '\n') break;
+  }
+  if (i == 0 && n > 1) return NULL;
+  s[i] = 0;
+  return s;
+}
+
+int fputs(char *s, FILE *f) {
+  int n;
+  n = 0;
+  while (s[n]) n = n + 1;
+  if (n == 0) return 0;
+  if (wr(f, s, n) != n) { f->err = 1; return EOF; }
+  return n;
+}
+
+int feof(FILE *f) { return f->eof; }
+int ferror(FILE *f) { return f->err; }
+
+/* 無バッファなので溜まっているものは無い */
+int fflush(FILE *f) { return 0; }
+
+int getchar(void) { return fgetc(stdin); }
+int putchar(int c) { return fputc(c, stdout); }
+
+int puts(char *s) {
+  if (fputs(s, stdout) == EOF) return EOF;
+  return fputc('\n', stdout);
+}
+
+/* ---- 書式出力 ---- */
+
+/* 実体は下 (sprintf の書込み先の宣言と一緒に置きたいため)。先に宣言だけ
+ * するのは，暗黙の宣言を許さない処理系 (tcc) で翻訳するためである */
+static int emitc(FILE *f, int c);
+
+/* sprintf の書込み先。NULL でなければ FILE ではなくここへ書く */
+static char *cap;
+static int caplim;              /* snprintf の残り容量 (-1 = 無制限) */
+
+static int emitc(FILE *f, int c) {
+  if (cap != NULL) {
+    if (caplim == 0) return c;  /* 溢れたぶんは数えるだけ (C99 の規則) */
+    if (caplim > 0) caplim = caplim - 1;
+    *cap = (char)c;
+    cap = cap + 1;
+    return c;
+  }
+  return fputc(c, f);
+}
+
+/* 整数を 1 つ書き出す (第 22 世代。第 21 世代までの pnum / pnum64 を
+ * 1 つにまとめ，精度と旗を持たせたもの)。
+ *
+ * **旗と精度を足したのは，ホストと突き合わせて出た穴である**
+ * (docs/stage017-gcc.md 5.3)。第 21 世代は `%o` を知らず，`%X` を
+ * 小文字で書き，`%.3d` の精度を読み捨て，`%+d` `% d` `%#x` の旗に
+ * 至っては**可変部を 1 つも取り出さないまま次の変換へ進んで**いた。
+ *
+ *   v     値 (符号は sgn が持つ)
+ *   base  2〜16
+ *   up    大文字で書く (%X)
+ *   sgn   先に出す符号の文字 ('-' / '+' / ' ')。0 なら出さない
+ *   alt   # 旗
+ *   prec  精度。-1 は指定なし。0 で値が 0 なら**桁を 1 つも書かない**
+ *   w     欄の幅   pad0  0 で詰める   left  左詰め
+ *
+ * 返り値は実際に書いた文字数である。 */
+static int pout(FILE *f, unsigned long long v, unsigned base, int up,
+                int sgn, int alt, int prec, int w, int pad0, int left) {
+  char b[24];
+  int n;
+  int i;
+  int d;
+  int zeros;
+  int pfx;
+  int len;
+
+  n = 0;
+  if (v == 0ULL) {
+    /* 精度 0 の 0 は空である (C89 7.9.6.1)。ただし # 旗つきの 8 進は
+     * 下で 0 を 1 つ足す */
+    if (prec != 0) { b[0] = '0'; n = 1; }
+  }
+  while (v != 0ULL) {
+    d = (int)(v % (unsigned long long)base);
+    if (d < 10) b[n] = (char)('0' + d);
+    else b[n] = (char)((up ? 'A' : 'a') + d - 10);
+    v = v / (unsigned long long)base;
+    n = n + 1;
+  }
+
+  zeros = 0;
+  if (prec > n) zeros = prec - n;
+  pfx = 0;
+  if (alt && base == 16 && n > 0) pfx = 2;     /* 0x / 0X。0 には付けない */
+  if (alt && base == 8 && zeros == 0 && (n == 0 || b[n - 1] != '0'))
+    zeros = 1;                                 /* 先頭を 0 にする */
+
+  len = n + zeros + pfx;
+  if (sgn) len = len + 1;
+
+  /* 空白詰めは符号より前，0 詰めは符号より後ろ。**精度が指定された
+   * 整数変換では 0 旗は効かない** (C89 7.9.6.1) */
+  if (left || prec >= 0) pad0 = 0;
+  i = len;
+  if (!left && !pad0) { while (i < w) { emitc(f, ' '); i = i + 1; } }
+  if (sgn) emitc(f, sgn);
+  if (pfx) { emitc(f, '0'); emitc(f, up ? 'X' : 'x'); }
+  if (pad0) { while (i < w) { emitc(f, '0'); i = i + 1; } }
+  while (zeros > 0) { emitc(f, '0'); zeros = zeros - 1; }
+  while (n > 0) { n = n - 1; emitc(f, b[n]); }
+  if (left) { while (i < w) { emitc(f, ' '); i = i + 1; } }
+  return i;
+}
+
+/* ================= 浮動小数点を字にする =================
+ *
+ * **第 22 世代は `%g` と `%e` を `%f` と同じに扱っていた** ——
+ * `%.6g` が `3.141590` になる。C89 7.9.6.1 は 3 つを別の形と定める。
+ * 丸めも 0 から遠い側へ倒していたので，`%.0f` の 2.5 が 3 になる
+ * (ホストは偶数側)。どちらも「動くが違う」である
+ * (docs/stage017-gcc.md 6.3)。
+ *
+ * 作りは `stage017/awkfmt1.c` と同じである —— あちらは libc に無いので
+ * awk の側で持っていたもので，本来の置き場はここである。
+ */
+
+/* 10^0 .. 10^22 は double で**正確に**表せる。ここまでは掛けても
+ * 誤差が入らないので，桁寄せを 1 回の掛け算で済ませられる */
+static double fpw10[23];
+static double fp10[9];
+static int fpinit;
+
+static int fpsetup(void) {
+  int i;
+  if (fpinit) return 0;
+  fpw10[0] = 1.0;
+  for (i = 1; i < 23; i = i + 1) fpw10[i] = fpw10[i - 1] * 10.0;
+  fp10[0] = 1e1;
+  for (i = 1; i < 9; i = i + 1) fp10[i] = fp10[i - 1] * fp10[i - 1];
+  fpinit = 1;
+  return 0;
+}
+
+/* a * b の丸め誤差を正確に求める (Dekker)。**半端の判定に要る** ——
+ * 2.45 は 2 進では 2.45 より僅かに大きいので `%.1f` は 2.5 になるべき
+ * だが，2.45 * 10 を素直に計算すると丁度 24.5 に丸まって「半端」に
+ * 見えてしまい，偶数丸めで 2.4 になる */
+static double fprderr(double a, double b, double p) {
+  double c;
+  double ahi;
+  double alo;
+  double bhi;
+  double blo;
+  c = 134217729.0 * a;          /* 2^27 + 1 */
+  ahi = c - (c - a);
+  alo = a - ahi;
+  c = 134217729.0 * b;
+  bhi = c - (c - b);
+  blo = b - bhi;
+  return ((ahi * bhi - p) + ahi * blo + alo * bhi) + alo * blo;
+}
+
+/* v * 10^k を整数へ丸める。**半端は偶数へ** (ホストの printf と同じ) */
+static unsigned long long fpscale(double v, int k) {
+  double t;
+  double err;
+  double frac;
+  unsigned long long n;
+  err = 0;
+  if (k >= 0 && k <= 22) {
+    t = v * fpw10[k];
+    err = fprderr(v, fpw10[k], t);
+  } else if (k >= 0) {
+    t = v;
+    while (k > 22) { t = t * fpw10[22]; k = k - 22; }
+    t = t * fpw10[k];
+  } else {
+    int m;
+    m = 0 - k;
+    t = v;
+    while (m > 22) { t = t / fpw10[22]; m = m - 22; }
+    t = t / fpw10[m];
+  }
+  n = (unsigned long long)t;
+  frac = (t - (double)n) + err;
+  if (frac > 0.5) n = n + 1;
+  else if (frac == 0.5) { if (n % 2 == 1) n = n + 1; }
+  return n;
+}
+
+/* v (> 0) の上位 nsig 桁を digs に入れ，先頭桁の 10 の冪を *ex に返す */
+static int fpdigits(double v, int nsig, char *digs, int *ex) {
+  int e;
+  int i;
+  int k;
+  double w;
+  unsigned long long n;
+  unsigned long long lim;
+  fpsetup();
+  e = 0;
+  w = v;
+  for (i = 8; i >= 0; i = i - 1) {
+    while (w >= fp10[i]) { w = w / fp10[i]; e = e + (1 << i); }
+  }
+  for (i = 8; i >= 0; i = i - 1) {
+    while (w * fp10[i] < 10.0) { w = w * fp10[i]; e = e - (1 << i); }
+  }
+  if (w >= 10.0) e = e + 1;
+  if (nsig > 18) nsig = 18;
+  lim = 1;
+  for (i = 0; i < nsig; i = i + 1) lim = lim * 10;
+  n = fpscale(v, nsig - 1 - e);
+  if (n >= lim) { e = e + 1; n = fpscale(v, nsig - 1 - e); }
+  if (n < lim / 10) { e = e - 1; n = fpscale(v, nsig - 1 - e); }
+  if (n >= lim) { n = n / 10; e = e + 1; }
+  for (i = nsig - 1; i >= 0; i = i - 1) {
+    k = (int)(n % 10);
+    n = n / 10;
+    digs[i] = (char)('0' + k);
+  }
+  digs[nsig] = 0;
+  *ex = e;
+  return 0;
+}
+
+static int fpput(char *out, int at, int c) {
+  out[at] = (char)c;
+  return at + 1;
+}
+
+/* 符号なしの整数を字にする (桁寄せの結果を並べるのに使う) */
+static int fpint(unsigned long long v, char *out) {
+  char tmp[24];
+  int n;
+  int i;
+  n = 0;
+  if (v == 0) { tmp[n] = '0'; n = 1; }
+  while (v > 0) { tmp[n] = (char)('0' + (int)(v % 10)); v = v / 10; n = n + 1; }
+  for (i = 0; i < n; i = i + 1) out[i] = tmp[n - 1 - i];
+  out[n] = 0;
+  return n;
+}
+
+/* **精度の上限。** 書式の精度 (`%.*e` の `*` も含む) はそのまま digs と
+ * 出力の添字になるので，青天井だと器の外へ書く。fpf は整数部が最大
+ * 309 桁になるので 309 + 1 + PRECMAX + 1 が出力の器 (512) に収まる値を
+ * 採る。**18 桁を超える所は元から 0 で埋める約束**なので (6.3 の限界)，
+ * ここを超える精度に意味は無い */
+#define FPPRECMAX 180
+
+/* 無限と NaN。**桁寄せの輪に入れてはいけない** —— w を fp10 で割っても
+ * 無限のままなので回り続ける。ホスト (glibc) と同じ字を出す */
+static int fpspecial(double v, int up, char *out) {
+  char *s;
+  int n;
+  int i;
+  n = 0;
+  if (v != v) {
+    s = up ? "NAN" : "nan";
+  } else if (v != 0.0 && v * 0.5 == v) {
+    if (v < 0) { out[n] = '-'; n = n + 1; }
+    s = up ? "INF" : "inf";
+  } else {
+    return 0 - 1;                      /* ふつうの数である */
+  }
+  for (i = 0; s[i]; i = i + 1) { out[n] = s[i]; n = n + 1; }
+  out[n] = 0;
+  return n;
+}
+
+/* 指数の形 (d.ddde±XX) */
+static int fpe(double v, int prec, int up, int alt, char *out) {
+  char digs[FPPRECMAX + 4];
+  int e;
+  int i;
+  int n;
+  int ae;
+  n = 0;
+  if (v < 0) { out[n] = '-'; n = n + 1; v = 0.0 - v; }
+  if (v == 0.0) {
+    e = 0;
+    for (i = 0; i <= prec; i = i + 1) digs[i] = '0';
+    digs[prec + 1] = 0;
+  } else {
+    fpdigits(v, prec + 1, digs, &e);
+    /* fpdigits は有効 18 桁で打ち切る (6.3 の限界)。**その先を
+     * 読ませない** —— 埋めないと器の中の古い値がそのまま字になる */
+    i = 0;
+    while (i <= prec && digs[i] != 0) i = i + 1;
+    while (i <= prec) { digs[i] = '0'; i = i + 1; }
+    digs[prec + 1] = 0;
+  }
+  n = fpput(out, n, digs[0]);
+  if (prec > 0) {
+    n = fpput(out, n, '.');
+    for (i = 1; i <= prec; i = i + 1) n = fpput(out, n, digs[i]);
+  } else if (alt) {
+    /* # 旗は**小数点を残す** (C89 7.9.6.1) */
+    n = fpput(out, n, '.');
+  }
+  n = fpput(out, n, up ? 'E' : 'e');
+  if (e < 0) { n = fpput(out, n, '-'); ae = 0 - e; }
+  else { n = fpput(out, n, '+'); ae = e; }
+  if (ae >= 100) {
+    n = fpput(out, n, '0' + ae / 100);
+    n = fpput(out, n, '0' + (ae / 10) % 10);
+    n = fpput(out, n, '0' + ae % 10);
+  } else {
+    n = fpput(out, n, '0' + ae / 10);
+    n = fpput(out, n, '0' + ae % 10);
+  }
+  out[n] = 0;
+  return n;
+}
+
+/* 小数の形 (ddd.ddd)。桁数が 18 に収まるなら**まるごと整数へ寄せて**
+ * 組む —— 丸めが fpscale の 1 か所だけになる */
+static int fpf(double v, int prec, int alt, char *out) {
+  char digs[24];
+  char body[64];
+  int e;
+  int i;
+  int n;
+  int nsig;
+  int ip;
+  int bl;
+  n = 0;
+  if (v < 0) { out[n] = '-'; n = n + 1; v = 0.0 - v; }
+  if (v == 0.0) {
+    n = fpput(out, n, '0');
+    if (prec > 0) {
+      n = fpput(out, n, '.');
+      for (i = 0; i < prec; i = i + 1) n = fpput(out, n, '0');
+    } else if (alt) {
+      n = fpput(out, n, '.');
+    }
+    out[n] = 0;
+    return n;
+  }
+  fpdigits(v, 1, digs, &e);
+  nsig = e + prec + 1;
+  if (nsig <= 18) {
+    unsigned long long u;
+    u = fpscale(v, prec);
+    bl = fpint(u, body);
+    if (bl <= prec) {
+      n = fpput(out, n, '0');
+      if (prec > 0) {
+        n = fpput(out, n, '.');
+        for (i = 0; i < prec - bl; i = i + 1) n = fpput(out, n, '0');
+        for (i = 0; i < bl; i = i + 1) n = fpput(out, n, body[i]);
+      } else if (alt) {
+        n = fpput(out, n, '.');
+      }
+      out[n] = 0;
+      return n;
+    }
+    for (i = 0; i < bl - prec; i = i + 1) n = fpput(out, n, body[i]);
+    if (prec > 0) {
+      n = fpput(out, n, '.');
+      for (i = bl - prec; i < bl; i = i + 1) n = fpput(out, n, body[i]);
+    } else if (alt) {
+      n = fpput(out, n, '.');
+    }
+    out[n] = 0;
+    return n;
+  }
+  /* 18 桁に収まらない。上位 18 桁だけを数え，残りは 0 で埋める ——
+   * ホストは 2 進の値を正確に十進へ展開するので，ここから先は
+   * 一致しない (docs/stage017-gcc.md 6.3 に註がある) */
+  nsig = 18;
+  fpdigits(v, nsig, digs, &e);
+  ip = e + 1;
+  if (ip <= 0) {
+    n = fpput(out, n, '0');
+  } else {
+    for (i = 0; i < ip; i = i + 1) {
+      if (i < nsig) n = fpput(out, n, digs[i]);
+      else n = fpput(out, n, '0');
+    }
+  }
+  if (prec > 0) {
+    n = fpput(out, n, '.');
+    for (i = 0; i < prec; i = i + 1) {
+      int k;
+      k = ip + i;
+      if (k < 0 || k >= nsig) n = fpput(out, n, '0');
+      else n = fpput(out, n, digs[k]);
+    }
+  } else if (alt) {
+    n = fpput(out, n, '.');
+  }
+  out[n] = 0;
+  return n;
+}
+
+/* %g。指数が小さすぎるか大きすぎれば e の形，そうでなければ f の形。
+ * **末尾の 0 を落とす**のが %g の要点である (# 旗があれば落とさない) */
+static int fpg(double v, int prec, int up, int alt, char *out) {
+  char tmp[512];
+  char digs[24];
+  int e;
+  int n;
+  int i;
+  int dot;
+  if (prec == 0) prec = 1;
+  if (v == 0.0) {
+    e = 0;
+  } else {
+    fpdigits(v < 0 ? 0.0 - v : v, prec, digs, &e);
+  }
+  if (e < 0 - 4 || e >= prec) n = fpe(v, prec - 1, up, alt, tmp);
+  else n = fpf(v, prec - 1 - e, alt, tmp);
+  if (!alt) {
+    int epos;
+    int last;
+    epos = 0 - 1;
+    for (i = 0; i < n; i = i + 1) {
+      if (tmp[i] == 'e' || tmp[i] == 'E') { epos = i; break; }
+    }
+    dot = 0 - 1;
+    for (i = 0; i < n; i = i + 1) {
+      if (tmp[i] == '.') { dot = i; break; }
+    }
+    if (dot >= 0) {
+      last = (epos < 0) ? n : epos;
+      while (last > dot + 1 && tmp[last - 1] == '0') last = last - 1;
+      if (last == dot + 1) last = dot;
+      if (epos < 0) {
+        tmp[last] = 0;
+        n = last;
+      } else {
+        int j;
+        j = 0;
+        while (epos + j <= n) { tmp[last + j] = tmp[epos + j]; j = j + 1; }
+        n = last + (n - epos);
+        tmp[n] = 0;
+      }
+    }
+  }
+  for (i = 0; i <= n; i = i + 1) out[i] = tmp[i];
+  return n;
+}
+
+/* 組んだ本体を旗と幅に従って書き出す。**符号と詰め物の順**は整数の側
+ * (pout) と同じ規則である —— 空白の詰め物は符号より前，0 の詰め物は
+ * 符号の後ろ */
+static int pdbl(FILE *f, char *body, int w, int pad0, int left,
+                int plus, int space) {
+  int bl;
+  int i;
+  int sgn;
+  int total;
+  int pad;
+  int n;
+  bl = 0;
+  while (body[bl]) bl = bl + 1;
+  sgn = 0;
+  if (body[0] == '-') sgn = '-';
+  else if (plus) sgn = '+';
+  else if (space) sgn = ' ';
+  total = bl + (sgn && body[0] != '-' ? 1 : 0);
+  pad = w - total;
+  if (pad < 0) pad = 0;
+  n = 0;
+  if (!left && !pad0) { while (pad > 0) { emitc(f, ' '); n = n + 1; pad = pad - 1; } }
+  if (sgn) {
+    emitc(f, sgn);
+    n = n + 1;
+    if (body[0] == '-') { i = 1; } else { i = 0; }
+  } else {
+    i = 0;
+  }
+  if (!left && pad0) { while (pad > 0) { emitc(f, '0'); n = n + 1; pad = pad - 1; } }
+  while (body[i]) { emitc(f, body[i]); n = n + 1; i = i + 1; }
+  if (left) { while (pad > 0) { emitc(f, ' '); n = n + 1; pad = pad - 1; } }
+  return n;
+}
+
+/* 実装する変換は %d %i %u %o %x %X %c %s %p %% と，旗 (- 0 + 空白 #)，
+ * 幅，精度，長さ修飾 (h は int へ格上げされて届くので読み捨て，l は
+ * long == int なので同じ，ll は 64 bit)。
+ *
+ * **第 21 世代との差はすべて，ホストと突き合わせて出たものである**
+ * (docs/stage017-gcc.md 5.3)。とくに旗は，知らない文字を「普通の字」
+ * として書き出していたので，`%+d` が "+d" になったうえ**可変部を
+ * 取り出さないまま次へ進み**，同じ printf の残りの引数がすべてずれた。 */
+static int vfpr(FILE *f, char *fmt, va_list ap) {
+  int i;
+  int w;
+  int pad0;
+  int left;
+  int plus;
+  int space;
+  int alt;
+  int sgn;
+  int v;
+  char *s;
+  int cnt;
+  int n;
+  int k;
+  int up;
+  int prec;
+  int nl;
+  int c;
+  long long lv;
+  unsigned long long uv;
+
+  cnt = 0;
+  i = 0;
+  while (fmt[i]) {
+    if (fmt[i] != '%') { emitc(f, fmt[i]); cnt = cnt + 1; i = i + 1; continue; }
+    i = i + 1;
+    left = 0;
+    pad0 = 0;
+    plus = 0;
+    space = 0;
+    alt = 0;
+    while (fmt[i] == '-' || fmt[i] == '0' || fmt[i] == '+'
+           || fmt[i] == ' ' || fmt[i] == '#') {
+      if (fmt[i] == '-') left = 1;
+      else if (fmt[i] == '0') pad0 = 1;
+      else if (fmt[i] == '+') plus = 1;
+      else if (fmt[i] == ' ') space = 1;
+      else alt = 1;
+      i = i + 1;
+    }
+    w = 0;
+    if (fmt[i] == '*') { w = va_arg(ap, int); i = i + 1; if (w < 0) { left = 1; w = 0 - w; } }
+    else while (fmt[i] >= '0' && fmt[i] <= '9') { w = w * 10 + (fmt[i] - '0'); i = i + 1; }
+    /* 精度。%s では最大長，%f では小数の桁数，整数では最小の桁数 */
+    prec = 0 - 1;
+    if (fmt[i] == '.') {
+      i = i + 1;
+      prec = 0;
+      if (fmt[i] == '*') { prec = va_arg(ap, int); i = i + 1; }
+      else while (fmt[i] >= '0' && fmt[i] <= '9') { prec = prec * 10 + (fmt[i] - '0'); i = i + 1; }
+      if (prec < 0) prec = 0 - 1;   /* * が負なら「指定なし」と同じ */
+    }
+    /* l は 1 個なら int と同じ幅。2 個 (ll) は 64 bit (第 4 部)。
+     * h / hh は既定の格上げで int になって届くので読み捨てる */
+    nl = 0;
+    while (fmt[i] == 'l') { nl = nl + 1; i = i + 1; }
+    while (fmt[i] == 'h') i = i + 1;
+    c = fmt[i];
+
+    /* 符号つき整数 */
+    if (c == 'd' || c == 'i') {
+      if (nl >= 2) lv = va_arg(ap, long long);
+      else lv = (long long)va_arg(ap, int);
+      sgn = 0;
+      if (lv < 0) sgn = '-';
+      else if (plus) sgn = '+';
+      else if (space) sgn = ' ';
+      /* 最小値は符号を反転できないので符号なしのまま扱う */
+      if (lv < 0) uv = 0ULL - (unsigned long long)lv;
+      else uv = (unsigned long long)lv;
+      cnt = cnt + pout(f, uv, 10, 0, sgn, 0, prec, w, pad0, left);
+      i = i + 1;
+      continue;
+    }
+    /* 符号なし整数。+ と空白の旗は符号つきにしか効かない (C89) */
+    if (c == 'u' || c == 'o' || c == 'x' || c == 'X' || c == 'p') {
+      k = 10;
+      up = 0;
+      if (c == 'o') k = 8;
+      else if (c != 'u') k = 16;
+      if (c == 'X') up = 1;
+      if (nl >= 2) uv = va_arg(ap, unsigned long long);
+      else uv = (unsigned long long)va_arg(ap, unsigned);
+      cnt = cnt + pout(f, uv, (unsigned)k, up, 0, c == 'u' ? 0 : alt,
+                       prec, w, pad0, left);
+      i = i + 1;
+      continue;
+    }
+    if (c == 'f' || c == 'F' || c == 'g' || c == 'G' || c == 'e' || c == 'E') {
+      /* 可変部の float は double へ格上げされて届く (cc15k)。
+       * **3 つは別の形である** —— 第 22 世代はすべて %f で出していた */
+      char fb[512];
+      double dv;
+      if (prec < 0) prec = 6;
+      if (prec > FPPRECMAX) prec = FPPRECMAX;
+      dv = va_arg(ap, double);
+      /* **無限と NaN を先に捌く。** 桁寄せの輪は無限では終わらない */
+      if (fpspecial(dv, (c == 'E' || c == 'F' || c == 'G'), fb) < 0) {
+        if (c == 'e' || c == 'E') fpe(dv, prec, c == 'E', alt, fb);
+        else if (c == 'f' || c == 'F') fpf(dv, prec, alt, fb);
+        else fpg(dv, prec, c == 'G', alt, fb);
+      }
+      cnt = cnt + pdbl(f, fb, w, pad0, left, plus, space);
+      i = i + 1;
+      continue;
+    }
+    if (fmt[i] == 'c') {
+      /* %c も欄の幅を持てる (C89 7.9.6.1)。%s と同じ扱いにする */
+      k = 0;
+      if (!left) { while (1 + k < w) { emitc(f, ' '); k = k + 1; } }
+      emitc(f, va_arg(ap, int));
+      if (left) { while (1 + k < w) { emitc(f, ' '); k = k + 1; } }
+      cnt = cnt + 1 + k;
+    } else if (fmt[i] == 's') {
+      s = va_arg(ap, char *);
+      n = 0;
+      while (s[n]) n = n + 1;
+      if (prec >= 0 && n > prec) n = prec;
+      k = 0;
+      if (!left) { while (n + k < w) { emitc(f, ' '); k = k + 1; } }
+      v = 0;
+      while (v < n) { emitc(f, s[v]); v = v + 1; }
+      if (left) { while (n + k < w) { emitc(f, ' '); k = k + 1; } }
+      cnt = cnt + n + k;
+    } else if (fmt[i] == '%') {
+      emitc(f, '%');
+      cnt = cnt + 1;
+    } else {
+      emitc(f, fmt[i]);
+      cnt = cnt + 1;
+    }
+    i = i + 1;
+  }
+  return cnt;
+}
+
+int vfprintf(FILE *f, char *fmt, va_list ap) {
+  return vfpr(f, fmt, ap);
+}
+
+int vsprintf(char *buf, char *fmt, va_list ap) {
+  int n;
+  cap = buf;
+  caplim = 0 - 1;
+  n = vfpr(NULL, fmt, ap);
+  *cap = 0;
+  cap = NULL;
+  return n;
+}
+
+/* n には終端の 0 を含む (C99 の snprintf の規則)。返り値は
+ * 「入り切ったとしたら書いた長さ」で，切り詰めの検出に使える */
+int vsnprintf(char *buf, size_t size, char *fmt, va_list ap) {
+  int n;
+  if (size == 0) {
+    static char sink;
+    int m;
+    cap = &sink;                /* 書かずに数えるだけ (caplim = 0) */
+    caplim = 0;
+    m = vfpr(NULL, fmt, ap);
+    cap = NULL;
+    caplim = 0 - 1;
+    return m;
+  }
+  cap = buf;
+  caplim = (int)size - 1;
+  n = vfpr(NULL, fmt, ap);
+  *cap = 0;
+  cap = NULL;
+  caplim = 0 - 1;
+  return n;
+}
+
+int snprintf(char *buf, size_t size, char *fmt, ...) {
+  va_list ap;
+  int n;
+  va_start(ap, fmt);
+  n = vsnprintf(buf, size, fmt, ap);
+  va_end(ap);
+  return n;
+}
+
+int sprintf(char *buf, char *fmt, ...) {
+  va_list ap;
+  int n;
+  va_start(ap, fmt);
+  n = vsprintf(buf, fmt, ap);
+  va_end(ap);
+  return n;
+}
+
+int fprintf(FILE *f, char *fmt, ...) {
+  va_list ap;
+  int n;
+  va_start(ap, fmt);
+  n = vfpr(f, fmt, ap);
+  va_end(ap);
+  return n;
+}
+
+int printf(char *fmt, ...) {
+  va_list ap;
+  int n;
+  va_start(ap, fmt);
+  n = vfpr(stdout, fmt, ap);
+  va_end(ap);
+  return n;
+}
+
+/* ---- 第 4 部: 位置つきの入出力 ---- */
+
+/* lseek の宣言はここに置いていたが，**どのヘッダにも無かった**ので
+ * 読む側 (zlib) が暗黙の int 宣言になっていた。第 21 世代で unistd.h に
+ * 移した (docs/stage017-cc.md 32.3) */
+
+long ftell(FILE *f)
+{
+    long p;
+    p = lseek(f->fd, 0, SEEK_CUR);
+    if (p < 0)
+        return p;
+    if (f->back >= 0)
+        return p - 1;           /* 押し戻した 1 文字ぶん手前にいる */
+    return p;
+}
+
+int fseek(FILE *f, long off, int whence)
+{
+    f->eof = 0;
+    f->back = -1;               /* ungetc の押し戻しは捨てる */
+    if (lseek(f->fd, off, whence) < 0)
+        return 0 - 1;
+    return 0;
+}
+
+/* 既に開いている fd を FILE で包む。fopen と同じ表から空きを取る */
+FILE *fdopen(int fd, char *mode)
+{
+    int k;
+    __stdfile(0);
+    if (fd < 0)
+        return NULL;
+    /* 0 / 1 / 2 は UART で，位置を持たない。**追記の印は立てない** ——
+     * 立てると書くたびに lseek が失敗する (第 21 世代) */
+    if (fd < 3)
+        return &files[fd];
+    for (k = 3; k < NFILE; k++) {
+        if (files[k].fd < 0) {
+            files[k].fd = fd;
+            files[k].back = -1;
+            files[k].eof = 0;
+            files[k].err = 0;
+            /* **印は mode で決める。** fclose は fd を -1 にするだけ
+             * なので，追記の流れが閉じた枠には app = 1 が残る。
+             * 落とさないと次にこの枠を取った流れが末尾へ寄せてしまう。
+             * かといって落とすだけだと fdopen(fd, "a") が追記に
+             * ならない —— **どちらも黙って誤る形である** (第 21 世代) */
+            files[k].app = (mode != 0 && mode[0] == 'a');
+            return &files[k];
+        }
+    }
+    return NULL;
+}
