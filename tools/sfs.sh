@@ -33,7 +33,7 @@ pack() {
     datastart=$((TBLOFF + cnt * ENTSZ))
     [ "$datastart" -lt "$size" ] || die "size too small for $cnt entries"
 
-    # 0 で満たした器 (スパース) を作り，スーパーブロックを書く
+    # ゼロで初期化したスパースファイルを作り，スーパーブロックを書く
     rm -f "$img"
     dd if=/dev/null of="$img" bs=1 seek="$size" 2>/dev/null
     printf 'sfs1' | dd of="$img" bs=4 conv=notrunc 2>/dev/null

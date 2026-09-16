@@ -628,7 +628,7 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
     overflow-wrap: anywhere;    /* 期待値は切れ目の無い長い列である */
 }
 
-/* ---- ターミナルの筋書き選択 ---- */
+/* ---- ターミナルの実行シナリオ選択 ---- */
 .term-scenarios { display: flex; flex-wrap: wrap; gap: 6px; }
 .term-scen {
     background: var(--bg2);

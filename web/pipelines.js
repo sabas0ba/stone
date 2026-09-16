@@ -168,7 +168,7 @@ export const PIPELINES = {
 
 // OS 世代のターミナル。kernel + sfs で起動し，UART をそのまま端末へつなぐ。
 // files: {name, asset} は成果物をそのまま，{name, build} はその場で
-// コンパイルして sfs へ置く (どちらも本物のチェーン成果物で処理する)。
+// コンパイルして sfs へ置く (どちらもビルドチェーンの成果物で処理する)。
 // samples は「入力欄へ先置きする一連のコマンド」(Enter は利用者が押す)。
 const LIBC12 = ['ctype.h', 'errno.h', 'fcntl.h', 'limits.h', 'stdarg.h',
     'stddef.h', 'stdio.h', 'stdlib.h', 'string.h', 'unistd.h'];
@@ -290,7 +290,7 @@ export const TERMINALS = {
             { cmd: 'q', note: 'q again confirms — the shell resumes reading the same input' },
             { cmd: 'bundle hi.c > hi.b', note: 'guest build: bundle the source' },
             { cmd: 'pp < hi.b > hi.i', note: 'preprocess' },
-            { cmd: 'cc < hi.i > hi.o', note: 'compile with the real bootstrapped cc' },
+            { cmd: 'cc < hi.i > hi.o', note: 'compile with cc built by the bootstrap chain' },
             { cmd: 'ldin E hi.o > hi.ld', note: 'assemble the linker input (E = executable)' },
             { cmd: 'ld < hi.ld > hi', note: 'link' },
             { cmd: 'hi', note: 'run what you just built (exits with 7)' },
@@ -299,7 +299,7 @@ export const TERMINALS = {
             { cmd: 'ldin F cc12.o > cc12.ld', note: 'linker input (F = flat binary)' },
             { cmd: 'ld < cc12.ld > cc10l.bin', note: 'byte-identical to the chain artifact — download it below after exit' },
             { cmd: 'mk -f mkfile all', note: 'optional: mk rebuilds pp / cc / ld from cc8.o (slow — about a minute)' },
-            { cmd: 'exit 0', note: 'end the session and harvest the files' },
+            { cmd: 'exit 0', note: 'end the session and list the files for download' },
         ],
     },
     // Stage 15: 64 bit と浮動小数点が **libc の上で** 効くところを見せる。
@@ -345,7 +345,7 @@ export const TERMINALS = {
     stage016: {
         mode: 'boot',
         fs: 2,                  // sfs2 (ディレクトリを持つ)
-        note: 'Three generations, three things to see. Each program below is the exact probe '
+        note: 'Compare path resolution, directory operations, and memory allocation. Each program is the probe '
             + 'that tests/stage016 runs under QEMU; here it is compiled in your browser by '
             + 'pp16 → cc15p → ld16, packed into an **sfs2** image, and booted. Every line is '
             + '`label expected actual` — so a mismatch is visible without a diff.',
@@ -358,7 +358,7 @@ export const TERMINALS = {
                 maxEntries: 128,
                 blurb: 'sfs2 gives entries a **kind** and a **parent**, so a path is walked one '
                     + 'component at a time. Note `/src/one.c` and `/inc/one.c`: the same name in '
-                    + 'two directories, which the old flat sfs could not even represent.',
+                    + 'two directories. sfs2 resolves each path using parent-directory entries.',
                 files: [
                     { name: 'top.txt', text: 'TOP\n' },
                     { name: 'src/one.c', text: 'SRC-ONE\n' },
@@ -382,7 +382,7 @@ export const TERMINALS = {
                 maxEntries: 128,
                 blurb: 'Listing, creating and moving. It must be linked against **libc16**, not '
                     + 'libc15: libc15\'s `open` strips leading slashes, which was correct while '
-                    + 'the namespace was flat and silently wrong the moment there is a cwd. Watch '
+                    + 'only the root directory existed, but misinterprets absolute paths after chdir. See '
                     + 'the tree below the terminal — `out/` and `out/f.txt` are made by the program.',
                 files: [
                     { name: 'top.txt', text: 'TOP\n' },

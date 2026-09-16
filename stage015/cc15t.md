@@ -38,10 +38,10 @@ declaration-specifiers:
       else if (tok == k_int) { bas = 1; next(); }
 ```
 
-## 見つかり方: zlib を我々の器で訳した
+## 見つかり方: zlib を stone の処理系で訳した
 
 [docs/stage017-gcc.md](../docs/stage017-gcc.md) 5.1 の測定である。
-`zlib` 14 単位 + `bzip2` 8 単位を，**我々の OS の上で我々の cc19 +
+`zlib` 14 単位 + `bzip2` 8 単位を，**stone の OS の上で我々の cc19 +
 cc15s に**訳させた。22 単位のうち通らなかったのは 1 つ ——
 `zlib/gzread.c` だけだった。
 

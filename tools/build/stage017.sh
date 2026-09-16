@@ -43,7 +43,7 @@ build_stage017() {
     # 同じものにする
     cmdlink cc15scmd cc15s
     # 第 20 世代。宣言指定子の途中に来る型修飾子 (unsigned const char)。
-    # zlib を我々の器で訳して出た穴で，これが最前線である
+    # zlib を stone の処理系で訳して出た穴で，これが最前線である
     # (docs/stage017-gcc.md 5.1)
     cmdlink cc15tcmd cc15t
     # 第 21 世代。複合代入の符号 (5.1)。これが最前線である

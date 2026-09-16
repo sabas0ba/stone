@@ -1015,7 +1015,7 @@ int elfok(int i) {
     pva = ld4(src + e + 8);
     fsz = ld4(src + e + 16);
     msz = ld4(src + e + 20);
-    if (fsz > msz) return 0;                    /* 中身が器より大きい */
+    if (fsz > msz) return 0;                    /* ファイル上のサイズがメモリ上のサイズを超える */
     if (poff > flen || flen - poff < fsz) return 0;   /* 中身がファイルの外 */
     if (msz > UBRKMAX - UBASE) return 0;        /* ユーザ領域より大きい */
     if (pva < UBASE) return 0;                  /* 載せ先が下に外れる */

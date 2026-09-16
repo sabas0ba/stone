@@ -1,12 +1,12 @@
 #!/bin/sh
-# tcc を**我々の鎖で**ビルドする (Stage 15 第 6 部)。
+# tcc を**stone のビルドチェーンで**ビルドする (Stage 15 第 6 部)。
 #
 #   tcc-stone.sh t1     T1 を作る (pp16 -> cc15p -> ld16)。tmp/s16/tcc1.bin
 #   tcc-stone.sh run    T1 を OS 上で走らせて in.c を翻訳し，ホストの
 #                       riscv32-tcc の出力と突き合わせる
 #
 # tools/tcc.sh (ホストの gcc で作る開発道具) とは別物である。こちらは
-# **ブートストラップ鎖の一部**であり，入力は我々の処理系の成果物だけ。
+# **ブートストラップのビルドチェーンの一部**であり，入力は我々の処理系の成果物だけ。
 #
 # 素材は docs/external/tcc に要る (無ければ tools/fetch.sh tcc)。
 # patch を当てた木は tmp/tcc/src (tools/tcc.sh src が作る)。
@@ -279,7 +279,7 @@ do_t2() {
         && echo "一致した" >&2 || echo "まだ食い違う (12.12)" >&2
 }
 
-# tccH (ホストの交差 tcc が作った，我々の OS 用の tcc) を OS の上で
+# tccH (ホストの交差 tcc が作った， stone の OS 用の tcc) を OS の上で
 # 走らせる。**これは鎖の検査ではない。** 実行環境 (start.S・libc15・
 # kernel16 の ELF 読み・libtcc1 相当) が揃っているかだけを見る対照で
 # ある。ここが通れば，T2 が動かないときの原因は我々の cc に絞れる。

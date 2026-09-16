@@ -1,6 +1,6 @@
 /* signal.h --- シグナル (第 21 世代。**中身は無い**)
  *
- * **我々の OS にシグナルは無い。** それでも実物はこのヘッダを読む ——
+ * **stone の OS にシグナルは無い。** それでも実物はこのヘッダを読む ——
  * bzip2 の bzip2.c 53 行が読み，1808 行で
  *
  *     signal (SIGSEGV, mySIGSEGVorSIGBUScatcher);

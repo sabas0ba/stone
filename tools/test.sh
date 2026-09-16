@@ -67,7 +67,7 @@ git show HEAD:tools/env.sh 2> /dev/null | grep -q '"${STONE_ENGINE:-}" = host'
 report $? "env: ホスト実行パッチが commit されていない (docs/dev-notes.md 1.2)"
 overall_fail=$fail
 
-# ブートストラップ鎖はここで一度だけ作る。各 Stage のテストは
+# ブートストラップのビルドチェーンはここで一度だけ作る。各 Stage のテストは
 # STONE_PREBUILT を見て作り直しを省く (tests/lib.sh の ensure_build)。
 # ビルド再現の検査 (生成物の SHA-256 と .md の照合) は各 Stage が従来どおり行う
 echo "== build =="
@@ -88,14 +88,14 @@ export STONE_PREBUILT=1
 #
 # ビルドと同じ考え方をテストにも入れる。**入力が前回と一致し，前回
 # 通っている Stage は飛ばす。** 入力は「その Stage の検査一式
-# (tests/<stage>/**)」「共通の tests/lib.sh」「鎖の全ソース (stage*/**)」
+# (tests/<stage>/**)」「共通の tests/lib.sh」「ビルドチェーンの全ソース (stage*/**)」
 # 「生成物のスタンプ (tmp/build/*.stamp)」である。生成物のスタンプには
 # すべての成果物の SHA-256 が入っているので，成果物が 1 バイトでも
 # 変われば鍵が変わる。
 #
 # 健全性の根拠はビルドの決定性と同じである (docs/dev-notes.md 1.3)。
 #
-# 鎖のソースは**その Stage 以下の番号のものだけ**を入れる。当初は
+# ビルドチェーンのソースは**その Stage 以下の番号のものだけ**を入れる。当初は
 # 絞らず全部入れていたが，それだと**新しい Stage を 1 つ足すだけで
 # 全 Stage のキャッシュが外れる** (Stage 16 を足したとき実際に
 # 000〜015 が全部走り直した)。各 Stage の検査が参照する stage ディレクトリ

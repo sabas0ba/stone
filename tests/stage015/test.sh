@@ -501,7 +501,7 @@ report $? "pp16: 既存のソースの前処理結果が pp15 と変わらない
 section "第 5 部: tcc に RV32 の対象を足す (docs/stage015-riscv32.md)"
 
 # 素材とホストの道具があるときだけ走る。ここで作るのは**ホストの gcc が
-# 作った tcc** であり，ブートストラップ鎖の一部ではない (tools/tcc.sh の
+# 作った tcc** であり，ブートストラップのビルドチェーンの一部ではない (tools/tcc.sh の
 # 頭の注意書き)。素材の無い環境 (CI) では飛ばす
 tccdir=docs/external/tcc
 if [ ! -d "$tccdir" ]; then
