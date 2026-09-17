@@ -311,7 +311,7 @@ work="$repo_root/tmp/g17u"
 # STONE_GCC17_LIBC で差し替えられる。stage015/libc はベアメタル実行側 ——
 # tools/diff17.sh の bare が測る器で，sys/ の下は time.h しか無い。
 # **どちらで測ったかで header の穴の数が変わる**ので明示する
-ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc22/include}
+ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc24/include}
 pp16=tmp/build/pp16.bin
 pp18=tmp/build/pp18
 cc15=tmp/build/cc15ac.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
@@ -792,7 +792,9 @@ units() {
     # 残すので，後から表だけを見ても基準を辿れる
     {
         printf 'source=%s\n' "$src_name"
-        printf 'libc=%s\n' "$ours"
+        # **リポジトリからの相対で書く。** 絶対経路を書くと，測った
+        # 機械の名前が記録に混じる (誰の家の下にあったかは基準ではない)
+        printf 'libc=%s\n' "$(echo "$ours" | sed "s|^$repo_root/||")"
         printf 'pp-engine=%s\n' "$PP_ENGINE"
         printf 'pp=%s\n' "$(case "$PP_ENGINE" in os) echo "$pp18 (OS)" ;; *) echo "$pp16" ;; esac)"
         printf 'cc=%s\n' "$cc15"
