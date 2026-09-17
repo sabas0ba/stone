@@ -1,8 +1,8 @@
 # source=gcc-4.7.4
-# libc=stage017/libc22/include
+# libc=stage017/libc24/include
 # pp-engine=os
 # pp=tmp/build/pp18 (OS)
-# cc=tmp/build/cc15ab.bin
+# cc=tmp/build/cc15ac.bin
 libiberty/regex	cap	pp 6
 libiberty/cplus-dem	ok	134920
 libiberty/cp-demangle	ok	140872
@@ -15,7 +15,7 @@ libiberty/concat	gap	1
 libiberty/cp-demint	ok	10068
 libiberty/crc32	ok	4664
 libiberty/dyn-string	ok	11684
-libiberty/fdmatch	decl	error: 'struct stat' has no member named 'st_dev'
+libiberty/fdmatch	ok	3880
 libiberty/fibheap	gap	5
 libiberty/filename_cmp	ok	1776
 libiberty/floatformat	ok	19876
@@ -23,13 +23,13 @@ libiberty/fnmatch	ok	7284
 libiberty/fopen_unlocked	ok	4456
 libiberty/getopt	ok	19932
 libiberty/getopt1	ok	1956
-libiberty/getpwd	decl	error: 'struct stat' has no member named 'st_ino'
+libiberty/getpwd	ok	5436
 libiberty/getruntime	hdr	sys/times.h -> decl	error: storage size of 'tms' isn't known
 libiberty/hashtab	gap	1
 libiberty/hex	ok	3964
 libiberty/lbasename	ok	4768
 libiberty/lrealpath	decl	error: '_PC_PATH_MAX' undeclared (first use in this function)
-libiberty/make-relative-prefix	ok	11040
+libiberty/make-relative-prefix	ok	11204
 libiberty/make-temp-file	ok	7484
 libiberty/objalloc	ok	4836
 libiberty/obstack	ok	9072
@@ -50,8 +50,8 @@ libiberty/stack-limit	ok	568
 libiberty/strerror	ok	9504
 libiberty/strsignal	ok	9004
 libiberty/timeval-utils	ok	1228
-libiberty/unlink-if-ordinary	decl	error: 'struct stat' has no member named 'st_mode'
-libiberty/xatexit	gap	1
+libiberty/unlink-if-ordinary	ok	3976
+libiberty/xatexit	ok	4332
 libiberty/xexit	ok	3916
 libiberty/xmalloc	gap	1
 libiberty/xmemdup	ok	4000
@@ -63,12 +63,12 @@ libcpp/directives	ok	87472
 libcpp/directives-only	ok	20236
 libcpp/errors	ok	19460
 libcpp/expr	ok	98872
-libcpp/files	decl	error: 'struct stat' has no member named 'st_mode'
+libcpp/files	ok	60492
 libcpp/identifiers	ok	19216
 libcpp/init	ok	31812
 libcpp/lex	ok	93368
 libcpp/line-map	ok	45268
-libcpp/macro	decl	error: 'struct stat' has no member named 'st_mtime'
+libcpp/macro	ok	85900
 libcpp/mkdeps	ok	16028
 libcpp/pch	ok	39272
 libcpp/symtab	ok	19552

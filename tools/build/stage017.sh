@@ -194,6 +194,29 @@ build_stage017() {
             -- libc23_run "$f" "$n"
     done
 
+    # libc の第 24 世代 (docs/stage017-gcc.md 8.5)。
+    #
+    # 差は include/sys/stat.h と posix/sys.c の 2 本で、**struct stat に
+    # st_dev / st_ino / st_mode / st_mtime を足した**ものである。
+    # GCC 4.7.4 の 5 単位がこの 4 つの欄で止まっていた。
+    #
+    # **4 つとも本当の値である** —— 埋め草は 1 つも無い。持っていない欄
+    # (所有者・許可ビット) は依然として構造体に無く、許可の macro も
+    # 定義していない。st_ino はカーネルの statat2 (502) が配る
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal; do
+        n=$(echo "$f" | tr / _)
+        step "l24_$n" "l24_$n.o" \
+            -- "stage017/libc24/$f.c" \
+               stage017/libc24/include/*.h \
+               stage017/libc24/include/sys/time.h \
+               stage017/libc24/include/sys/stat.h \
+               stage017/libc24/include/sys/types.h \
+               tmp/build/cc15ac.bin tmp/build/pp.bin \
+            -- libc24_run "$f" "$n"
+    done
+
     # ---- configure が使う道具 (docs/stage017-gcc.md 5.5〜5.9) ----
     #
     # GCC の configure は sed と awk が無ければ 1 行も進まない。
@@ -317,6 +340,15 @@ build_stage017() {
         -- stage017/kernel25.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
         -- kern17 kernel25 stage017/kernel25.c
+
+    # カーネルの第 26 世代。kernel25 との差は statat2 (502) の 1 本だけ
+    # (docs/stage017-gcc.md 8.5)。**79 の約束は変えていない** ——
+    # 4 語の器を渡している既存の実行形式を壊さないため、5 語を書く
+    # 新しい約束は新しい番号で配る
+    step kernel26 kernel26.bin \
+        -- stage017/kernel26.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin \
+        -- kern17 kernel26 stage017/kernel26.c
 }
 
 # カーネルを 1 つ作る (前置部は 'K')。stage016.sh の kern と同じ手だが，
@@ -353,6 +385,18 @@ libc23_run() {
     sh tools/env.sh qemu tmp/build/cc15ab.bin < "tmp/build/l23_$2.i" \
         > "tmp/build/l23_$2.o"
     echo "built tmp/build/l23_$2.o" >&2
+}
+
+libc24_run() {
+    sh tools/bundle.sh stage017/libc24/include/*.h \
+        "sys/time.h=stage017/libc24/include/sys/time.h" \
+        "sys/stat.h=stage017/libc24/include/sys/stat.h" \
+        "sys/types.h=stage017/libc24/include/sys/types.h" \
+        "stage017/libc24/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l24_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15ac.bin < "tmp/build/l24_$2.i" \
+        > "tmp/build/l24_$2.o"
+    echo "built tmp/build/l24_$2.o" >&2
 }
 
 # libc23 と最前線の器 (cc15ab) で組む OS プログラム。
@@ -519,7 +563,7 @@ cc17_run() {
 
 do_stage017() {
     run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd cc15abcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 pp18 mk17 mk18 mk19 mk20 stamp \
-        kernel23.bin kernel24.bin kernel25.bin \
+        kernel23.bin kernel24.bin kernel25.bin kernel26.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
         l19_posix_sys.o l19_posix_morecore.o l19_posix_stdio.o \
@@ -540,12 +584,17 @@ do_stage017() {
         l23_src_morecore.o l23_src_misc15.o \
         l23_posix_sys.o l23_posix_morecore.o l23_posix_stdio.o \
         l23_posix_assert.o l23_posix_dir.o l23_posix_signal.o \
+        l24_src_string.o l24_src_ctype.o l24_src_stdlib.o \
+        l24_src_morecore.o l24_src_misc15.o \
+        l24_posix_sys.o l24_posix_morecore.o l24_posix_stdio.o \
+        l24_posix_assert.o l24_posix_dir.o l24_posix_signal.o \
         sed1 sed2 sed3 re1.o re2.o sh3 sh4 sh5 awkfmt1.o awk1 \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc stage017/pp18.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
            stage017/mk20.c \
            stage017/kernel23.c stage017/kernel24.c stage017/kernel25.c \
+           stage017/kernel26.c \
            tests/stage017/user/stamp.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \
@@ -557,6 +606,8 @@ do_stage017() {
            stage017/libc22/src/*.c stage017/libc22/posix/*.c \
            stage017/libc23/include/*.h stage017/libc23/include/sys/*.h \
            stage017/libc23/src/*.c stage017/libc23/posix/*.c \
+           stage017/libc24/include/*.h stage017/libc24/include/sys/*.h \
+           stage017/libc24/src/*.c stage017/libc24/posix/*.c \
            stage017/sed1.c stage017/sed2.c stage017/sed3.c \
            stage017/re1.c stage017/re1.h stage017/re2.c stage017/re2.h \
            stage017/sh3.c stage017/sh4.c stage017/sh5.c \

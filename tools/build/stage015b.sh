@@ -97,6 +97,14 @@ build_stage015b() {
     # 表明にこの形を使う (docs/stage017-gcc.md 8.3 の 10)。
     # **ビルドチェーンの成果物は変わらない** —— 既存のソースにこの形は無い
     ccgen cc15ab cc15aa stage015/cc15ab.sc
+    # 第 29 世代。差分試験をコンパイラ側へ広げて出た 5 つ。無名の
+    # ビットフィールド・関数ポインタの配列・逆向きの添字を受けるように
+    # し，静的な初期化子のビットフィールドと関数ポインタ越しの 64 bit
+    # 返却を直した。後ろの 2 つは**通ったうえで値が違う** (bad) もので，
+    # cc15u と同じ族である (docs/stage017-gcc.md 8.8)。
+    # **ビルドチェーンの成果物は変わらない** —— 既存のソースはどの形も
+    # 使っていない。使っていないからこそ自分自身を組む限り表に出ない
+    ccgen cc15ac cc15ab stage015/cc15ac.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -120,14 +128,14 @@ do_stage015b() {
         cc15v0.bin cc15v.bin cc15w0.bin cc15w.bin \
         cc15x0.bin cc15x.bin cc15y0.bin cc15y.bin \
         cc15z0.bin cc15z.bin cc15aa0.bin cc15aa.bin \
-        cc15ab0.bin cc15ab.bin \
+        cc15ab0.bin cc15ab.bin cc15ac0.bin cc15ac.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
            stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
            stage015/cc15x.sc stage015/cc15y.sc stage015/cc15z.sc \
-           stage015/cc15aa.sc stage015/cc15ab.sc \
+           stage015/cc15aa.sc stage015/cc15ab.sc stage015/cc15ac.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh

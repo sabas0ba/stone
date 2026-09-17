@@ -41,7 +41,7 @@ cd "$repo_root"
 out=tmp/d17
 mkdir -p "$out"
 
-cc=${STONE_DIFF_CC:-tmp/build/cc15ab.bin}  # 最前線の世代で測る
+cc=${STONE_DIFF_CC:-tmp/build/cc15ac.bin}  # 最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -56,11 +56,30 @@ shim=tests/hostshim/shim.h
 osprb=tests/stage017/probe
 ospp=tmp/build/pp16.bin
 osld=tmp/build/ld17.bin           # 落ちたら名前を言うリンカ (5.1)
-oskern=tmp/build/kernel24.bin
 # 測る libc の世代。**前の世代を測り直せるようにしてある** ——
 # 「直す前は何が違っていたか」を後から再現できないと，直した記録が
 # 我々の言い分だけになる (STONE_DIFF_LIBCGEN=21 で第 21 世代)
-osgen=${STONE_DIFF_LIBCGEN:-23}
+osgen=${STONE_DIFF_LIBCGEN:-24}
+# **カーネルは libc の世代が決める。** 第 24 世代の stat は statat2
+# (502) を呼ぶので，それを持たないカーネルでは動かない
+# (docs/stage017-gcc.md 8.5)。
+#
+# kernel26 は kernel25 の写しなので **sfs4 を読み，像を 0xa000_0000 に
+# 置く** —— 詰める道具も記憶の大きさも kernel24 とは違う
+# (tests/stage017/test.sh の runroot4 と同じ値である)
+if [ "$osgen" -ge 24 ]; then
+    oskern=tmp/build/kernel26.bin
+    ospack=sfs4
+    ossfsa=536870912              # 0xa000_0000 - 0x8000_0000
+    osram=1073741824              # 1 GiB
+    osramq=1G
+else
+    oskern=tmp/build/kernel24.bin
+    ospack=sfs3
+    ossfsa=67108864               # 0x8400_0000 - 0x8000_0000
+    osram=536870912               # 512 MiB
+    osramq=512M
+fi
 LIBC=stage017/libc$osgen
 # /lib と同じ組合せ。src/morecore と posix/morecore は同じ符号を
 # 別の環境向けに定義するので，どちらか一方だけ (tools/ext17.sh と同じ)
@@ -314,14 +333,14 @@ os_run_all() {
     printf 'echo @@end\n' >> "$osout/root/go.sh"
     printf 'sh2 go.sh\n' > "$osout/root/boot"
 
-    sh tools/sfs3.sh pack "$osout/root" "$osout/fs.img" 16777216 256 \
+    sh "tools/$ospack.sh" pack "$osout/root" "$osout/fs.img" 16777216 256 \
             > /dev/null 2>&1 \
         && rm -f "$osout/ram" \
-        && dd if=/dev/null of="$osout/ram" bs=1 seek=536870912 2> /dev/null \
+        && dd if=/dev/null of="$osout/ram" bs=1 seek="$osram" 2> /dev/null \
         && dd if="$osout/fs.img" of="$osout/ram" bs=64K oflag=seek_bytes \
-            seek=67108864 conv=notrunc 2> /dev/null \
+            seek="$ossfsa" conv=notrunc 2> /dev/null \
         && STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-600} \
-            STONE_QEMU_RAMFILE="$osout/ram" STONE_QEMU_RAM=512M \
+            STONE_QEMU_RAMFILE="$osout/ram" STONE_QEMU_RAM="$osramq" \
             sh tools/env.sh qemu "$oskern" < /dev/null \
             > "$osout/run.out" 2>&1
     if [ ! -s "$osout/run.out" ]; then
