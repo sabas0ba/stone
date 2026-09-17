@@ -171,6 +171,102 @@ build_stage017() {
             -- libc22_run "$f" "$n"
     done
 
+    # libc の第 23 世代 (docs/stage017-gcc.md 5.3 / 5.4 / 6.3)。libc22 との
+    # 差は posix/stdio.c と src/stdlib.c の 2 本で、**差分試験の OS 側
+    # (tools/diff17.sh os) がホストと突き合わせて見つけた食い違い**である
+    # —— printf の旗・精度・%o / %X、strtoul の空白と endptr、
+    # fgets(b, 1, f)、そして %g / %e / %E / %G / %F の浮動小数点変換。
+    #
+    # **この世代から cc15k では組めない。** l19〜l22 は cc15k で組んで
+    # いたが、libc23 の posix/stdio.c は 5 で拒まれる。最前線の cc15ab で
+    # 組む (stage017/libc23.md)
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal; do
+        n=$(echo "$f" | tr / _)
+        step "l23_$n" "l23_$n.o" \
+            -- "stage017/libc23/$f.c" \
+               stage017/libc23/include/*.h \
+               stage017/libc23/include/sys/time.h \
+               stage017/libc23/include/sys/stat.h \
+               stage017/libc23/include/sys/types.h \
+               tmp/build/cc15ab.bin tmp/build/pp.bin \
+            -- libc23_run "$f" "$n"
+    done
+
+    # ---- configure が使う道具 (docs/stage017-gcc.md 5.5〜5.9) ----
+    #
+    # GCC の configure は sed と awk が無ければ 1 行も進まない。
+    # **世代はすべて main の最前線 (cc15ab) と libc23 で組む** ——
+    # 元は別の枝で刻まれた世代で、あちらの Stage 18 の器で組まれていたが、
+    # 道具の側はその器を要求していない (どれも C89 の内側で書かれている)
+
+    # sed の第 1 世代 (5.5)。正規表現機構を自前で持つ
+    step sed1 sed1 \
+        -- stage017/sed1.c tmp/build/cc15ab.bin tmp/build/pp16.bin \
+           tmp/build/ld17.bin tmp/build/l23_posix_dir.o \
+        -- osprog23_run sed1 stage017/sed1.c
+
+    # 正規表現機構 (5.6)。sed2 と sh3 が分け合う。**写しを 2 つ持たない**
+    step re1 re1.o \
+        -- stage017/re1.c stage017/re1.h tmp/build/cc15ab.bin \
+           tmp/build/pp16.bin \
+        -- osobj23_run re1 stage017/re1.c
+
+    # sed の第 2 世代 (5.6)。機構を re1 へ移しただけで、受ける形は同じ
+    step sed2 sed2 \
+        -- stage017/sed2.c stage017/re1.h tmp/build/re1.o \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog23_run sed2 stage017/sed2.c tmp/build/re1.o
+
+    # シェルの第 3 世代 (5.6)。grep を正規表現へ引き上げ、configure が
+    # 使う道具 (tr / expr / basename / dirname / wc / sort / touch /
+    # chmod) を足したもの
+    step sh3 sh3 \
+        -- stage017/sh3.c stage017/re1.h tmp/build/re1.o \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog23_run sh3 stage017/sh3.c tmp/build/re1.o
+
+    # 正規表現機構の第 2 世代 (5.7)。ERE・選択・{n,m}・字種を受け、
+    # 組の中へ後戻りできる。awk はこれが無いと書けない
+    step re2 re2.o \
+        -- stage017/re2.c stage017/re2.h tmp/build/cc15ab.bin \
+           tmp/build/pp16.bin \
+        -- osobj23_run re2 stage017/re2.c
+
+    # sed の第 3 世代 (5.7)。機構を re2 へ替えたもの
+    step sed3 sed3 \
+        -- stage017/sed3.c stage017/re2.h tmp/build/re2.o \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog23_run sed3 stage017/sed3.c tmp/build/re2.o
+
+    # シェルの第 4 世代 (5.7)。grep -E / egrep が使えるようになった
+    step sh4 sh4 \
+        -- stage017/sh4.c stage017/re2.h tmp/build/re2.o \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog23_run sh4 stage017/sh4.c tmp/build/re2.o
+
+    # シェルの第 5 世代 (5.9)。経路展開 (glob) を持つ
+    step sh5 sh5 \
+        -- stage017/sh5.c stage017/re2.h tmp/build/re2.o \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog23_run sh5 stage017/sh5.c tmp/build/re2.o
+
+    # awk の数と書式 (5.8)。**翻訳単位を分けてある** —— awk はこの鎖で
+    # いちばん大きなプログラムで、1 ファイルでは我々の cc の表が溢れる
+    step awkfmt1 awkfmt1.o \
+        -- stage017/awkfmt1.c stage017/awkfmt1.h tmp/build/cc15ab.bin \
+           tmp/build/pp16.bin \
+        -- osobj23_run awkfmt1 stage017/awkfmt1.c
+
+    # awk の第 1 世代 (5.8)。configure が使う道具の最後の 1 つで、
+    # re2 の ERE を使う
+    step awk1 awk1 \
+        -- stage017/awk1.c stage017/re2.h stage017/awkfmt1.h \
+           tmp/build/re2.o tmp/build/awkfmt1.o \
+           tmp/build/cc15ab.bin tmp/build/pp16.bin tmp/build/ld17.bin \
+        -- osprog23_run awk1 stage017/awk1.c tmp/build/re2.o tmp/build/awkfmt1.o
+
     # 前処理器の第 17 世代 (第 3 部の 3 の 2)。-I を探す道として持つ。
     # **libc を繋がない** —— sys_* は 'E' 前置部のものを直に呼ぶ
     # (docs/stage017-cc.md 17 章)
@@ -245,6 +341,58 @@ libc21_run() {
     sh tools/env.sh qemu tmp/build/cc15k.bin < "tmp/build/l21_$2.i" \
         > "tmp/build/l21_$2.o"
     echo "built tmp/build/l21_$2.o" >&2
+}
+
+libc23_run() {
+    sh tools/bundle.sh stage017/libc23/include/*.h \
+        "sys/time.h=stage017/libc23/include/sys/time.h" \
+        "sys/stat.h=stage017/libc23/include/sys/stat.h" \
+        "sys/types.h=stage017/libc23/include/sys/types.h" \
+        "stage017/libc23/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l23_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15ab.bin < "tmp/build/l23_$2.i" \
+        > "tmp/build/l23_$2.o"
+    echo "built tmp/build/l23_$2.o" >&2
+}
+
+# libc23 と最前線の器 (cc15ab) で組む OS プログラム。
+# **新しい道具はここから作る** —— 凍結した世代 (libc19 / cc15p) は
+# 既存の成果物のためのもので、新しく書くものを縛る理由が無い
+osprog23_run() {
+    _nm=$1
+    _src=$2
+    shift 2
+    sh tools/bundle.sh stage017/libc23/include/*.h \
+        "sys/time.h=stage017/libc23/include/sys/time.h" \
+        "sys/stat.h=stage017/libc23/include/sys/stat.h" \
+        "sys/types.h=stage017/libc23/include/sys/types.h" \
+        stage017/re1.h stage017/re2.h stage017/awkfmt1.h "$_src" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${_nm}.i"
+    sh tools/env.sh qemu tmp/build/cc15ab.bin < "tmp/build/${_nm}.i" \
+        > "tmp/build/${_nm}.o"
+    # shellcheck disable=SC2086
+    { printf 'E'; cat "tmp/build/${_nm}.o" $* \
+        tmp/build/l23_src_string.o tmp/build/l23_src_ctype.o \
+        tmp/build/l23_src_stdlib.o tmp/build/l23_src_misc15.o \
+        tmp/build/l23_posix_sys.o tmp/build/l23_posix_morecore.o \
+        tmp/build/l23_posix_stdio.o tmp/build/l23_posix_assert.o \
+        tmp/build/l23_posix_dir.o tmp/build/l23_posix_signal.o \
+        tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/build/$_nm"
+    echo "built tmp/build/$_nm" >&2
+}
+
+# 道具どうしで分け合う部品を 1 つ .o にする (re1 / re2 / awkfmt1)
+osobj23_run() {
+    sh tools/bundle.sh stage017/libc23/include/*.h \
+        "sys/time.h=stage017/libc23/include/sys/time.h" \
+        "sys/stat.h=stage017/libc23/include/sys/stat.h" \
+        "sys/types.h=stage017/libc23/include/sys/types.h" \
+        stage017/re1.h stage017/re2.h stage017/awkfmt1.h "$2" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${1}.i"
+    sh tools/env.sh qemu tmp/build/cc15ab.bin < "tmp/build/${1}.i" \
+        > "tmp/build/${1}.o"
+    echo "built tmp/build/${1}.o" >&2
 }
 
 libc22_run() {
@@ -388,6 +536,11 @@ do_stage017() {
         l22_src_morecore.o l22_src_misc15.o \
         l22_posix_sys.o l22_posix_morecore.o l22_posix_stdio.o \
         l22_posix_assert.o l22_posix_dir.o l22_posix_signal.o \
+        l23_src_string.o l23_src_ctype.o l23_src_stdlib.o \
+        l23_src_morecore.o l23_src_misc15.o \
+        l23_posix_sys.o l23_posix_morecore.o l23_posix_stdio.o \
+        l23_posix_assert.o l23_posix_dir.o l23_posix_signal.o \
+        sed1 sed2 sed3 re1.o re2.o sh3 sh4 sh5 awkfmt1.o awk1 \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc stage017/pp18.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
@@ -402,6 +555,12 @@ do_stage017() {
            stage017/libc21/src/*.c stage017/libc21/posix/*.c \
            stage017/libc22/include/*.h stage017/libc22/include/sys/*.h \
            stage017/libc22/src/*.c stage017/libc22/posix/*.c \
+           stage017/libc23/include/*.h stage017/libc23/include/sys/*.h \
+           stage017/libc23/src/*.c stage017/libc23/posix/*.c \
+           stage017/sed1.c stage017/sed2.c stage017/sed3.c \
+           stage017/re1.c stage017/re1.h stage017/re2.c stage017/re2.h \
+           stage017/sh3.c stage017/sh4.c stage017/sh5.c \
+           stage017/awk1.c stage017/awkfmt1.c stage017/awkfmt1.h \
            stage016/libc18/include/*.h \
            stage016/libc18/include/sys/*.h \
            tmp/build/stage016.stamp tools/build/stage017.sh tools/bundle.sh

@@ -1459,4 +1459,132 @@ diff -u tests/stage017/expected/putc.txt "$out/putc.out" > "$out/putc.diff"
 report $? "run: 我々の OS の上で putc(c, stdout) が書ける (libc22 のマクロ)"
 [ -s "$out/putc.diff" ] && sed -n '4,$p' "$out/putc.diff"
 
+# ---------------------------------------------------------------------------
+# 第 8 部: configure が使う道具 (docs/stage017-gcc.md 5.5〜5.9)
+#
+# **物差しはホストの実装で，期待値は我々が書かない。** どの段も
+# 同じ台本を両方に食わせて出力を突き合わせる
+
+section "sed --- 我々の OS の上でホストの sed と突き合わせる (5.5)"
+
+# **我々の OS には正規表現が 1 つも無かった。** autoconf の configure は
+# ほぼすべてを sed でやるので，4.2 はここで止まる。
+#
+# 測るのは我々が書いた期待値ではなく**ホストの sed の出力**である
+# (tools/diffsed.sh)。台本は autoconf の configure が使う形を選んである。
+# 走行は 1 回の起動に全件を詰めてある (1 分ほど)
+if ! command -v sed > /dev/null 2>&1; then
+    echo "   skip: ホストに sed が無い (突き合わせる相手がいない)"
+else
+    sh tools/diffsed.sh os > "$out/diffsed.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/diffsed.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: sed の出力が我々の OS とホストで一致する"
+fi
+
+section "道具 --- 我々の OS の道具をホストの同名の道具と突き合わせる (5.6)"
+
+# grep (正規表現)・tr・expr・basename・dirname・wc・sort。**無いと
+# configure は落ちるのではなく，空の値を掴んで進む**
+if ! command -v tr > /dev/null 2>&1; then
+    echo "   skip: ホストに tr が無い"
+else
+    sh tools/difftool.sh > "$out/difftool.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/difftool.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: 道具の出力が我々の OS とホストで一致する"
+fi
+
+section "経路展開 --- 我々のシェルの glob をホストのシェルと突き合わせる (5.9)"
+
+# sh2 は glob を持たなかった。GCC の Makefile は `*.c` を使うので，
+# **無いと落ちるのではなく語がそのまま残って進む**。同じ台本を両方の
+# シェルに食わせて測る (tools/diffglob.sh)
+if [ -s tmp/build/sh5 ]; then
+    sh tools/diffglob.sh os > "$out/diffglob.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/diffglob.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: 経路展開が我々の OS とホストで一致する"
+else
+    echo "   skip: tmp/build/sh5 が無い"
+fi
+
+section "awk --- 我々の OS の上でホストの awk と突き合わせる (5.8)"
+
+# **awk は言語ひとつぶんある。** 我々が期待値を書くと我々の読み違いが
+# そのまま期待値になるので，物差しはホストの awk である
+# (tools/diffawk.sh)。config.status は awk 無しでは 1 行も書き出せない。
+# 走行は 1 回の起動に全件を詰めてある (数分)
+if ! command -v awk > /dev/null 2>&1; then
+    echo "   skip: ホストに awk が無い (突き合わせる相手がいない)"
+else
+    sh tools/diffawk.sh os > "$out/diffawk.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/diffawk.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: awk の出力が我々の OS とホストで一致する"
+fi
+
+section "awk --- ホストと分かれる形 (値をここに書く。5.8)"
+
+# `substr(s, m, n)` の m が 1 未満のとき，**POSIX の文言と gawk は
+# 「位置 m〜m+n-1 のうち在るものだけ」を返す**ので substr("hello",0,3)
+# は "he" になる。mawk は m を 1 に切り上げてから n 文字取るので "hel"。
+#
+# 我々は POSIX に合わせた。差分試験には置けないので，**値をここに直に
+# 書く** —— 5.2 の「ホストは万能の物差しではない」の 2 例目である
+if [ -s tmp/build/awk1 ] && [ -s tmp/build/kernel24.bin ]; then
+    rm -rf "$out/awkposix"
+    mkdir -p "$out/awkposix/root"
+    cat > "$out/awkposix/root/p.awk" <<'AWKEOF'
+BEGIN {
+  print "[" substr("hello", 0, 3) "]"
+  print "[" substr("hello", -1, 3) "]"
+  print "[" substr("hello", 0) "]"
+  print "[" substr("hello", 3, -1) "]"
+}
+AWKEOF
+    cp tmp/build/awk1 "$out/awkposix/root/awk"
+    cp tmp/build/sh2.bin "$out/awkposix/root/sh2"
+    printf 'awk -f p.awk\necho @@end\n' > "$out/awkposix/root/go.sh"
+    printf 'sh2 go.sh\n' > "$out/awkposix/root/boot"
+    sh tools/sfs3.sh pack "$out/awkposix/root" "$out/awkposix/fs.img" \
+        4194304 64 > /dev/null \
+        && rm -f "$out/awkposix/ram" \
+        && dd if=/dev/null of="$out/awkposix/ram" bs=1 seek=536870912 2> /dev/null \
+        && dd if="$out/awkposix/fs.img" of="$out/awkposix/ram" bs=64K \
+            oflag=seek_bytes seek=67108864 conv=notrunc 2> /dev/null \
+        && STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-300} \
+            STONE_QEMU_RAMFILE="$out/awkposix/ram" STONE_QEMU_RAM=512M \
+            sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
+            > "$out/awkposix/run.out" 2>&1
+    printf '[he]\n[h]\n[hello]\n[]\n' > "$out/awkposix/want"
+    sed -n '/^\[/p' "$out/awkposix/run.out" > "$out/awkposix/got"
+    cmp -s "$out/awkposix/want" "$out/awkposix/got"
+    report $? "awk: substr の開始位置が 1 未満のとき POSIX の値を返す"
+else
+    echo "   skip: tmp/build/awk1 が無い"
+fi
+
+section "差分試験の OS 側 (libc を我々の OS の上でホストと突き合わせる)"
+
+# **libc の穴は，我々が書いた期待値では出ない。** 我々は自分が使う
+# 書き方しか試さないからである (cc15u と同じ構図)。前置部だけで走る
+# 側は Stage 15 が見ているので，ここは libc を繋いで OS の上で走らせる
+# 側だけを見る (docs/stage017-gcc.md 5.3)。
+#
+# 走行は 1 回の起動に全プローブを詰めてある (2 分ほど)
+if ! command -v "${CC:-gcc}" > /dev/null 2>&1; then
+    echo "   skip: ホストに ${CC:-gcc} が無い (突き合わせる相手がいない)"
+else
+    sh tools/diff17.sh os > "$out/diff17os.log" 2>&1
+    r=$?
+    sed 's/^/   /' "$out/diff17os.log"
+    [ "$r" -eq 0 ]
+    report $? "diff: libc の値が我々の OS とホストで一致する"
+fi
+
 summary
