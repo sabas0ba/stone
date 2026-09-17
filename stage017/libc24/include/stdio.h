@@ -79,6 +79,22 @@ int fflush(FILE *f);
  * (docs/stage017-gcc.md 8.3 の 8)。 */
 #define putc(c, f) fputc((c), (f))
 
+/* getc も同じ理由でマクロにする (第 24 世代)。
+ *
+ * **前置部は 0 引数の getc を持っている** (標準入力から 1 バイト)。
+ * 1 引数の呼出しは引数個数の不一致 (5) になる —— putc と同じ形の
+ * 衝突で，違うのは組込みの引数が 1 個ではなく 0 個であることだけ。
+ * 7.9.7.5 は getc を「関数ではなくマクロとして実装してよい」と名指し
+ * している。
+ *
+ * **これは第 24 世代で初めて見えた穴である。** libcpp/files が
+ * `struct stat` の st_mode で先に止まっていたので，その先にある
+ * `getc (f)` まで届いていなかった (docs/stage017-gcc.md 8.5)。
+ *
+ * 限界は putc と同じ —— `(getc)(f)` と `&getc` は展開されないので
+ * 前置部の 0 引数 getc に当たる。 */
+#define getc(f) fgetc((f))
+
 int getchar(void);
 int putchar(int c);
 int puts(char *s);
