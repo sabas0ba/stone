@@ -30,6 +30,24 @@ static void nl(void) { putc('\n'); }
  *    GCC の hashtab.c がマクロとの衝突を避けるためこう書く */
 static int (twice)(int x) { return x * 2; }
 
+/* 14. 仮引数の register。C89 6.5.1 が仮引数に許す唯一の記憶域クラス
+ *     指定子である。**割付けは変えないので値は変わらない** ——
+ *     変わったら我々の側が誤っている。hashtab.c の iterative_hash が
+ *     この形 (docs/stage017-gcc.md 8.3 の 14) */
+static int mix(register int a, register unsigned b, int c) {
+  register int t;
+  t = a + (int)b;
+  return t * c;
+}
+
+/* K&R 形式でも同じ規則が効く */
+static int krmix(a, b)
+     register int a;
+     int b;
+{
+  return a * 100 + b;
+}
+
 /* ビットフィールドを隣り合わせに並べる。++ が隣を壊さないことを見る */
 struct bits {
   unsigned a : 3;
@@ -73,6 +91,11 @@ int main(void) {
   /* 1 bit のフィールドは 0 と 1 を往復する */
   v.c = 0;
   for (i = 0; i < 3; i = i + 1) { v.c++; pn((int)v.c); }
+  nl();
+
+  /* 14. 仮引数の register。値は register を書かないときと同じである */
+  pn(mix(3, 4, 5));
+  pn(krmix(7, 8));
   nl();
 
   /* 3. 括弧で囲んだ名前で定義した関数を呼ぶ */

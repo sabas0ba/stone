@@ -113,6 +113,15 @@ build_stage015b() {
     # **ビルドチェーンの成果物は変わらない** —— 既存のソースはどの形も
     # 使っていない
     ccgen cc15ad cc15ac stage015/cc15ad.sc
+    # 第 31 世代。仮引数の register (C89 6.5.1 が許す唯一の記憶域クラス
+    # 指定子)。pparam が ptype を直に呼んでいて，その手前で読み捨てて
+    # いなかった。plocal と topdecl は前からしている。
+    # **cc15ad の直しが足りなかったのではない** —— libiberty/hashtab は
+    # 壁が 2 つあり，1 つめ (括弧で囲んだ名前) を通した先にこれがあった
+    # (docs/stage017-gcc.md 8.3 の 14)。
+    # **ビルドチェーンの成果物は変わらない** —— 既存のソースは仮引数に
+    # register を書いていない
+    ccgen cc15ae cc15ad stage015/cc15ae.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -137,7 +146,7 @@ do_stage015b() {
         cc15x0.bin cc15x.bin cc15y0.bin cc15y.bin \
         cc15z0.bin cc15z.bin cc15aa0.bin cc15aa.bin \
         cc15ab0.bin cc15ab.bin cc15ac0.bin cc15ac.bin \
-        cc15ad0.bin cc15ad.bin \
+        cc15ad0.bin cc15ad.bin cc15ae0.bin cc15ae.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
@@ -145,7 +154,7 @@ do_stage015b() {
            stage015/cc15u.sc stage015/cc15v.sc stage015/cc15w.sc \
            stage015/cc15x.sc stage015/cc15y.sc stage015/cc15z.sc \
            stage015/cc15aa.sc stage015/cc15ab.sc stage015/cc15ac.sc \
-           stage015/cc15ad.sc \
+           stage015/cc15ad.sc stage015/cc15ae.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
