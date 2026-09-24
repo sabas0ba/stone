@@ -1499,6 +1499,7 @@ spawn 0
 cut y
 own-small y
 path-max 256 256
+path-noent -1 2
 mkdir y
 p254 0 0
 p255 0 0
@@ -1510,6 +1511,129 @@ rc=$?
 [ "$rc" -eq 0 ] && diff -u "$out/tm.want" "$out/tm.out" > "$out/tm.diff"
 report $? "run: 子の時間が cutime へ入り，255 バイトの経路が stat を通る (kernel27 / libc25)"
 [ -s "$out/tm.diff" ] && sed -n '4,$p' "$out/tm.diff"
+
+section "第 10 部: 押し戻しの器 (pp19。docs/stage017-gcc.md 8.10)"
+
+# **GCC の libiberty/regex がここで止まっていた。** 識別子の直後の 1 文字を
+# 押し戻したまま置換結果のフレームを積むので，展開の入れ子 1 段ごとに
+# 押し戻しが 1 つ溜まる。pp18 の器は 16 で，入れ子 15 段で 6 になる。
+# pp19 は器を 256 にしただけである (stage017/pp19.sc)。
+want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage017/pp19.md | cut -d' ' -f2)
+got=$(sha256sum tmp/build/pp19); got=${got%% *}
+[ -n "$want" ] && [ "$want" = "$got" ]
+report $? "build: pp19 の SHA-256 が stage017/pp19.md の記載値と一致"
+
+r=$out/pbk
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/s"
+cp tmp/build/pp18 "$r/pp18"
+cp tmp/build/pp19 "$r/pp19"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+# A0 から An まで 1 段ずつ展開させる入力。$1 = n
+nest() {
+    i=1
+    echo '#define A0 nest_ok'
+    while [ "$i" -le "$1" ]; do
+        echo "#define A$i A$((i - 1))"
+        i=$((i + 1))
+    done
+    echo "A$1"
+}
+for n in 14 15 60; do
+    nest "$n" > "$r/s/c.c"
+    sh tools/bundle.sh "$r/s/c.c" > "$r/n$n.b"
+done
+rm -rf "$r/s"
+cat > "$r/go.sh" <<'EOF'
+pp18 < n14.b > o18_14.txt
+echo "pp18 14 $?"
+pp18 < n15.b > o18_15.txt
+echo "pp18 15 $?"
+pp19 < n14.b > o19_14.txt
+echo "pp19 14 $?"
+grep nest_ok o18_14.txt
+grep nest_ok o19_14.txt
+pp19 < n15.b > o19_15.txt
+echo "pp19 15 $?"
+grep nest_ok o19_15.txt
+pp19 < n60.b > o19_60.txt
+echo "pp19 60 $?"
+grep nest_ok o19_60.txt
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+# 期待: pp18 は 14 段まで通り 15 段で 6。pp19 は 60 段 (フレームの上限の
+# 手前) まで通り，どちらも最後の置換結果 nest_ok を出す。14 段では pp18 と
+# pp19 が同じ行を出す (器を広げただけで出力は変わらない)
+cat > "$out/pbk.want" <<'PBKEOF'
+pp18 14 0
+pp18 15 6
+pp19 14 0
+nest_ok
+nest_ok
+pp19 15 0
+nest_ok
+pp19 60 0
+nest_ok
+PBKEOF
+runroot3 "$r" "$out/pbk.out" 8388608 512
+# 行末の空白は落として比べる。置換のたびに補いの空白が 1 個付くので，
+# 段数ぶんの空白が並ぶ (前処理の結果としては正しい)
+sed 's/ *$//' "$out/pbk.out" > "$out/pbk.norm"
+diff -u "$out/pbk.want" "$out/pbk.norm" > "$out/pbk.diff"
+report $? "run: pp18 は入れ子 15 段の展開で 6，pp19 は 60 段まで通る"
+[ -s "$out/pbk.diff" ] && sed -n '4,$p' "$out/pbk.diff"
+
+section "第 11 部: マクロ表の容量 (pp20。docs/stage017-gcc.md 8.11)"
+
+# **GCC の gcc/ 本体の全単位がここで止まっていた。** 対象の記述を読むので
+# マクロを 7,000〜15,000 個定義し，最長のマクロ名は 64 バイトある。pp19 の
+# 表は 4096 個・名前 63 バイトまでである。pp20 は表を広げ，名前を
+# ハッシュ表で引く (stage017/pp20.sc)
+want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage017/pp20.md | cut -d' ' -f2)
+got=$(sha256sum tmp/build/pp20); got=${got%% *}
+[ -n "$want" ] && [ "$want" = "$got" ]
+report $? "build: pp20 の SHA-256 が stage017/pp20.md の記載値と一致"
+
+r=$out/mtab
+rm -rf "$r"
+mkdir -p "$r/bin" "$r/s"
+cp tmp/build/pp19 "$r/pp19"
+cp tmp/build/pp20 "$r/pp20"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+# 5000 個のマクロ (最後のものが前のものを参照する) と，64 バイトの名前
+L64=$(printf 'n%.0s' $(seq 1 64))
+{
+    i=0
+    while [ "$i" -lt 5000 ]; do
+        echo "#define M$i $i"
+        i=$((i + 1))
+    done
+    echo "#define $L64 long_ok"
+    echo "M4999 M0 $L64"
+} > "$r/s/c.c"
+sh tools/bundle.sh "$r/s/c.c" > "$r/m.b"
+rm -rf "$r/s"
+cat > "$r/go.sh" <<'EOF'
+pp19 < m.b > o19.txt
+echo "pp19 $?"
+pp20 < m.b > o20.txt
+echo "pp20 $?"
+grep long_ok o20.txt
+EOF
+printf 'sh2 go.sh\n' > "$r/boot"
+cat > "$out/mtab.want" <<'MTEOF'
+pp19 6
+pp20 0
+4999 0 long_ok
+MTEOF
+runroot3 "$r" "$out/mtab.out" 8388608 512
+# 空白の並びは 1 個にまとめて比べる (置換結果の後ろに補いの空白が付く)
+sed 's/  */ /g; s/ *$//' "$out/mtab.out" > "$out/mtab.norm"
+diff -u "$out/mtab.want" "$out/mtab.norm" > "$out/mtab.diff"
+report $? "run: マクロ 5000 個と 64 バイトの名前を pp19 は 6 で拒み，pp20 は展開する"
+[ -s "$out/mtab.diff" ] && sed -n '4,$p' "$out/mtab.diff"
 
 # ---------------------------------------------------------------------------
 # 第 8 部: configure が使う道具 (docs/stage017-gcc.md 5.5〜5.9)

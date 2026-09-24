@@ -16,7 +16,7 @@
 # unit / units はビルドチェーンで生成したバイナリ (tmp/build) と QEMU を要る。STONE_ENGINE と
 # qemu-system-riscv32 は呼ぶ側の環境で与える (tools/env.sh の契約のまま)。
 #
-# STONE_GCC17_PP=os で pp の段を**stone の OS の上の pp18** に替える
+# STONE_GCC17_PP=os で pp の段を**stone の OS の上の pp20** (既定。STONE_GCC17_PPOS で替えられる) に替える
 # (既定はベアメタル実行の pp16)。docs/stage017-gcc.md 8.7 の 2。
 #
 # STONE_GCC47_SRC で測るツリーを差し替えられる。**答の判っている小さなツリーで
@@ -316,8 +316,12 @@ work="$repo_root/tmp/g17u"
 # **どちらで測ったかで header の不足数が変わる**ので明示する
 ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc25/include}
 pp16=tmp/build/pp16.bin
-pp18=tmp/build/pp18
-cc15=tmp/build/cc15ae.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+# OS 側の前処理器。**最前線の pp20 で測る** (pp18 は入れ子 15 段の展開で
+# 押し戻しの器が尽き，pp19 は gcc/ のマクロ表に収まらない。docs/stage017-gcc.md
+# 8.10 / 8.11)。STONE_GCC17_PPOS で
+# 前の世代を測り直せる
+ppos=${STONE_GCC17_PPOS:-tmp/build/pp20}
+cc15=tmp/build/cc15af.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
@@ -325,7 +329,7 @@ HOSTCC=${CC:-gcc}
 #
 #   bare  pp16 を OS なし (bare metal) で実行する (既定)。stdin からバンドルを読み，
 #         stdout へ .i を出す。QEMU の起動は 1 単位につき 1 回
-#   os    **stone の OS の上の pp18 を実行する。** pp16 では測れないものが
+#   os    **stone の OS の上の pp20 (pp18 / pp19 の後継) を実行する。** pp16 では測れないものが
 #         2 つある —— 展開の結果に現れた defined (pp17 以降だけが評価
 #         する) と，バンドルのメンバ数 256 / アリーナ 64 KiB という広がった容量。
 #         13 単位が ppext に落ちているのはすべて前者である
@@ -358,45 +362,47 @@ pp_run() {
     esac
 }
 
-# **stone の OS の上で pp18 に通す** (8.7 の 2)。
+# **stone の OS の上で pp20 に通す** (8.7 の 2)。
 #
 # tools/tcc17.sh が既に持つ形と同じである —— 作業用のルートを sfs3 で詰め，
 # メモリイメージの 64 MiB の位置へ置いて kernel24 を起動し，走った後のイメージを
 # 読み直して出来たものを取り出す。
 #
-# pp18 は OS 側の世代なので OS なしでは実行できない (ld16 の 'E' 前置きが付いて
-# いる)。パスを付けない名前はイメージのルートからしか参照できないので，pp18 も sh2 もルートに置く。
-pp_root="$work/pproot"
+# pp18 / pp19 は OS 側の世代なので OS なしでは実行できない (ld16 の 'E' 前置きが付いて
+# いる)。パスを付けない名前はイメージのルートからしか参照できないので，前処理器も sh2 もルートに置く。
+# **作業の置き場は単位ごとに分ける** ($b.os)。units を並列に回すとき
+# (STONE_GCC17_JOBS)，置き場を共有すると別の単位のイメージを読み戻してしまう
 pp_run_os() {
     b=$1; i=$2; e=$3
-    for f in pp18 sh2.bin kernel24.bin; do
+    for f in sh2.bin kernel24.bin; do
         [ -s "tmp/build/$f" ] || die "OS 側のイメージが無い: tmp/build/$f (sh tools/build.sh stage017)"
     done
-    rm -rf "$pp_root"
-    mkdir -p "$pp_root"
-    cp tmp/build/sh2.bin "$pp_root/sh2"
-    cp "$pp18" "$pp_root/pp18"
-    cp "$b" "$pp_root/u.b"
-    printf 'pp18 < u.b > u.i\necho "rc $?"\n' > "$pp_root/go.sh"
-    printf 'sh2 go.sh\n' > "$pp_root/boot"
-    sh tools/sfs3.sh pack "$pp_root" "$work/pp.img" 33554432 1024 > /dev/null
-    rm -f "$work/pp.ram"
-    dd if=/dev/null of="$work/pp.ram" bs=1 seek=536870912 2> /dev/null
-    dd if="$work/pp.img" of="$work/pp.ram" bs=64K oflag=seek_bytes \
+    d="$b.os"
+    rm -rf "$d"
+    mkdir -p "$d/root"
+    cp tmp/build/sh2.bin "$d/root/sh2"
+    [ -s "$ppos" ] || die "OS 側の前処理器が無い: $ppos (sh tools/build.sh stage017)"
+    cp "$ppos" "$d/root/pp"
+    cp "$b" "$d/root/u.b"
+    printf 'pp < u.b > u.i\necho "rc $?"\n' > "$d/root/go.sh"
+    printf 'sh2 go.sh\n' > "$d/root/boot"
+    sh tools/sfs3.sh pack "$d/root" "$d/pp.img" 33554432 1024 > /dev/null
+    dd if=/dev/null of="$d/pp.ram" bs=1 seek=536870912 2> /dev/null
+    dd if="$d/pp.img" of="$d/pp.ram" bs=64K oflag=seek_bytes \
         seek=67108864 conv=notrunc 2> /dev/null
+    # **RAMFILE はリポジトリからの相対で渡す。** QEMU はコンテナの中で走り，
+    # リポジトリは /work に見える (tools/env.sh)。host の絶対経路はそこに無い
     STONE_QEMU_TIMEOUT=${STONE_QEMU_TIMEOUT:-1800} \
-        STONE_QEMU_RAMFILE="$work/pp.ram" STONE_QEMU_RAM=512M \
+        STONE_QEMU_RAMFILE="${d#"$repo_root"/}/pp.ram" STONE_QEMU_RAM=512M \
         sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
         > "$e" 2>&1 || true
-    dd if="$work/pp.ram" of="$work/pp.back.img" bs=64K skip=1024 2> /dev/null
-    rm -rf "$work/pp.back"
-    sh tools/sfs3.sh unpack "$work/pp.back.img" "$work/pp.back" \
+    dd if="$d/pp.ram" of="$d/pp.back.img" bs=64K skip=1024 2> /dev/null
+    sh tools/sfs3.sh unpack "$d/pp.back.img" "$d/back" \
         > /dev/null 2>&1 || true
     : > "$i"
-    if [ -f "$work/pp.back/u.i" ]; then cp "$work/pp.back/u.i" "$i"; fi
-    # 終了コードは sh2 が出した "rc N" から読む。**行が無いのは 0 ではない**
-    # —— 起動そのものが落ちた場合と区別が付かなくなる。その場合は 125 を
-    # 返して，pp の終了コードとして現れない値で表に出す
+    if [ -f "$d/back/u.i" ]; then cp "$d/back/u.i" "$i"; fi
+    # 512 MiB のメモリイメージを単位の数だけ残さない
+    rm -rf "$d"
     rc=$(sed -n 's/^rc \([0-9][0-9]*\)$/\1/p' "$e" | tail -n 1)
     [ -n "$rc" ] || return 125
     return "$rc"
@@ -726,15 +732,16 @@ closure_all() {
     lib=${1%%/*}; u=${1#*/}
     mkdir -p "$stub" "$work/out"
     mf="$work/out/$lib.$u.missing"
+    mkdir -p "$(dirname "$mf")"
     i=0
     while [ "$i" -lt 32 ]; do
-        if out=$(STONE_GCC17_STUB="$stub" closure "$1" 2> "$work/out/hdr.err"); then
+        if out=$(STONE_GCC17_STUB="$stub" closure "$1" 2> "$mf.err"); then
             printf '%s\n' "$out" | grep "^$stub/" | sed "s|^$stub/||" | tr '\n' ' ' \
                 | sed 's/ $//' > "$mf"
             printf '%s\n' "$out"
             return 0
         fi
-        h=$(cat "$work/out/hdr.err")
+        h=$(cat "$mf.err")
         # 名前が取れない失敗 (cpp の別の誤り) は "?" で残す
         [ -n "$h" ] || { echo "?" > "$mf"; return 1; }
         mkdir -p "$stub/$(dirname "$h")"
@@ -823,7 +830,7 @@ baseline_iso() {
 unit() {
     lib=${1%%/*}; u=${1#*/}
     case "$PP_ENGINE" in
-    os) [ -s "$pp18" ] || die "OS 側のイメージが無い: $pp18 (sh tools/build.sh stage017)" ;;
+    os) [ -s "$ppos" ] || die "OS 側のイメージが無い: $ppos (sh tools/build.sh stage017)" ;;
     *)  [ -s "$pp16" ] || die "ビルドチェーンのイメージが無い: $pp16 (sh tools/build.sh all)" ;;
     esac
     [ -s "$cc15" ] || die "ビルドチェーンのイメージが無い: $cc15 (sh tools/build.sh all)"
@@ -858,7 +865,7 @@ unit_run() {
         esac
         members="$members $name=$h"; n=$((n + 1))
         # **gcc/ は階層つきの名前でも含める** ("config/i386/i386.h" や
-        # "c-family/c-common.h")。pp18 は #include の綴りとメンバ名を
+        # "c-family/c-common.h")。pp18 / pp19 は #include の綴りとメンバ名を
         # そのまま比べるので，綴りの数だけ名前が要る。綴りは探索パス
         # (-I) から見た相対経路である。同じ階層からの "c-common.def" の
         # ような綴りは basename の方が受ける
@@ -954,13 +961,22 @@ unit_run() {
     # 付け，cc15v はそれを終端として読む。host には "stray '\4'" になり，
     # それだけで gnu89 の検査が落ちて，本当は通る単位まで decl に見えた
     tr -d '\004' < "$o.i" > "$o.host.c"
-    if ! "$HOSTCC" -fsyntax-only -std=gnu89 -w -include "$shim" -x c "$o.host.c" \
+    # **gcc/ は host にも ILP32 で読ませる。** gcc/ は RV32 の語長で configure
+    # してあり (configure_gcc)，real.h などが翻訳時に語長を表明する
+    # (extern char test_real_width[...])。64 bit の host で読むと，我々の
+    # .i が正しくても表明が負の大きさになって decl に見える。-fsyntax-only
+    # なので 32 bit の libc は要らない
+    hostw=""
+    [ "$lib" = gcc ] && hostw="-m32"
+    # shellcheck disable=SC2086
+    if ! "$HOSTCC" $hostw -fsyntax-only -std=gnu89 -w -include "$shim" -x c "$o.host.c" \
             > "$o.h1.log" 2>&1; then
         printf 'decl\t%s\n' "$(grep -m1 -oE 'error: .*' "$o.h1.log")"
         return 0
     fi
     baseline_iso
-    "$HOSTCC" -fsyntax-only -std=c89 -pedantic-errors -include "$shim" -x c "$o.host.c" \
+    # shellcheck disable=SC2086
+    "$HOSTCC" $hostw -fsyntax-only -std=c89 -pedantic-errors -include "$shim" -x c "$o.host.c" \
         > "$o.h2.log" 2>&1 || true
     # ISO C の診断が 1 つも無ければ grep が 1 を返す。それも答である。
     #
@@ -1032,7 +1048,7 @@ units() {
         # 機械の名前が記録に混じる (誰のホームディレクトリの下にあったかは基準ではない)
         printf 'libc=%s\n' "$(echo "$ours" | sed "s|^$repo_root/||")"
         printf 'pp-engine=%s\n' "$PP_ENGINE"
-        printf 'pp=%s\n' "$(case "$PP_ENGINE" in os) echo "$pp18 (OS)" ;; *) echo "$pp16" ;; esac)"
+        printf 'pp=%s\n' "$(case "$PP_ENGINE" in os) echo "$ppos (OS)" ;; *) echo "$pp16" ;; esac)"
         printf 'cc=%s\n' "$cc15"
     } | tee "$m"
     echo
@@ -1041,11 +1057,22 @@ units() {
     for lib in ${1:-libiberty libcpp}; do
         want=$((want + $(unit_list "$lib" | grep -c . || true)))
     done
+    # STONE_GCC17_JOBS で単位を並列に通す (gcc/ は 1 単位が数 MB あり，
+    # 1 本ずつでは数時間かかる)。各単位は結果を自分の .row へ書き，
+    # **表は単位の一覧の順に並べ直す** —— 終わった順に並べると，同じ測定の
+    # 表が実行ごとに違って見える
+    jobs=${STONE_GCC17_JOBS:-1}
     for lib in ${1:-libiberty libcpp}; do
-        for u in $(unit_list "$lib"); do
-            unit "$lib/$u"
-        done
-    done | tee "$t"
+        unit_list "$lib" | grep . | sed "s|^|$lib/|"
+    done > "$work/units.list"
+    # 共有する控え (host の ISO C 診断の基準) は並列にする前に 1 度だけ作る
+    baseline_iso
+    find "$work/out" -name "*.row" -exec rm -f {} +
+    # 1 単位が die で落ちても他は続ける。欠けた行は下の長さの検査が捕まえる
+    xargs -P "$jobs" -n 1 sh "$0" unit-row < "$work/units.list" || true
+    while IFS= read -r lu; do
+        cat "$work/out/${lu%%/*}.${lu#*/}.row" 2> /dev/null || true
+    done < "$work/units.list" | tee "$t"
     echo
     got=$(wc -l < "$t" | tr -d ' ')
     echo "units: $got 単位"
@@ -1067,6 +1094,12 @@ configure-gcc) configure_gcc ;;
 headers) headers "${2:-}" ;;
 closure) [ -n "${2:-}" ] || die "closure <lib>/<unit>"; closure_all "$2"; cat "$work/out/${2%%/*}.${2#*/}.missing" >&2 ;;
 unit) [ -n "${2:-}" ] || die "unit <lib>/<unit>"; unit "$2" ;;
+unit-row)
+    # units の並列実行から呼ばれる。1 単位の結果を .row へ書く (表は units が並べる)
+    [ -n "${2:-}" ] || die "unit-row <lib>/<unit>"
+    mkdir -p "$(dirname "$work/out/${2%%/*}.${2#*/}")"
+    unit "$2" > "$work/out/${2%%/*}.${2#*/}.row"
+    ;;
 units) units "${2:-}" ;;
 where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)

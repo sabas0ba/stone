@@ -98,6 +98,11 @@ int main(int argc, char **argv) {
 
   /* 2. 経路の上限。100 + 1 + 100 + 1 + 葉 で 254 / 255 / 256 バイト */
   printf("path-max %d %ld\n", PATH_MAX, pathconf("/", _PC_PATH_MAX));
+  /* 無い経路は stat と同じ errno で -1。glibc はここで上限を返すので，
+   * ホストとは突き合わせられない (probe/timesx.c の註) */
+  errno = 0;
+  printf("path-noent %ld %d\n", pathconf("tx_no_such_file", _PC_PATH_MAX),
+         errno);
   fill(d1, 'd', 100);
   strcpy(d2, d1);
   strcat(d2, "/");

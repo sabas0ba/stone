@@ -12,7 +12,6 @@
  *   tick の単位が 100 Hz か (Linux の USER_HZ と同じ値)
  *   知らない名前を訊けば EINVAL で -1 になるか
  *   経路の上限が POSIX の最小値 (256) 以上か
- *   無い経路を訊けば ENOENT で -1 になるか
  *   時間が戻らないか
  *   計算を続ければ CPU 時間が増えるか
  *
@@ -50,9 +49,9 @@ int main(void) {
 
   yn("path-max-macro", PATH_MAX >= 256);
   yn("path-max-root", pathconf("/", _PC_PATH_MAX) >= 256);
-  errno = 0;
-  yn("path-noent", pathconf("tx_no_such_file", _PC_PATH_MAX) == -1
-                   && errno == ENOENT);
+  /* 無い経路を訊いたときは突き合わせない。POSIX は ENOENT を「失敗して
+   * よい」としか言っておらず，glibc は経路を見ずに上限を返す。我々は
+   * ENOENT で -1 を返す (tests/stage017/user/tmx.c が見る) */
 
   ra = times(&a);
   yn("times-ok", ra != (clock_t)-1);
