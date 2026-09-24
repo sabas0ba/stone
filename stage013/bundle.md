@@ -1,11 +1,11 @@
 # bundle 説明文書
 
-bundle はソース群を pp への入力 (束ね) へ変換するコマンドである。
+bundle はソース群を pp への入力 (バンドル) へ変換するコマンドである。
 ホスト側の [../tools/bundle.sh](../tools/bundle.sh) のゲスト版で，
 形式は [stage009-pp.md](../docs/stage009-pp.md) 2.2。設計は
 [stage013-tools.md](../docs/stage013-tools.md) 7.2。
 
-ソース [bundle.c](bundle.c) が正本である。自作の C89 + 第 13 世代の
+ソース [bundle.c](bundle.c) が原本である。自作の C89 + 第 13 世代の
 libc で書かれている。
 
 ## ビルド
@@ -46,8 +46,8 @@ member := "@" name " " size "\n" content
 
 **末尾に EOT (0x04) を置くのがこのコマンドの要である。** OS の上では
 入力の終わりで read が 0 を返すが，pp と cc は EOT でしか読取りを
-止めない。どちらも凍結された世代で手を入れられないので，EOT を置くのは
-束ねを作る側の役目になる ([cmds.md](cmds.md))。
+止めない。どちらも凍結された世代で変更できないので，EOT を置くのは
+バンドルを作る側の役目になる ([cmds.md](cmds.md))。
 
 ## 制限
 

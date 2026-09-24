@@ -11,7 +11,7 @@ morecore.o は malloc の供給源 (固定領域版) である。ヒープを `.
 | ベアメタル | `stdlib.o` + `morecore.o` (本ファイル) |
 | 自作 OS の上 | `stdlib.o` + `p_morecore.o` (brk 版) + `p_sys.o` |
 
-ソース [morecore.c](morecore.c) が正本である。
+ソース [morecore.c](morecore.c) が原本である。
 
 ## ビルド
 

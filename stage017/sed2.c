@@ -498,7 +498,7 @@ static int runline(void) {
     if (ccmd[i] == ':') { i = i + 1; continue; }
     if (!selected(i)) {
       if (ccmd[i] == '{') {
-        /* 選ばれなかった塊は丸ごと飛ばす */
+        /* 選ばれなかった塊はすべて飛ばす */
         int depth;
         depth = 1;
         i = i + 1;

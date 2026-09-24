@@ -270,7 +270,7 @@ function toggleTrack(id) {
     lab.querySelector('.tk-caret').textContent = open ? '▾' : '▸';
 }
 
-// 押した升 (系統 x 世代) の中身だけを出す。もう一度押すと畳む
+// 押したセル (系統 x 世代) の中身だけを出す。もう一度押すと閉じる
 function showDetail(key, stage) {
     const box = $('tk-detail');
     if (detailKey === `${key}|${stage}`) {
@@ -340,7 +340,7 @@ function select(num, push = true) {
     $('acc-trivia').hidden = !st.trivia;
     if (st.trivia) $('st-trivia').innerHTML = inlineMd(st.trivia);
 
-    // 世代を移ったらアコーディオンは畳み直す
+    // 世代を移ったらアコーディオンは閉じ直す
     for (const d of document.querySelectorAll('.acc')) d.open = false;
 
     renderCoverage(st);
@@ -482,7 +482,7 @@ async function setupPlayground(st) {
     $('pg-stdin').value = pgConfig.stdin || '';
 
     // 台帳を持つ世代は probe を選べるようにする。名前は pipelines.js に
-    // 写さず台帳から取るので，台帳を直せば選択肢も追随する
+    // 複製せず台帳から取るので，台帳を修正すれば選択肢も追随する
     const led = pgConfig.samplesFromLedger ? ledgerGroup(st) : null;
     const items = led ? led.items : [];
     $('pg-picker').hidden = items.length === 0;
@@ -574,7 +574,7 @@ $('pg-run').onclick = () => {
 };
 
 // ---- ターミナル (OS 世代の対話セッション) ----
-// 1 つの世代が複数の実行シナリオ (別のカーネル・別の木) を持つことがある。
+// 1 つの世代が複数の実行シナリオ (別のカーネル・別のツリー) を持つことがある。
 // Stage 16 は kernel17 / 18 / 19 を並べて見せる (記憶域は 2 つ並べないと
 // 「広がった」ことが言えない。docs/stage016-os.md 8.6)
 let termConfig = null;
@@ -684,7 +684,7 @@ function seededNames() {
     return names;
 }
 
-// sfs / sfs2 の中身を出す。sfs2 は木なので経路順に並べて字下げする
+// sfs / sfs2 の中身を出す。sfs2 はツリーなので経路順に並べて字下げする
 function renderTermFiles(files) {
     const names = seededNames();
     const tree = termConfig.fs === 2;
@@ -779,7 +779,7 @@ $('term-in').addEventListener('keydown', (e) => {
         const bytes = new Uint8Array([...`${line}\n`].map((c) => c.charCodeAt(0) & 0xff));
         worker.postMessage({ kind: 'tin', id: termId, data: bytes });
     }
-    // 送った行が案内どおりなら次の手順を先置きする
+    // 送った行が案内どおりなら次の手順を入力欄へ事前に設定する
     const cur = termScen.samples[termSampleIdx];
     if (cur && line.trim() === cur.cmd) {
         termSampleIdx++;

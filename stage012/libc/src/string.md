@@ -6,12 +6,12 @@ string.o はフリースタンディング libc の一部で，文字列と記�
 
 ソース [string.c](string.c) とヘッダ
 [../include/string.h](../include/string.h) /
-[../include/stddef.h](../include/stddef.h) が正本である。
+[../include/stddef.h](../include/stddef.h) が原本である。
 オブジェクトはビルドで再現される生成物であり，git 管理しない。
 
 ## ビルド
 
-Stage 10 の成果物 (pp + cc) でビルドする。リンク済みの実行像ではなく
+Stage 10 の成果物 (pp + cc) でビルドする。リンク済みの実行イメージではなく
 オブジェクトのまま置き，利用側が必要なものだけを ld に指定する。
 
 ```

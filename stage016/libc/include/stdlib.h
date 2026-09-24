@@ -31,7 +31,7 @@ long long atoll(char *s);
 double strtod(const char *s, char **endptr);
 float strtof(const char *s, char **endptr);
 /* long double は double と同じ 8 バイトである (cc も tcc の RV32 も)。
- * ただし tcc は型としては別に数えるので，マクロで strtod に潰すと
+ * ただし tcc は型としては別に数えるので，マクロで strtod に代えると
  * tcc.h の extern 宣言と型が食い違う。実体のある関数として持つ */
 long double strtold(const char *s, char **endptr);
 void qsort(void *base, size_t nmemb, size_t size, int (*cmp)(void *, void *));

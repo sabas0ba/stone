@@ -2,7 +2,7 @@
 # hex1 言語の参照実装 (独立監査用)。仕様: docs/stage002-hex1.md 2 章。
 #
 # tmp/build/hex1.bin とは独立に，仕様書だけから書き起こした実装である。
-# hex1(asm.hex1) 等の出力一致をもって記録 SHA-256 の裏を取る
+# hex1(asm.hex1) 等の出力一致をもって記録 SHA-256 を裏付ける
 # (verify/audit/README.md)。ビルド経路には使用しない。
 #
 # 使用法: python3 hex1.py < input > output

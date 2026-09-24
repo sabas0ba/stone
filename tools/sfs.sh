@@ -1,5 +1,5 @@
 #!/bin/sh
-# sfs イメージとディレクトリの相互変換 (ホスト側の道具)。
+# sfs イメージとディレクトリの相互変換 (ホスト側のツール)。
 # 形式は docs/stage012-os.md 4 章。
 #
 # 使用法:
@@ -48,7 +48,7 @@ pack() {
     while IFS= read -r name; do
         [ "$i" -lt "$cnt" ] || die "too many files (max $cnt)"
         # 名前の上限はバイト数で決まる (表項目は name[52] + NUL 終端)。
-        # ${#name} は文字数なので非 ASCII 名で検査が狂う
+        # ${#name} は文字数なので非 ASCII 名で検査を誤る
         nbytes=$(printf '%s' "$name" | wc -c | tr -d ' \t')
         [ "$nbytes" -le 51 ] || die "name too long ($nbytes bytes): $name"
         len=$(wc -c < "$dir/$name" | tr -d ' \t')

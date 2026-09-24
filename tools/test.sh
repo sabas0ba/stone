@@ -9,7 +9,7 @@
 #   変更の無い段は作り直されない (docs/dev-notes.md 1.3)。
 #
 #   テストにもスタンプがある。**入力が前回と一致し，前回通っている
-#   Stage は飛ばす** (docs/dev-notes.md 1.5)。STONE_FORCE_TEST=1 で
+#   Stage は省略する** (docs/dev-notes.md 1.5)。STONE_FORCE_TEST=1 で
 #   無視して全部走らせる。
 #
 # 各 Stage のテストは並列に走らせる (共有するのは tmp/build の生成物の
@@ -60,7 +60,7 @@ report $? "env: gdb-multiarch の導入確認"
 #
 # これを入れたのは，実際に 1 度入ってしまったからである。パッチは
 # STONE_ENGINE=host のときしか通らないので，コンテナで走る CI では
-# 分岐に入らず，**緑のまま 3 回すり抜けた**。動作を壊さない違反は
+# 分岐に入らず，**CI が 3 回成功したまま検出されなかった**。動作を壊さない違反は
 # 動作の検査では見つからない。
 git show HEAD:tools/env.sh 2> /dev/null | grep -q '"${STONE_ENGINE:-}" = host'
 [ $? -ne 0 ]
@@ -87,27 +87,27 @@ export STONE_PREBUILT=1
 # ---- テストのスタンプ ----
 #
 # ビルドと同じ考え方をテストにも入れる。**入力が前回と一致し，前回
-# 通っている Stage は飛ばす。** 入力は「その Stage の検査一式
+# 通っている Stage は省略する。** 入力は「その Stage の検査一式
 # (tests/<stage>/**)」「共通の tests/lib.sh」「ビルドチェーンの全ソース (stage*/**)」
 # 「生成物のスタンプ (tmp/build/*.stamp)」である。生成物のスタンプには
 # すべての成果物の SHA-256 が入っているので，成果物が 1 バイトでも
-# 変われば鍵が変わる。
+# 変わればキーが変わる。
 #
 # 健全性の根拠はビルドの決定性と同じである (docs/dev-notes.md 1.3)。
 #
 # ビルドチェーンのソースは**その Stage 以下の番号のものだけ**を入れる。当初は
 # 絞らず全部入れていたが，それだと**新しい Stage を 1 つ足すだけで
-# 全 Stage のキャッシュが外れる** (Stage 16 を足したとき実際に
-# 000〜015 が全部走り直した)。各 Stage の検査が参照する stage ディレクトリ
+# 全 Stage のキャッシュが無効になる** (Stage 16 を足したとき実際に
+# 000〜015 が全部再実行された)。各 Stage の検査が参照する stage ディレクトリ
 # は自分以下の番号に収まっている (最大は stage013 -> stage009/010/012) ので，
 # 後ろの Stage のソースは前の Stage の検査結果を変えようがない。
 #
 # 前の Stage のソースを外さないのは，検査がソースを直接読む場合がある
 # ため (例: stage015 の検査は stage015/libc/*.c をその場で翻訳する)。
 # 成果物の側は tmp/build/*.stamp が全世代ぶんの SHA-256 を持っているので，
-# 1 バイトでも変われば全 Stage の鍵が変わる。
+# 1 バイトでも変われば全 Stage のキーが変わる。
 #
-# STONE_FORCE_TEST=1 で無視して全部走らせる。CI の週次はこれを立てる。
+# STONE_FORCE_TEST=1 で無視して全部走らせる。CI の週次はこれを設定する。
 mkdir -p tmp/test
 teststamp_key() {
     # "stage016" -> 16。この番号以下の stage ディレクトリだけを見る。
@@ -121,12 +121,12 @@ teststamp_key() {
     { find "tests/$1" -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
         | xargs -0 sha256sum 2> /dev/null
       sha256sum tests/lib.sh 2> /dev/null
-      # **検査を走らせる仕掛けそのものも印に入れる。**
+      # **検査を走らせる仕組みそのものもキーに入れる。**
       #
       # 入れていなかったせいで，tools/run-qemu.sh に上限を足した回の CI が
-      # 全 Stage を「cached」で飛ばし，1 秒で result: all passed と出した。
-      # 走らせ方を変えたのに，走らせずに緑になる。仕掛けが壊れていても
-      # 同じことが起きるので，これは黙って通る型である
+      # 全 Stage を「cached」で省略し，1 秒で result: all passed と出した。
+      # 走らせ方を変えたのに，実行されずに成功になる。仕組みが壊れていても
+      # 同じことが起きるので，これはエラーなしに通る形である
       find tools -type f 2> /dev/null | LC_ALL=C sort | tr '\n' '\0' \
           | xargs -0 sha256sum 2> /dev/null
       # 空のときに find を呼ぶと引数なし = カレントディレクトリ全体に
@@ -159,8 +159,8 @@ for t in tests/stage*/test.sh; do
 done
 
 # **Stage 1 つあたりの上限** (docs/dev-notes.md 1.8)。QEMU の側にも
-# 上限を置いてあるが (tools/run-qemu.sh)，podman ごと固まる形もあるので
-# 外側からも掛ける。0 で外せる
+# 上限を置いてあるが (tools/run-qemu.sh)，podman ごと停止する形もあるので
+# 外側からも設定する。0 で無効にできる
 stage_to=${STONE_TEST_TIMEOUT:-1800}
 runstage() {
     if [ "$stage_to" = 0 ] || ! command -v timeout > /dev/null 2>&1; then

@@ -3,16 +3,16 @@
 # tools/build.sh から読み込まれる。**このファイル自身がスタンプの入力**
 # なので，ここを直せばこの部分だけが作り直される。
 #
-# ここは第 1〜4 部で封じた cc の世代 (cc15a〜cc15k) だけである。封じた
-# 世代の原文はもう変わらないので，普段は常に cached になる。Stage 15 で
+# ここは第 1〜4 部で凍結した cc の世代 (cc15a〜cc15k) だけである。凍結した
+# 世代のソースはもう変わらないので，普段は常に cached になる。Stage 15 で
 # いちばん時間のかかる部分をここへ隔離するのが，この分割の目的である
 # (docs/dev-notes.md 1.4)。
 #
-# 世代ごとに step のスタンプを持つので，途中で殺されても失うのは
+# 世代ごとに step のスタンプを持つので，途中で強制終了されても失うのは
 # 高々 1 世代である (docs/dev-notes.md 1.5)。
 
 build_stage015a() {
-    # 64 bit 整数の土台 (docs/stage015-tcc.md 6 章)。前段は Stage 14 の最前線
+    # 64 bit 整数の基盤 (docs/stage015-tcc.md 6 章)。前段は Stage 14 の最前線
     ccgen cc15a cc14g stage015/cc15a.sc
     # 64 bit の演算 (第 2 部の後半)
     ccgen cc15b cc15a stage015/cc15b.sc
@@ -22,7 +22,7 @@ build_stage015a() {
     ccgen cc15d cc15c stage015/cc15d.sc
     # 64 bit の除算 (第 2 部の締め)
     ccgen cc15e cc15d stage015/cc15e.sc
-    # 第 2 部の穴 3 つの修正 (第 3 部 その 2)
+    # 第 2 部の不足 3 つの修正 (第 3 部 その 2)
     ccgen cc15f cc15e stage015/cc15f.sc
     # 再配置の表の拡張 (第 3 部の下準備)
     ccgen cc15g cc15f stage015/cc15g.sc

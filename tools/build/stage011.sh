@@ -6,8 +6,8 @@
 # 作り直しになっていた)。
 
 # Stage 11 は Stage 10 の成果物 (pp + cc) でビルドする。libc はリンク済みの
-# 実行像ではなくオブジェクトのまま置き，利用者が必要なものだけ ld へ並べる
-# (docs/stage011-libc.md 2.2)。ヘッダは束ねで pp へ渡す (docs/stage009-pp.md 2.2)
+# 実行イメージではなくオブジェクトのまま置き，利用者が必要なものだけ ld へ並べる
+# (docs/stage011-libc.md 2.2)。ヘッダはバンドルで pp へ渡す (docs/stage009-pp.md 2.2)
 build_stage011() {
     # 第 11 世代の libc (フリースタンディングのみ)。stage011/libc/ に凍結して
     # あり，後の世代が触ることはない (docs/roadmap.md 4.1)。

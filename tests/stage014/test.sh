@@ -8,7 +8,7 @@
 #   bad  通ってしまうが結果が誤っている
 #
 # **台帳と実測が食い違えば失敗する。** 直したのに表がそのままでも，
-# 壊したのに気づかなくても，等しく捕まえるためである。gap が ok に
+# 壊したのに気づかなくても，等しく検出するためである。gap が ok に
 # 変わったらそれは前進なので，表を直して commit する。
 set -u
 
@@ -52,7 +52,7 @@ probe() {
         echo "runfail $rc"
         return
     fi
-    # 改行を \n として 1 行に畳む (台帳に書ける形にする)
+    # 改行を \n として 1 行にまとめる (台帳に書ける形にする)
     printf 'ok %s\n' "$(printf '%s\n' "$out" | sed -e 's/\\/\\\\/g' -e 's/\t/\\t/g' | tr '\n' '@' | sed 's/@/\\n/g')"
 }
 
@@ -143,9 +143,9 @@ done < tests/stage014/ledger.txt
 echo
 echo "   台帳: 通る $nok 件 / 未対応 $ngap 件 / 通るが誤り $nbad 件"
 
-# 台帳は行駆動なので，probe/ に足しただけで台帳に載せていないファイルは
+# 台帳は行駆動なので，probe/ に足しただけで台帳に記載していないファイルは
 # 黙って検査されない。1:1 であることを確かめる (probe を足したのに台帳を
-# 直し忘れた，を捕まえる)
+# 直し忘れた，を検出する)
 sed 's/#.*//' tests/stage014/ledger.txt | awk 'NF { print $1 }' | sort > tmp/s14/ledger.names
 find "$prb" -name '*.c' -exec basename {} .c \; | sort > tmp/s14/probe.names
 diff -u tmp/s14/probe.names tmp/s14/ledger.names > tmp/s14/names.diff
@@ -391,7 +391,7 @@ runk() {
 #
 # pack は名前順に詰めるので割付け順は a.txt, b.txt, boot, cpfilt, in.txt, sh。
 # a.txt (3 バイト = 割付け 4) を in.txt の中身で書き直すと元の割付けを
-# はみ出す。kernel13 は直後の b.txt を潰し，さらにカーソルが巻き戻って
+# はみ出す。kernel13 は直後の b.txt を上書きし，さらにカーソルが巻き戻って
 # 次の新規作成 (new.txt) が in.txt 自身に重なった
 rm -rf tmp/s14/root
 mkdir -p tmp/s14/root
@@ -421,7 +421,7 @@ report $? "sfs: 上書き後の新規作成が既存に重ならない (in.txt �
 cmp -s "$o/new.txt" tmp/s14/root/in.txt
 report $? "sfs: 上書き後に作った新規ファイルの内容が正しい (new.txt)"
 
-# --- #49: 載せ先がユーザ領域の外にある ELF を拒む ---
+# --- #49: ロード先がユーザ領域の外にある ELF を拒む ---
 #
 # 正しい実行形式の p_vaddr をカーネル本体 (0x8000_0000) へ向ける。
 # kernel13 はこれをそのまま複写して自分を壊し，機械ごと止まった
@@ -447,7 +447,7 @@ exit
 report $? "run: 壊れた ELF を起動してもカーネルが生き残りシェルが続く"
 
 grep -q 'errno 8' tmp/s14/badelf.out
-report $? "elf: 載せ先がユーザ領域の外なら ENOEXEC (8) で拒む"
+report $? "elf: ロード先がユーザ領域の外なら ENOEXEC (8) で拒む"
 
 # --- 退行: kernel13 で動いていたものが kernel14 でも同じ結果になる ---
 rm -rf tmp/s14/root

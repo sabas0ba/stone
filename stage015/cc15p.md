@@ -4,14 +4,14 @@ cc15p は C コンパイラの Stage 15 第 6 部の世代である。
 [cc15o.sc](cc15o.sc) を出発点に，**構造体の配置を C89 (と ilp32 の
 慣行) に揃えた**。黙って誤る (bad) 誤りが 2 つ直っている。
 
-ソース [cc15p.sc](cc15p.sc) が正本である。
+ソース [cc15p.sc](cc15p.sc) が原本である。
 
 ## ビルド
 
 ```
 sh tools/build.sh stage015
 # cc15o(cc15p.sc) -> cc15p0     (1 段目)
-# cc15p0(cc15p.sc) -> cc15p     (正本。以降は固定点)
+# cc15p0(cc15p.sc) -> cc15p     (2 段目。以降は固定点)
 ```
 
 SHA-256: 1953eddbb26944580286e53bee7424591b6ecffe9553fb7d60e866fa1178aa79

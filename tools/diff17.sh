@@ -3,15 +3,15 @@
 # **値を突き合わせる** (docs/stage017-gcc.md 5.2)。
 #
 #   sh tools/diff17.sh          プローブ全部 (前置部の側と OS の側)
-#   sh tools/diff17.sh bare     前置部だけで走る側 (Stage 15 の器の適合)
-#   sh tools/diff17.sh os       libc を繋いで OS の上で走らせる側 (Stage 17)
+#   sh tools/diff17.sh bare     前置部だけで走る側 (Stage 15 の処理系の適合)
+#   sh tools/diff17.sh os       libc をリンクして OS の上で走らせる側 (Stage 17)
 #   sh tools/diff17.sh <名前>   1 つだけ
 #
 # ## なぜ要るか
 #
 # `cc15u` (複合代入が符号を見ていない) は，**往復検査でも固定点でも
-# 再現性でもバイト一致でも捕まらなかった**。捕まえたのは
-# 「我々が書いていない物差し」だけである。
+# 再現性でもバイト一致でも検出されなかった**。検出したのは
+# 「我々が書いていない基準」だけである。
 #
 # 台帳 (tests/stage015/ledger.txt) の期待値は**我々が書いている**ので，
 # 我々の思い込みがそのまま期待値になる。zlib の adler32 を突き合わせて
@@ -28,11 +28,11 @@
 # 「まだ実装していない」と「誤った入力を正しく拒む」。後者を名乗るには
 # **その入力が本当に誤っていること**を我々以外が言っている必要がある。
 #
-# ## ホストは万能の物差しではない
+# ## ホストは万能の基準ではない
 #
 # 語長が違う (ホストは 64 bit)。C が定義していない振舞い (0 除算) は
-# 比べようがない。ビルドチェーンの内部だけの名前を呼ぶプローブもある。**飛ばす
-# ものは名前と理由を必ず出す** —— 黙って飛ばすと「全部合った」に見える。
+# 比べようがない。ビルドチェーンの内部だけの名前を呼ぶプローブもある。**省略する
+# ものは名前と理由を必ず出す** —— 通知なしに省略すると「全部合った」に見える。
 set -u
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -48,9 +48,9 @@ prb=tests/stage015/probe
 hdr=stage015/libc/include/stdarg.h
 shim=tests/hostshim/shim.h
 
-# ---- OS の側 (libc を繋いで我々の OS の上で走らせる) ----
+# ---- OS の側 (libc をリンクして我々の OS の上で走らせる) ----
 #
-# 前置部だけで走る形では libc を測れない。**libc の穴は我々が書いた
+# 前置部だけで走る形では libc を測れない。**libc の不足は我々が書いた
 # 期待値では出ない** —— 我々は自分が使う書き方しか試さないからである
 # (docs/stage017-gcc.md 5.3)。
 osprb=tests/stage017/probe
@@ -58,14 +58,14 @@ ospp=tmp/build/pp16.bin
 osld=tmp/build/ld17.bin           # 落ちたら名前を言うリンカ (5.1)
 # 測る libc の世代。**前の世代を測り直せるようにしてある** ——
 # 「直す前は何が違っていたか」を後から再現できないと，直した記録が
-# 我々の言い分だけになる (STONE_DIFF_LIBCGEN=21 で第 21 世代)
+# 我々の主張だけになる (STONE_DIFF_LIBCGEN=21 で第 21 世代)
 osgen=${STONE_DIFF_LIBCGEN:-24}
 # **カーネルは libc の世代が決める。** 第 24 世代の stat は statat2
 # (502) を呼ぶので，それを持たないカーネルでは動かない
 # (docs/stage017-gcc.md 8.5)。
 #
-# kernel26 は kernel25 の写しなので **sfs4 を読み，像を 0xa000_0000 に
-# 置く** —— 詰める道具も記憶の大きさも kernel24 とは違う
+# kernel26 は kernel25 の複製なので **sfs4 を読み，イメージを 0xa000_0000 に
+# 置く** —— 詰めるツールもメモリの大きさも kernel24 とは違う
 # (tests/stage017/test.sh の runroot4 と同じ値である)
 if [ "$osgen" -ge 24 ]; then
     oskern=tmp/build/kernel26.bin
@@ -93,11 +93,11 @@ OSPRB_EXTRA=strtod
 
 HOSTCC=${CC:-gcc}
 
-# **飛ばすものと理由。** 黙って飛ばさない
+# **省略するものと理由。** 通知なしに省略しない
 skip_reason() {
     case $1 in
     fpsoft)
-        echo "鎖の内部の名前 (__dadd / __dmul …) を直に呼ぶ。ホストに実体が無い" ;;
+        echo "ビルドチェーンの内部の名前 (__dadd / __dmul …) を直に呼ぶ。ホストに実体が無い" ;;
     layout-oracle)
         echo "main を持たない断片 (layout.c の期待値を出すためのもの)" ;;
     hyg16)
@@ -115,14 +115,14 @@ skip_reason() {
 # **C89 の外側を測るプローブ。** 我々が拒んだときの裏取りは
 # `gcc -std=c89 -pedantic-errors` に「その入力は誤りか」を訊く形だが，
 # C99 や GNU の書き方は C89 モードのホストなら**当たり前に拒む**ので，
-# この裏取りが素通しになる —— 我々が実装できていないだけの拒否が
-# 「拒むのが正しい」に化ける。
+# この裏取りが意味をなさなくなる —— 我々が実装できていないだけの拒否が
+# 「拒むのが正しい」と判定される。
 #
 # ここに名前があるプローブは，**我々が拒んだ時点で落とす**
 # (docs/stage018-ext.md 4)。
 beyond_c89() {
     # **いまは空である。** Stage 18 のプローブ (c99decl / desig /
-    # stmtexpr / typeofx / caserange) はこの枝に持ち込んでいないので、
+    # stmtexpr / typeofx / caserange) はこの branch に持ち込んでいないので、
     # 該当が無い。持ち込むときはここへ名前を足す
     case $1 in
     esac
@@ -159,10 +159,10 @@ one() {
     fi
 
     # ---- ホストの側 ----
-    # **-funsigned-char で組む。** 素の char が符号つきかは処理系定義で，
-    # RV32 (我々の的) は符号なし，x86-64 のホストは符号つきである
-    # (cc15aa.sc の charsign)。物差しには**我々の的の約束**を伝える ——
-    # -std=c89 を伝えるのと同じ筋で，我々に合わせているのではない
+    # **-funsigned-char でビルドする。** 修飾なしの char が符号つきかは処理系定義で，
+    # RV32 (我々の対象アーキテクチャ) は符号なし，x86-64 のホストは符号つきである
+    # (cc15aa.sc の charsign)。基準には**我々の対象アーキテクチャの約束**を伝える ——
+    # -std=c89 を伝えるのと同じ方針で，我々に合わせているのではない
     "$HOSTCC" -w -funsigned-char -include "$shim" -o "$out/h_$n" \
         "$prb/$n.c" -lm \
         > "$out/h_$n.log" 2>&1
@@ -229,12 +229,12 @@ one() {
 
 # ================= OS の側 =================
 #
-# 前置部だけで走る形 (上) は libc を持たない。ここは **libc を繋いで
+# 前置部だけで走る形 (上) は libc を持たない。ここは **libc をリンクして
 # 我々の OS (kernel24) の上で走らせ**，同じソースをホストで走らせた
 # 標準出力と突き合わせる。
 #
 # 起動は 1 回だけである。プローブごとに QEMU を上げ下げすると，測る
-# ものより待つ時間のほうが長くなる。1 つの像に全部詰め，シェル (sh2)
+# ものより待つ時間のほうが長くなる。1 つのイメージに全部詰め，シェル (sh2)
 # に順に起動させて，`@@ 名前` の行で出力を切り分ける。
 
 osout=$out/os
@@ -261,7 +261,7 @@ os_missing() {
     echo "$_m"
 }
 
-# 我々の側で 1 本組む。返り値: 0 出来た / 3 我々の cc が拒んだ / 4 その他
+# 我々の側で 1 本ビルドする。返り値: 0 出来た / 3 我々の cc が拒んだ / 4 その他
 os_build() {
     _n=$1
     _src=$(os_src "$_n")
@@ -275,8 +275,8 @@ os_build() {
         || return 3
     _objs=""
     for _o in $OSLIB; do _objs="$_objs tmp/build/$_o.o"; done
-    # **落ちた ld の言い分は出力ファイルの中身である** (ld の標準出力は
-    # 像なので。tools/ext17.sh do_run と同じ)。中身の有無では判らない
+    # **落ちた ld の診断は出力ファイルの中身である** (ld の標準出力は
+    # イメージなので。tools/ext17.sh do_run と同じ)。中身の有無では判らない
     # ので，見るのは終了状態のほうである
     # shellcheck disable=SC2086
     { printf 'E'; cat "$osout/$_n.o" $_objs; printf '\0'; } \
@@ -316,14 +316,14 @@ os_run_all() {
                 pass=$((pass + 1)); continue
             fi
         else
-            printf 'FAIL %-14s 我々の側で組めない (%s/%s の .i と bin/%s を見よ)\n' \
+            printf 'FAIL %-14s 我々の側でビルドできない (%s/%s の .i と bin/%s を見よ)\n' \
                 "$_n" "$osout" "$_n" "$_n"
         fi
         fail=$((fail + 1))
     done
     [ -n "$_built" ] || return 0
 
-    # 像を詰める。**シェルと道具は我々のもの**である
+    # イメージを詰める。**シェルとツールは我々のもの**である
     cp tmp/build/sh2.bin "$osout/root/sh2"
     : > "$osout/root/go.sh"
     for _n in $_built; do
@@ -352,10 +352,10 @@ os_run_all() {
         return 0
     fi
 
-    # **終わりの印が無ければ途中で止まっている。** 出た分だけを見て
-    # 「合っていた」と言わないための見張りである
+    # **終わりの目印が無ければ途中で止まっている。** 出た分だけを見て
+    # 「合っていた」と言わないための検査である
     if ! grep -q '^@@end$' "$osout/run.out"; then
-        printf 'FAIL %-14s 走行が最後まで届かなかった (%s を見よ)\n' \
+        printf 'FAIL %-14s 実行が最後まで完了しなかった (%s を見よ)\n' \
             "(os)" "$osout/run.out"
         fail=$((fail + 1))
     fi
@@ -372,9 +372,9 @@ os_run_all() {
                 "$_n" "$osout/h_$_n.log"
             fail=$((fail + 1)); continue
         fi
-        # **ホスト側も作業場の中で走らせる。** ファイルを作るプローブが
+        # **ホスト側も作業領域の中で走らせる。** ファイルを作るプローブが
         # あるので (filex)，走らせる場所を揃えないと repo が汚れるうえ，
-        # 残り物が次の走行の答を変える
+        # 残り物が次の実行の答を変える
         if ! ( cd "$osout" && timeout 30 "./h_$_n" < /dev/null > "$_n.host" \
                 2> /dev/null ); then
             printf 'FAIL %-14s ホストの実行が落ちた\n' "$_n"
@@ -401,7 +401,7 @@ is_os_probe() {
 run_bare() {
     for f in "$prb"/*.c; do
         n=$(basename "$f" .c)
-        # libc を要るものは OS 側で測る。前置部だけでは繋がらない
+        # libc を要るものは OS 側で測る。前置部だけではリンクできない
         case " $OSPRB_EXTRA " in *" $n "*) continue ;; esac
         one "$n"
     done
@@ -414,7 +414,7 @@ run_os() {
         skipped=$((skipped + 1))
         return 0
     fi
-    echo "-- OS 側 (libc を繋いで kernel24 の上で走らせる) --"
+    echo "-- OS 側 (libc をリンクして kernel24 の上で走らせる) --"
     os_run_all "$(os_names | tr '\n' ' ')"
 }
 
@@ -427,5 +427,5 @@ os)   run_os ;;
 esac
 
 echo
-echo "diff17: 一致 $pass / 食い違い $fail / 飛ばした $skipped"
+echo "diff17: 一致 $pass / 食い違い $fail / 省略した $skipped"
 [ "$fail" -eq 0 ]

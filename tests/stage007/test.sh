@@ -36,7 +36,7 @@ report $? "build: B2 (occ.bin) の SHA-256 が occ.md 記載値と一致"
 
 # 2. 固定点
 #
-# **QEMU を通す実行は CI で稀に揺らぐ** (docs/dev-notes.md 1.6)。
+# **QEMU を通す実行は CI で稀に結果が変動する** (docs/dev-notes.md 1.6)。
 # 素の cmp だと，中身の退行と実行の非再現が同じ FAIL に見える
 fp7gen() {
     { cat stage007/occ.sc; printf '\004'; } | sh tools/env.sh qemu "$occ" > "$1"
@@ -89,7 +89,7 @@ report $? "codegen: occ の出力が scc の出力より小さい"
 # 4KiB を超える分岐 (occ の主眼。docs/stage007-occ.md 3 章)。
 # 旧実装 (sc/scc) は B-type 即値 (±4KiB) の範囲検査をせずに beq を直接
 # 出すため，本体が 4KiB を超える if を silent に誤コンパイルする。occ は
-# 「逆条件の B-type で 1 語跳び越え + jal」に落として制限を外した。
+# 「逆条件の B-type で 1 語跳び越え + jal」に変換して制限を回避した。
 #
 # occ.sc 自身は「旧コード生成でも ±4KiB に収まるよう」大きなループ本体を
 # 関数へ分割して書いてあるので (同 3 章)，固定点検証ではこの経路を通らない。

@@ -5,7 +5,7 @@ cc2 は C コンパイラである。Stage 10 第 1 部の [cc.sc](cc.sc) を出
 [stage010-c89.md](../docs/stage010-c89.md)，出力形式は
 [stage008-elf-ld.md](../docs/stage008-elf-ld.md) を参照。
 
-ソース [cc2.sc](cc2.sc) が正本である。バイナリはビルドで再現される生成物で
+ソース [cc2.sc](cc2.sc) が原本である。バイナリはビルドで再現される生成物で
 あり，git 管理しない。
 
 ## ビルド

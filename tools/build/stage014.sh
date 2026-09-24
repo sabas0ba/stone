@@ -6,7 +6,7 @@
 # 作り直しになっていた)。
 
 # Stage 14 は cc の新世代 (cc14a) を作る。前段の成果物のみでビルドする
-# 約束のとおり，1 段目は cc10l (= cc.bin) が作り，正本はその 1 段目が
+# 約束のとおり，1 段目は cc10l (= cc.bin) が作り，2 段目はその 1 段目が
 # 自分自身を再コンパイルしたものである (以降は固定点)。
 #
 # **cc.bin は差し替えない。** cc.bin を最新世代へ向けると Stage 11 以降の
@@ -79,7 +79,7 @@ build_stage014() {
     { cat tmp/build/cc14f.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14f.bin
     echo "built tmp/build/cc14f.bin" >&2
-    # リンカの第 14 世代 (シンボル名 31 バイト)。ld13 と同じ道具立てで作る
+    # リンカの第 14 世代 (シンボル名 31 バイト)。ld13 と同じツール群で作る
     { cat stage014/ld14.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/ld14.o
     { cat tmp/build/ld14.o; printf '\0'; } \
@@ -96,7 +96,7 @@ build_stage014() {
     { cat tmp/build/cc14g.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc14g.bin
     echo "built tmp/build/cc14g.bin" >&2
-    # pp の第 14 世代 (容量拡大。第 9 部)。同じ道具立てで作る
+    # pp の第 14 世代 (容量拡大。第 9 部)。同じツール群で作る
     { cat stage014/pp14.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/pp14.o
     { cat tmp/build/pp14.o; printf '\0'; } \
@@ -111,7 +111,7 @@ build_stage014() {
         | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/build/kernel14.bin
     echo "built tmp/build/kernel14.bin" >&2
     # 第 14 世代の libc (assert・printf の拡張・sprintf)。最前線の cc14g で
-    # コンパイルする (外部ソースと同じ経路に載せるため)
+    # コンパイルする (外部ソースと同じ経路を通すため)
     for f in src/string src/ctype src/stdlib src/morecore posix/sys posix/morecore posix/stdio posix/assert; do
         n=$(echo "$f" | tr / _)
         sh tools/bundle.sh stage014/libc/include/*.h "stage014/libc/$f.c" \

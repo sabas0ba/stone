@@ -4,7 +4,7 @@
  * (docs/stage013-tools.md 3 章)。
  *
  *   spawn (500)   プログラムからのプログラム起動。子の終わりを待つ逐次実行。
- *                 親の像は退避領域 (0x8100_0000..0x8370_0000) へ複写して守る
+ *                 親のイメージは退避領域 (0x8100_0000..0x8370_0000) へ複写して守る
  *   つなぎ替え    プロセスごとに fd 0 / fd 1 の結び先 (UART か sfs ファイル)
  *                 を持ち，spawn の引数で子の結び先を指定できる
  *   fd 0 の read  最初の 1 バイトが届くまで待つ (kernel12 は即 0 = EOF を
@@ -33,7 +33,7 @@ int urun(void);
 #define SAVEA   0x81000000      /* spawn の退避領域 (ここから上へ積む) */
 #define SAVETOP 0x83700000      /* 退避領域の上限 (= TFA) */
 #define SFSA    0x84000000      /* 共有領域 (sfs イメージ) */
-#define UBASE   0x86000000      /* ユーザ像のロード位置 */
+#define UBASE   0x86000000      /* ユーザイメージのロード位置 */
 #define USP     0x87000000      /* ユーザのフレームスタック上端 */
 #define UBRKMAX 0x86e00000      /* brk の上限 */
 #define UARTA   0x10000000      /* UART */
@@ -84,7 +84,7 @@ int depth;
 unsigned savecur;
 unsigned sbase[8];              /* MAXDEP 段 */
 
-/* spawn / boot の引数の写し。親の像は子の配置で消えるので，文字列は
+/* spawn / boot の引数の写し。親のイメージは子の配置で消えるので，文字列は
  * 先にカーネル側へ写す (docs/stage013-tools.md 3.2) */
 char kargs[512];                /* 引数文字列の連結 (NUL 区切り) */
 int kargo[8];                   /* kargs 内の各引数の開始位置 */
@@ -342,10 +342,10 @@ int cpystr(char *d, unsigned s, int cap) {
   return -1;
 }
 
-/* 親の像を退避して子を配置する。返り値は 0 か -errno。
+/* 親のイメージを退避して子を配置する。返り値は 0 か -errno。
  * 退避レコードの配置 (バイト): +0 tf 33 語, +132 fdent 16 語,
  * +196 fdpos 16 語, +260 つなぎ替え 4 語, +276 ubrk/sp/imgsz/stksz の 4 語,
- * +292 から像 [UBASE, ubrk) とフレームスタック [sp, USP) の複写 */
+ * +292 からイメージ [UBASE, ubrk) とフレームスタック [sp, USP) の複写 */
 int sys_spawn(unsigned sa) {
   unsigned *tf;
   char path[64];

@@ -103,8 +103,8 @@ done
 [ "$ok" -eq 0 ]
 report $? "build: ld13.bin / kernel13.bin / sh13 / ed13 / bundle13 / ldin13 の SHA-256 が各 .md 記載値と一致"
 
-# libc のオブジェクトも記録値と照合する。道具へリンクされるものは実行結果で
-# 間接的に守られるが，どの道具にもリンクされない ctype.o は記録した SHA-256 を
+# libc のオブジェクトも記録値と照合する。ツールへリンクされるものは実行結果で
+# 間接的に検査されるが，どのツールにもリンクされない ctype.o は記録した SHA-256 を
 # 誰も見ていなかった (記録だけがあって検査が無い状態)
 ok=0
 [ "$buildrc" -eq 0 ] || ok=1
@@ -139,7 +139,7 @@ report $? "elf: sh13 が ET_EXEC / RISC-V / entry 0x86000054 / PT_LOAD"
 # ---------------------------------------------------------------------------
 section "退行: 'F' / 'K' の出力が ld12 と一致"
 
-# **同じ入力・同じ道具でも答が揺らぐことがある** (docs/dev-notes.md 1.6)。
+# **同じ入力・同じツールでも結果が変動することがある** (docs/dev-notes.md 1.6)。
 # 扱いは tests/stage012 の同じ検査と揃える
 ok=0
 for o in pp.o cc10l.o ld.o; do
@@ -295,7 +295,7 @@ printf 'sh\n' > tmp/s13/root/boot
 runos gb "$fix/guestbuild.txt"
 rc=$?
 [ "$rc" -eq 0 ] && diff -q tmp/s13/gb.out "$exp/gb.txt" > /dev/null
-report $? "run: bundle -> pp -> cc -> ldin -> ld を通し，出来た像がその場で動く"
+report $? "run: bundle -> pp -> cc -> ldin -> ld を通し，出来たイメージがその場で動く"
 
 harvest
 
@@ -312,7 +312,7 @@ for pair in host.b:hi.b host.i:hi.i host.o:hi.o host.ld:hi.ld host.bin:hi; do
     cmp -s "tmp/s13/${pair%%:*}" "tmp/s13/out2/${pair##*:}" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "same: 各段の生成物 (束ね / .i / .o / ld 入力 / 実行形式) がホスト経路とバイト一致"
+report $? "same: 各段の生成物 (バンドル / .i / .o / ld 入力 / 実行形式) がホスト経路とバイト一致"
 
 # 出来た実行形式が ELF として妥当であることを確かめる (verify 層)
 cp tmp/s13/out2/hi tmp/s13/guest-hi
@@ -320,12 +320,12 @@ sh tools/env.sh run riscv64-unknown-elf-readelf -h tmp/s13/guest-hi > tmp/s13/hi
 grep -q 'EXEC (Executable file)' tmp/s13/hi.readelf \
     && grep -q 'RISC-V' tmp/s13/hi.readelf \
     && grep -q '0x86000054' tmp/s13/hi.readelf
-report $? "elf: ゲストが作った像が ET_EXEC / RISC-V / entry 0x86000054"
+report $? "elf: ゲストが作ったイメージが ET_EXEC / RISC-V / entry 0x86000054"
 
 # ---------------------------------------------------------------------------
 section "自己再生成: 処理系が OS の上で自分自身を作り直す (第 3 部)"
 
-# cc 自身のソースは指令を含まないので束ねを通さない。EOT を足すのが eot。
+# cc 自身のソースは指令を含まないのでバンドルを通さない。EOT を足すのが eot。
 # 出来上がりはチェーンの成果物そのもの (docs/stage013-tools.md 7.4)
 rm -rf tmp/s13/root
 mkdir -p tmp/s13/root
@@ -349,7 +349,7 @@ report $? "same: 途中の cc12.o もホスト経路の cc10l.o とバイト一�
 # ---------------------------------------------------------------------------
 section "ビルド記述: mk がゲスト内で処理系を作り直す (第 4 部)"
 
-# 持ち込むのは cc8.o だけ (鎖の境目。docs/stage013-tools.md 9.1 / 9.5)。
+# 持ち込むのは cc8.o だけ (ビルドチェーンの境界。docs/stage013-tools.md 9.1 / 9.5)。
 # そこから上の pp / cc / ld をゲスト内で作り直す。
 # 中間物が増えるのでイメージを広げる (以降の検査はこの節で終わり)
 IMGSIZE=16777216

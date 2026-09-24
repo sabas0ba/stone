@@ -23,7 +23,7 @@ ld=tmp/build/ld.bin
 compile() {
     { cat "$1"; printf '\004'; } | sh tools/env.sh qemu "$cc" > "$2"
 }
-# オブジェクト列を実行像へ (列の終わりは 0x7f 以外の 1 バイト)
+# オブジェクト列を実行イメージへ (列の終わりは 0x7f 以外の 1 バイト)
 link() {
     out=$1
     shift
@@ -48,7 +48,7 @@ report $? "build: cc8.bin / ld.bin の SHA-256 が各 .md 記載値と一致"
 # 2. 固定点
 #
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
-# 分ける** (docs/dev-notes.md 1.6)。この検査は CI で実際に揺らいだ
+# 分ける** (docs/dev-notes.md 1.6)。この検査は CI で実際に結果が変動した
 gencc2() {
     compile stage008/cc.sc tmp/s8/cc2.o && link "$1" tmp/s8/cc2.o
 }

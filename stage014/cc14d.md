@@ -5,14 +5,14 @@ cc14d は C コンパイラの Stage 14 第 5 部の世代である。
 と **K&R 形式の関数定義**を足した。設計は
 [stage014-external.md](../docs/stage014-external.md) 8 章。
 
-ソース [cc14d.sc](cc14d.sc) が正本である。
+ソース [cc14d.sc](cc14d.sc) が原本である。
 
 ## ビルド
 
 ```
 sh tools/build.sh stage014
 # cc14c(cc14d.sc) -> cc14d0     (1 段目)
-# cc14d0(cc14d.sc) -> cc14d     (正本。以降は固定点)
+# cc14d0(cc14d.sc) -> cc14d     (2 段目。以降は固定点)
 ```
 
 SHA-256: 0807358b48c77d6c83d082ed0be54a88c05dcddd34178c75b16e53b822e4dcdc
@@ -53,4 +53,4 @@ int b;
 - K&R の並びとプロトタイプ (`int add(int, int);`) の整合は検査しない
   (個数は従来どおり検査される)
 - 不完全型の配列 (`struct s arr[4];` を前方参照のまま) は個別には
-  検査しない。実体を置く時点の大きさ 0 で捕まる
+  検査しない。実体を置く時点の大きさ 0 で検出される

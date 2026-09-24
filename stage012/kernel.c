@@ -21,7 +21,7 @@ int urun(void);
 /* メモリ配置 (docs/stage012-os.md 4.3 / 5.5) */
 #define TFA     0x83700000      /* トラップフレーム */
 #define SFSA    0x84000000      /* 共有領域 (sfs イメージ) */
-#define UBASE   0x86000000      /* ユーザ像のロード位置 */
+#define UBASE   0x86000000      /* ユーザイメージのロード位置 */
 #define USP     0x87000000      /* ユーザのフレームスタック上端 */
 #define UBRKMAX 0x86e00000      /* brk の上限 */
 #define UARTA   0x10000000      /* UART */

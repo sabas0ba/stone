@@ -3,8 +3,8 @@
 #
 #   sh tools/t1probe.sh <file.c>
 #
-# tccH はホストの交差 tcc が作った同じ tcc なので，食い違えば
-# **我々の cc が T1 を誤訳した**ことになる (docs/stage015-tcc.md 12.18)。
+# tccH はホストのクロス tcc が作った同じ tcc なので，食い違えば
+# **我々の cc が T1 を誤コンパイルした**ことになる (docs/stage015-tcc.md 12.18)。
 # 1 ブートで両方を走らせるので 1 周 1〜2 分である。
 set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

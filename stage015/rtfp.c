@@ -113,7 +113,7 @@ unsigned long long dnorm(int s, unsigned long long sig, int e) {
     return dpack(s, 0, sig);
   }
 
-  // 正規化数。仮数の最上位を bit 52 へ寄せる
+  // 正規化数。仮数の最上位を bit 52 に揃える
   if (sh > 52) {
     d = sh - 52;
     half = 1ULL << (d - 1);
@@ -169,7 +169,7 @@ unsigned long long dadd2(unsigned long long a, unsigned long long b) {
     ti = sa; sa = sb; sb = ti;
   }
   d = ea - eb;
-  // 3 bit ぶん余裕を持たせてから寄せる
+  // 3 bit ぶん余裕を持たせてから桁を揃える
   ma = ma << 3;
   mb = mb << 3;
   sticky = 0;

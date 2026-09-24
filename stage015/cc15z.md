@@ -36,7 +36,7 @@ C89 6.5.4.1 ——
 | `int (*const f)(int) = 0;` (局所) | **1 で拒む** | 通る |
 | `int g(int (*volatile f)(int))` | **1 で拒む** | 通る |
 
-**これで括弧の中の宣言子を読む道が 3 世代そろった** ——
+**これで括弧の中の宣言子を読む経路が 3 世代で揃った** ——
 [cc15w](cc15w.md) が名前の省略 (仮引数並び)、[cc15x](cc15x.md) が
 cast の型名、cc15z が型修飾子である。**どれも「括弧の外では既に
 できていたことが、括弧の中だけ抜けていた」**という同じ形の抜けだった。
@@ -55,7 +55,7 @@ conversion_loop (int (*const one_conversion)(iconv_t, const uchar **, size_t *,
 
 `libcpp/charset` 1 単位が止まっていた。
 
-## 鎖は変わらない
+## ビルドチェーンは変わらない
 
 既存のソースにこの形は無い。`sh` / `ed` / `mk` を訳した `.o` は
 `cc10l` のものと 1 バイトも変わらず、`cc15z0` と `cc15z` もバイト一致
@@ -75,7 +75,7 @@ conversion_loop (int (*const one_conversion)(iconv_t, const uchar **, size_t *,
 ## 世代名について
 
 **`cc15z` で 1 文字が尽きた。** 次からは `cc15aa` / `cc15ab` … と 2 文字へ
-延ばす (持ち主の判断)。`cc15a..cc15z` の並びをそのまま延長する形なので、
+延ばす (リポジトリ所有者の判断)。`cc15a..cc15z` の並びをそのまま延長する形なので、
 既存の `.md` / ビルド / 検査の参照形式は一切変わらない。**辞書順と世代順は
 一致しなくなる** (`cc15aa` は `cc15a` の直後に並ぶ) ので、並べるときは
 この `.md` の「第 15 世代 その N」を見る。
@@ -85,7 +85,7 @@ conversion_loop (int (*const one_conversion)(iconv_t, const uchar **, size_t *,
 ```
 sh tools/build.sh stage015
 # cc15y(cc15z.sc) -> cc15z0     (1 段目)
-# cc15z0(cc15z.sc) -> cc15z     (正本。以降は固定点)
+# cc15z0(cc15z.sc) -> cc15z     (2 段目。以降は固定点)
 ```
 
 SHA-256: 51b034da8441a8babeb1b11fae776e09bebdc4f368955e855243d9ba2750c499

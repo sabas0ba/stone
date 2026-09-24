@@ -36,11 +36,11 @@ FILE *__stdfile(int i) {
   return &files[i];
 }
 
-/* 追記の流れは**書く前に必ず末尾へ寄せる** (第 21 世代)。
+/* 追記の流れは**書く前に必ず末尾へ移動する** (第 21 世代)。
  *
  * カーネルに O_APPEND が無いので libc の側でやる。単一の走行なので
  * (spawn は子の終わりを待つ)，これで POSIX の O_APPEND と同じ意味に
- * なる。**寄せられなければ書かない** —— 書くと先頭を潰すからである
+ * なる。**移動できなければ書かない** —— 書くと先頭を壊すからである
  * (docs/stage017-cc.md 32 章)。
  */
 static int wr(FILE *f, void *buf, int n) {
@@ -62,9 +62,9 @@ FILE *fopen(char *path, char *mode) {
   app = 0;
   if (mode[0] == 'r') flags = O_RDONLY;
   else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
-  /* **O_APPEND は渡さない。** カーネルが知らない旗を黙って捨てるので，
-   * 渡しても効かない —— そして open() はそれを拒む (fcntl.h の註)。
-   * 追記はここ (libc) で実装する。印だけ立てて，書く前に末尾へ寄せる */
+  /* **O_APPEND は渡さない。** カーネルが知らないフラグを黙って捨てるので，
+   * 渡しても無効である —— そして open() はそれを拒む (fcntl.h の註)。
+   * 追記はここ (libc) で実装する。印だけ立てて，書く前に末尾へ移動する */
   else if (mode[0] == 'a') { flags = O_WRONLY | O_CREAT; app = 1; }
   else return NULL;
   fd = open(path, flags);
@@ -222,18 +222,18 @@ static int emitc(FILE *f, int c) {
 }
 
 /* 整数を 1 つ書き出す (第 22 世代。第 21 世代までの pnum / pnum64 を
- * 1 つにまとめ，精度と旗を持たせたもの)。
+ * 1 つにまとめ，精度とフラグを持たせたもの)。
  *
- * **旗と精度を足したのは，ホストと突き合わせて出た穴である**
+ * **フラグと精度を足したのは，ホストと突き合わせて出た不足である**
  * (docs/stage017-gcc.md 5.3)。第 21 世代は `%o` を知らず，`%X` を
- * 小文字で書き，`%.3d` の精度を読み捨て，`%+d` `% d` `%#x` の旗に
+ * 小文字で書き，`%.3d` の精度を読み捨て，`%+d` `% d` `%#x` のフラグに
  * 至っては**可変部を 1 つも取り出さないまま次の変換へ進んで**いた。
  *
  *   v     値 (符号は sgn が持つ)
  *   base  2〜16
  *   up    大文字で書く (%X)
  *   sgn   先に出す符号の文字 ('-' / '+' / ' ')。0 なら出さない
- *   alt   # 旗
+ *   alt   # フラグ
  *   prec  精度。-1 は指定なし。0 で値が 0 なら**桁を 1 つも書かない**
  *   w     欄の幅   pad0  0 で詰める   left  左詰め
  *
@@ -250,7 +250,7 @@ static int pout(FILE *f, unsigned long long v, unsigned base, int up,
 
   n = 0;
   if (v == 0ULL) {
-    /* 精度 0 の 0 は空である (C89 7.9.6.1)。ただし # 旗つきの 8 進は
+    /* 精度 0 の 0 は空である (C89 7.9.6.1)。ただし # フラグつきの 8 進は
      * 下で 0 を 1 つ足す */
     if (prec != 0) { b[0] = '0'; n = 1; }
   }
@@ -273,7 +273,7 @@ static int pout(FILE *f, unsigned long long v, unsigned base, int up,
   if (sgn) len = len + 1;
 
   /* 空白詰めは符号より前，0 詰めは符号より後ろ。**精度が指定された
-   * 整数変換では 0 旗は効かない** (C89 7.9.6.1) */
+   * 整数変換では 0 フラグは無効である** (C89 7.9.6.1) */
   if (left || prec >= 0) pad0 = 0;
   i = len;
   if (!left && !pad0) { while (i < w) { emitc(f, ' '); i = i + 1; } }
@@ -299,7 +299,7 @@ static int pout(FILE *f, unsigned long long v, unsigned base, int up,
  */
 
 /* 10^0 .. 10^22 は double で**正確に**表せる。ここまでは掛けても
- * 誤差が入らないので，桁寄せを 1 回の掛け算で済ませられる */
+ * 誤差が入らないので，正規化を 1 回の掛け算で済ませられる */
 static double fpw10[23];
 static double fp10[9];
 static int fpinit;
@@ -317,7 +317,7 @@ static int fpsetup(void) {
 
 /* a * b の丸め誤差を正確に求める (Dekker)。**半端の判定に要る** ——
  * 2.45 は 2 進では 2.45 より僅かに大きいので `%.1f` は 2.5 になるべき
- * だが，2.45 * 10 を素直に計算すると丁度 24.5 に丸まって「半端」に
+ * だが，2.45 * 10 を単純に計算すると丁度 24.5 に丸まって「半端」に
  * 見えてしまい，偶数丸めで 2.4 になる */
 static double fprderr(double a, double b, double p) {
   double c;
@@ -402,7 +402,7 @@ static int fpput(char *out, int at, int c) {
   return at + 1;
 }
 
-/* 符号なしの整数を字にする (桁寄せの結果を並べるのに使う) */
+/* 符号なしの整数を字にする (正規化の結果を並べるのに使う) */
 static int fpint(unsigned long long v, char *out) {
   char tmp[24];
   int n;
@@ -422,7 +422,7 @@ static int fpint(unsigned long long v, char *out) {
  * ここを超える精度に意味は無い */
 #define FPPRECMAX 180
 
-/* 無限と NaN。**桁寄せの輪に入れてはいけない** —— w を fp10 で割っても
+/* 無限と NaN。**正規化のループに入れてはいけない** —— w を fp10 で割っても
  * 無限のままなので回り続ける。ホスト (glibc) と同じ字を出す */
 static int fpspecial(double v, int up, char *out) {
   char *s;
@@ -469,7 +469,7 @@ static int fpe(double v, int prec, int up, int alt, char *out) {
     n = fpput(out, n, '.');
     for (i = 1; i <= prec; i = i + 1) n = fpput(out, n, digs[i]);
   } else if (alt) {
-    /* # 旗は**小数点を残す** (C89 7.9.6.1) */
+    /* # フラグは**小数点を残す** (C89 7.9.6.1) */
     n = fpput(out, n, '.');
   }
   n = fpput(out, n, up ? 'E' : 'e');
@@ -487,7 +487,7 @@ static int fpe(double v, int prec, int up, int alt, char *out) {
   return n;
 }
 
-/* 小数の形 (ddd.ddd)。桁数が 18 に収まるなら**まるごと整数へ寄せて**
+/* 小数の形 (ddd.ddd)。桁数が 18 に収まるなら**全体を整数へ変換して**
  * 組む —— 丸めが fpscale の 1 か所だけになる */
 static int fpf(double v, int prec, int alt, char *out) {
   char digs[24];
@@ -569,7 +569,7 @@ static int fpf(double v, int prec, int alt, char *out) {
 }
 
 /* %g。指数が小さすぎるか大きすぎれば e の形，そうでなければ f の形。
- * **末尾の 0 を落とす**のが %g の要点である (# 旗があれば落とさない) */
+ * **末尾の 0 を落とす**のが %g の要点である (# フラグがあれば落とさない) */
 static int fpg(double v, int prec, int up, int alt, char *out) {
   char tmp[512];
   char digs[24];
@@ -616,7 +616,7 @@ static int fpg(double v, int prec, int up, int alt, char *out) {
   return n;
 }
 
-/* 組んだ本体を旗と幅に従って書き出す。**符号と詰め物の順**は整数の側
+/* 本体をフラグと幅に従って書き出す。**符号と詰め物の順**は整数の側
  * (pout) と同じ規則である —— 空白の詰め物は符号より前，0 の詰め物は
  * 符号の後ろ */
 static int pdbl(FILE *f, char *body, int w, int pad0, int left,
@@ -651,12 +651,12 @@ static int pdbl(FILE *f, char *body, int w, int pad0, int left,
   return n;
 }
 
-/* 実装する変換は %d %i %u %o %x %X %c %s %p %% と，旗 (- 0 + 空白 #)，
+/* 実装する変換は %d %i %u %o %x %X %c %s %p %% と，フラグ (- 0 + 空白 #)，
  * 幅，精度，長さ修飾 (h は int へ格上げされて届くので読み捨て，l は
  * long == int なので同じ，ll は 64 bit)。
  *
  * **第 21 世代との差はすべて，ホストと突き合わせて出たものである**
- * (docs/stage017-gcc.md 5.3)。とくに旗は，知らない文字を「普通の字」
+ * (docs/stage017-gcc.md 5.3)。とくにフラグは，知らない文字を「普通の字」
  * として書き出していたので，`%+d` が "+d" になったうえ**可変部を
  * 取り出さないまま次へ進み**，同じ printf の残りの引数がすべてずれた。 */
 static int vfpr(FILE *f, char *fmt, va_list ap) {
@@ -733,7 +733,7 @@ static int vfpr(FILE *f, char *fmt, va_list ap) {
       i = i + 1;
       continue;
     }
-    /* 符号なし整数。+ と空白の旗は符号つきにしか効かない (C89) */
+    /* 符号なし整数。+ と空白のフラグは符号つきにしか作用しない (C89) */
     if (c == 'u' || c == 'o' || c == 'x' || c == 'X' || c == 'p') {
       k = 10;
       up = 0;
@@ -755,7 +755,7 @@ static int vfpr(FILE *f, char *fmt, va_list ap) {
       if (prec < 0) prec = 6;
       if (prec > FPPRECMAX) prec = FPPRECMAX;
       dv = va_arg(ap, double);
-      /* **無限と NaN を先に捌く。** 桁寄せの輪は無限では終わらない */
+      /* **無限と NaN を先に扱う。** 正規化のループは無限では終わらない */
       if (fpspecial(dv, (c == 'E' || c == 'F' || c == 'G'), fb) < 0) {
         if (c == 'e' || c == 'E') fpe(dv, prec, c == 'E', alt, fb);
         else if (c == 'f' || c == 'F') fpf(dv, prec, alt, fb);
@@ -913,7 +913,7 @@ FILE *fdopen(int fd, char *mode)
             files[k].err = 0;
             /* **印は mode で決める。** fclose は fd を -1 にするだけ
              * なので，追記の流れが閉じた枠には app = 1 が残る。
-             * 落とさないと次にこの枠を取った流れが末尾へ寄せてしまう。
+             * 落とさないと次にこの枠を取った流れが末尾へ移動してしまう。
              * かといって落とすだけだと fdopen(fd, "a") が追記に
              * ならない —— **どちらも黙って誤る形である** (第 21 世代) */
             files[k].app = (mode != 0 && mode[0] == 'a');

@@ -1,7 +1,7 @@
 /* config-stone.h --- stone 上で tcc を組むときの config.h (第 2 世代)
  *
  * 上流の configure はホストでしか動かないので，stone 用の設定を
- * 手で固定する。束ねでは "config.h" の名前で載せる
+ * 手で固定する。バンドルでは "config.h" の名前で含める
  * (tools/bundle.sh の 名前=パス の形)。
  *
  * stage015/tcc/config-stone.h との差は逆進 (backtrace) と境界検査を

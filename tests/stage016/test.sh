@@ -112,7 +112,7 @@ echo "A-TWO"   > "$drt/src/a/two.c"
 echo "INC-ONE" > "$drt/inc/one.c"      # src/one.c と同名・別階層
 
 # dirprobe を **libc16** とリンクする。libc15 とリンクしてはいけない ——
-# libc15 の open は先頭の '/' を剥がすので，abs-from-src が黙って
+# libc15 の open は先頭の '/' を除去するので，abs-from-src が黙って
 # 間違う (docs/stage016-os.md 7.4)
 sh tools/bundle.sh stage016/libc/include/*.h \
     "sys/stat.h=stage016/libc/include/sys/stat.h" \
@@ -167,7 +167,7 @@ report $? "build: memprobe を組める"
 printf 'memprobe\n' > "$mrt/boot"
 sh tools/sfs2.sh pack "$mrt" "$out/mfs.img" 4194304 32 > /dev/null
 
-# 同じ像を 2 つのカーネルで走らせて比べる。**片方だけを見ても
+# 同じイメージを 2 つのカーネルで走らせて比べる。**片方だけを見ても
 # 「広がった」ことは言えない**ので，古い世代の実測を対にして出す
 memrun() {                  # memrun <kernel> <ramsize> <rambytes>
     rm -f "$out/mram"
@@ -189,11 +189,11 @@ report $? "kernel18 (128 MB): 取れた記憶域を書いて読み戻せる (got
 echo "$new_out" | grep -q '^verify ok$'
 report $? "kernel19 (512 MB): 取れた記憶域を書いて読み戻せる (got ${new_mb:-?} MiB)"
 
-# 旧世代は 14 MB の枠内 (像とデータスタックを引くので 14 未満)
+# 旧世代は 14 MB の枠内 (イメージとデータスタックを引くので 14 未満)
 [ -n "$old_mb" ] && [ "$old_mb" -lt 14 ]
 report $? "kernel18 の上限は 14 MiB 未満 (UBRKMAX - UBASE = 14 MB)"
 
-# 新世代は 250 MiB 以上。256 MB の枠から像とデータスタックを引いた値
+# 新世代は 250 MiB 以上。256 MB の枠からイメージとデータスタックを引いた値
 [ -n "$new_mb" ] && [ "$new_mb" -ge 250 ]
 report $? "kernel19 の上限は 250 MiB 以上 (got ${new_mb:-?} MiB)"
 
@@ -238,7 +238,7 @@ sh tools/sfs2.sh pack "$rrt" "$out/rfs.img" 4194304 128 > /dev/null \
 r=$?
 [ "$r" -eq 0 ] && diff -u tests/stage016/expected/rmprobe.txt "$out/rmprobe.out" \
     > "$out/rmprobe.diff"
-report $? "run: kernel20 が消せて，libc17 の realpath が経路を畳める"
+report $? "run: kernel20 が消せて，libc17 の realpath が経路を正規化できる"
 [ -s "$out/rmprobe.diff" ] && sed -n '4,$p' "$out/rmprobe.diff"
 
 section "sh2: POSIX 部分集合のシェル (docs/stage016-os.md 10 章)"
@@ -253,7 +253,7 @@ diff -q tests/stage016/expected/shprobe.txt "$out/shprobe.ref" > /dev/null
 report $? "ref: 記録した期待値が参照シェルの出力と一致する"
 
 # 各行は「名札 期待 実測」である。**expected/ との突き合わせだけでは，
-# 記録した期待値のほうが間違っている場合を捕まえられない**
+# 記録した期待値のほうが間違っている場合を検出できない**
 awk 'NF >= 3 && $2 != $3 { bad = 1 } END { exit bad }' \
     tests/stage016/expected/shprobe.txt
 report $? "ref: 期待と実測が全行で一致している (記録の側の取り違え避け)"
@@ -290,7 +290,7 @@ report $? "ref: 記録した期待値が参照シェルの出力と一致する"
 
 # 各行は「名札 期待 実測」である。期待と実測が食い違う行が 1 つでも
 # あれば駄目。**expected/ との突き合わせだけでは，記録した期待値の
-# ほうが間違っている場合を捕まえられない**
+# ほうが間違っている場合を検出できない**
 awk 'NF >= 3 && $2 != $3 { bad = 1 } END { exit bad }' \
     tests/stage016/expected/toolprobe.txt
 report $? "ref: 期待と実測が全行で一致している (記録の側の取り違え避け)"

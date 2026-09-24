@@ -54,14 +54,14 @@ int open(char *path, int flags, ...) {
   /* mode (O_CREAT のときの第 3 引数) は読まずに捨てる。sfs に許可は
    * 無く，可変部を読まなくても呼出し規約上の害は無い (呼び手が積んで
    * 呼び手が下ろす) */
-  /* 第 15 世代までは先頭の '/' の並びをここで剥がしていた。名前空間が
+  /* 第 15 世代までは先頭の '/' の並びをここで除去していた。名前空間が
    * 平らでルート直下しか無かったので正しかったが，**作業ディレクトリを
    * 持った瞬間に重大な誤りになる** —— "/inc/one.c" が "inc/one.c" に
    * なり，ルートではなく cwd から引かれる。「絶対経路を渡したのに，
    * 今いる場所によって別のファイルが開く」という黙って間違う壊れ方で
    * ある (docs/stage016-os.md 7.4)。
    *
-   * 剥がす処理はもう要らない。入った理由は tcc が -I/ から
+   * 除去する処理はもう要らない。入った理由は tcc が -I/ から
    * "//tccdefs.h" の形の経路を作ることだったが，第 1 部の walk が
    * 先頭と連続の '/' を読み飛ばすので，そのまま渡して正しく引ける */
   return wrap(sys_openat(AT_FDCWD, path, flags, 0));
@@ -179,9 +179,9 @@ int getdents64(int fd, void *buf, int n) {
   return wrap(sys_ecall(SYS_GETDENTS, fd, (int)buf, n));
 }
 
-/* 経路を絶対形に直し，. と .. と重なった / を畳む (第 17 世代)。
+/* 経路を絶対形に直し，. と .. と重なった / を正規化する (第 17 世代)。
  *
- * **シンボリックリンクが無いので字句的な畳み込みで足りる。** 本来の
+ * **シンボリックリンクが無いので字句的な正規化で足りる。** 本来の
  * realpath は各段を実際に辿って解決するが，sfs2 にリンクは無いので
  * 結果は同じになる。
  *
@@ -210,7 +210,7 @@ char *realpath(char *path, char *resolved) {
     strcpy(tmp + n, path);
   }
 
-  /* 2. 字句的に畳む。out へ「/名前」を積み，.. で 1 つ戻す */
+  /* 2. 字句的に正規化する。out へ「/名前」を積み，.. で 1 つ戻す */
   out = resolved;
   if (out == 0) {
     out = (char *)malloc(_RPMAX);
@@ -235,7 +235,7 @@ char *realpath(char *path, char *resolved) {
     memcpy(out + len, tmp + st, (size_t)seg);
     len = len + seg;
   }
-  if (len == 0) { out[0] = '/'; len = 1; }      /* すべて畳んだらルート */
+  if (len == 0) { out[0] = '/'; len = 1; }      /* すべて打ち消したらルート */
   out[len] = 0;
   return out;
 }

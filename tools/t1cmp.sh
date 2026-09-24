@@ -4,8 +4,8 @@
 #
 #   sh tools/t1cmp.sh a.c b.c ...
 #
-# tccH はホストの交差 tcc が作った同じ tcc なので，食い違えば
-# **我々の cc が T1 を誤訳した**ことになる (docs/stage015-tcc.md 12.18)。
+# tccH はホストのクロス tcc が作った同じ tcc なので，食い違えば
+# **我々の cc が T1 を誤コンパイルした**ことになる (docs/stage015-tcc.md 12.18)。
 set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"

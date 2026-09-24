@@ -1,4 +1,4 @@
-// RV32IM ベアメタルエミュレータ (展示層)。
+// RV32IM ベアメタルエミュレータ (デモ層)。
 //
 // stone の成果物 (フラットバイナリ) をブラウザ内で実行するための最小実装。
 // 実行モデルは docs/plan.md 3 章と同一:
@@ -9,7 +9,7 @@
 // Stage 12 以降のカーネルを動かすため，M/U の 2 特権と CSR・mret・
 // ecall トラップを備える (ld12/ld13 の 'K' 前置部と kernel が使う範囲。
 // docs/stage012-os.md 5 章)。PMP は CSR としては受けるが強制はしない
-// (全許可相当。展示ではメモリ保護の失敗を再現する必要がない)。
+// (全許可相当。デモではメモリ保護の失敗を再現する必要がない)。
 //
 // ビルド経路には一切使用しない (検証の基準は QEMU + コンテナのまま。
 // docs/plan.md 2.3)。本実装の正しさは web/test-emu.mjs が「チェーンの
@@ -381,7 +381,7 @@ export function concatBytes(parts) {
     return r;
 }
 
-// pp への入力 (束ね) を組み立てる。形式は docs/stage009-pp.md 2.2
+// pp への入力 (バンドル) を組み立てる。形式は docs/stage009-pp.md 2.2
 // (tools/bundle.sh と同じ。最後のメンバが翻訳単位)
 export function buildBundle(members) {
     const enc = new TextEncoder();

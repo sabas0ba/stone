@@ -108,7 +108,7 @@ int strncmp(char *a, char *b, size_t n) {
 
 /* memchr --- 記憶域から 1 バイトを探す (C89 7.11.5.1。第 21 世代)。
  *
- * **strchr と違い，NUL で止まらない。** n バイトを丸ごと見る。
+ * **strchr と違い，NUL で止まらない。** n バイトをすべて見る。
  * zlib の gzread.c 538 行が行の切れ目を探すのに使う
  * (docs/stage017-cc.md 32 章)。無いと zlib の gz 系が繋がらない。 */
 void *memchr(void *s, int c, size_t n) {

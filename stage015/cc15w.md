@@ -43,13 +43,13 @@ extern int _obstack_begin (struct obstack *, int, int,
 `libcpp/symtab` を合わせて **12 単位**がここで止まっていた。
 
 `pp18` で前処理を OS 側へ移すまで、この 10 単位は前処理の段
-(`ppext`) で止まっていて**この壁は見えていなかった**
+(`ppext`) で止まっていて**この未対応箇所は見えていなかった**
 ([docs/stage017-gcc.md](../docs/stage017-gcc.md) 8.2)。1 つ通すと次が
 見える。
 
 ## 直し方
 
-`fnpdec()` を `fnpdec1(b, anon)` に割り、`anon` が 1 のときだけ名前の
+`fnpdec()` を `fnpdec1(b, anon)` に分割し、`anon` が 1 のときだけ名前の
 省略を受ける。名前を省いたときは `fpnam` を空にする。
 
 ```c
@@ -64,7 +64,7 @@ extern int _obstack_begin (struct obstack *, int, int,
 
 `fnpdec(b)` は `fnpdec1(b, 0)` の別名として残す。**呼ぶ側 5 か所のうち
 仮引数並び (`pparam`) だけ**が `fnpdec1(b, 1)` を使う。他の 4 か所
-(大域・局所・構造体の員・K&R の型宣言) では名前の無い宣言子は宣言として
+(大域・局所・構造体のメンバ・K&R の型宣言) では名前の無い宣言子は宣言として
 意味を持たないので、受けてしまうと記号の無い宣言が通る。
 
 `pparam()` は名前が空なら記号を作らず、占める語だけ数えて返る。
@@ -87,10 +87,10 @@ extern int _obstack_begin (struct obstack *, int, int,
 | `int g(int (*)[4]);` (配列へのポインタ) | 1 で拒む |
 
 どちらも C89 として妥当だが、GCC 4.7.4 の libiberty / libcpp の閉包には
-現れない。**会った形だけを足す** —— 会っていない形を想像で足すと、
+現れない。**実際に遭遇した形だけを足す** —— 遭遇していない形を想像で足すと、
 根拠の無い実装が残る (`cofs` の `sizeof` を保留したのと同じ判断)。
 
-## 鎖は変わらない
+## ビルドチェーンは変わらない
 
 既存のソースはプロトタイプで関数ポインタの仮引数名を省いていない。
 `sh` / `ed` / `mk` を訳した `.o` は `cc10l` のものと 1 バイトも変わらず、
@@ -113,7 +113,7 @@ extern int _obstack_begin (struct obstack *, int, int,
 ```
 sh tools/build.sh stage015
 # cc15v(cc15w.sc) -> cc15w0     (1 段目)
-# cc15w0(cc15w.sc) -> cc15w     (正本。以降は固定点)
+# cc15w0(cc15w.sc) -> cc15w     (2 段目。以降は固定点)
 ```
 
 SHA-256: 38ebe346a83efa8e433d49ac826db7107ecb82296d7c7d9d38594e4c3bd067ff

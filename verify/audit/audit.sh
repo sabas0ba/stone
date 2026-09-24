@@ -78,13 +78,13 @@ rc=$?
 [ "$rc" -eq 0 ] && cmp -s "$work/asm-self.bin" "$work/asm.bin"
 report $? "asm: 自己アセンブル固定点 asm(転記) == hex1(asm.hex1) を参照実装のみで再現"
 
-section "鎖の成果物との照合 (tmp/build がある場合のみ)"
+section "ビルドチェーンの成果物との照合 (tmp/build がある場合のみ)"
 
 if [ -f tmp/build/hex1.bin ] && [ -f tmp/build/asm.bin ]; then
     cmp -s "$work/hex1.bin" tmp/build/hex1.bin
-    report $? "chain: 参照実装の hex1.bin が鎖の生成物とビット一致"
+    report $? "chain: 参照実装の hex1.bin がビルドチェーンの生成物とビット一致"
     cmp -s "$work/asm.bin" tmp/build/asm.bin
-    report $? "chain: 参照実装の asm.bin が鎖の生成物とビット一致"
+    report $? "chain: 参照実装の asm.bin がビルドチェーンの生成物とビット一致"
 else
     echo "skip チェーン生成物が無い (sh tools/build.sh stage003 の後に再実行すると照合する)"
 fi
