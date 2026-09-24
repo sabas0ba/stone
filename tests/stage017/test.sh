@@ -1459,6 +1459,58 @@ diff -u tests/stage017/expected/putc.txt "$out/putc.out" > "$out/putc.diff"
 report $? "run: 我々の OS の上で putc(c, stdout) が書ける (libc22 のマクロ)"
 [ -s "$out/putc.diff" ] && sed -n '4,$p' "$out/putc.diff"
 
+section "第 9 部: プロセスの時間と経路の上限 (kernel27 / libc25。docs/stage017-gcc.md 8.9)"
+
+# **GCC の libiberty 2 単位 (getruntime / lrealpath) がここで止まっていた。**
+# times / sysconf(_SC_CLK_TCK) / pathconf(_PC_PATH_MAX) / PATH_MAX を
+# 足した (stage017/libc25.md)。times はカーネルの times (153) を呼ぶ。
+#
+# ホストと突き合わせられる性質は差分試験の OS 側 (probe/timesx.c) が見る。
+# ここで見るのはホストに無いものである —— spawn した子の時間と，
+# kernel27 で定義どおりに直した経路の上限。
+
+# 根を sfs4 で詰めて kernel27 で走らせる。runroot4 と同じ手順で，
+# カーネルだけが違う。$1=根 $2=出力 $3=大きさ $4=件数
+runroot5() {
+    sh tools/sfs4.sh pack "$1" "$out/i5" "${3:-4194304}" "${4:-128}" \
+            > /dev/null \
+        && rm -f "$out/r5" \
+        && dd if=/dev/null of="$out/r5" bs=1 seek=1073741824 2> /dev/null \
+        && dd if="$out/i5" of="$out/r5" bs=64K oflag=seek_bytes \
+            seek=536870912 conv=notrunc 2> /dev/null \
+        && STONE_QEMU_RAMFILE="$out/r5" STONE_QEMU_RAM=1G \
+            sh tools/env.sh qemu tmp/build/kernel27.bin < /dev/null \
+            > "$2" 2>&1
+}
+
+r=$out/tmroot
+rm -rf "$r"; mkdir -p "$r/bin"
+cp tmp/build/sh2.bin "$r/bin/sh2"
+cp tmp/build/sh2.bin "$r/sh2"
+cp tmp/build/tmx "$r/tmx"
+printf 'tmx\necho "rc $?"\n' > "$r/go.sh"
+printf 'sh2 go.sh\n' > "$r/boot"
+# 期待値の意味は tests/stage017/user/tmx.c の註にある。p255 が通るのが
+# kernel27 の直した所で，kernel26 までは E2BIG (7) だった
+cat > "$out/tm.want" <<'TMEOF'
+clk 100
+pre-cut y
+spawn 0
+cut y
+own-small y
+path-max 256 256
+mkdir y
+p254 0 0
+p255 0 0
+p256 -1 7
+rc 0
+TMEOF
+runroot5 "$r" "$out/tm.out" 4194304 128
+rc=$?
+[ "$rc" -eq 0 ] && diff -u "$out/tm.want" "$out/tm.out" > "$out/tm.diff"
+report $? "run: 子の時間が cutime へ入り，255 バイトの経路が stat を通る (kernel27 / libc25)"
+[ -s "$out/tm.diff" ] && sed -n '4,$p' "$out/tm.diff"
+
 # ---------------------------------------------------------------------------
 # 第 8 部: configure が使う道具 (docs/stage017-gcc.md 5.5〜5.9)
 #

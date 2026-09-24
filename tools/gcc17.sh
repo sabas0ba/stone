@@ -5,6 +5,7 @@
 #   gcc17.sh pack      全配布ツリーをウィンドウと同じ大きさの sfs4 に実際に詰める (手動)
 #
 #   gcc17.sh configure            libiberty / libcpp を host で configure し config.h を作る
+#   gcc17.sh configure-gcc        gcc/ を測る準備 (生成物・auto-host.h・gmp.h。GMP / MPFR / MPC が要る)
 #   gcc17.sh headers [lib]        単位ごとに header の閉包を取り，我々の libc に無いものを数える
 #   gcc17.sh closure <lib>/<unit> 1 単位の閉包 (無い header は空の代役で埋める) を出す
 #   gcc17.sh unit <lib>/<unit>    1 単位を bundle -> pp -> cc15v に通し，結果を 1 行で出す
@@ -46,6 +47,8 @@ else
     src="$repo_root/docs/external/gcc47"
     src_name=gcc-4.7.4
 fi
+# GCC の前提 (gmp / mpfr / mpc) の取得先。gcc/ を測るときだけ要る
+ext="$repo_root/docs/external"
 
 die() {
     echo "gcc17.sh: $*" >&2
@@ -304,14 +307,14 @@ EOF
 work="$repo_root/tmp/g17u"
 # どの libc の header で測るか。
 #
-# **既定は libc21 である。** 実物 (zlib / bzip2) を読んで足した世代で，
-# 我々が実物に向けて持っている header はこれが全部である
-# (stage017/libc21.md)。GCC をビルドするときに使うのもこちらになる。
+# **既定は最前線の libc25 である。** GCC の単位が止まった理由を 1 つずつ
+# 足してきた世代で，我々が実物に向けて持っている header はこれが全部で
+# ある (stage017/libc25.md)。
 #
 # STONE_GCC17_LIBC で差し替えられる。stage015/libc はベアメタル実行側 ——
 # tools/diff17.sh の bare が測る対象で，sys/ の下は time.h しか無い。
 # **どちらで測ったかで header の不足数が変わる**ので明示する
-ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc24/include}
+ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc25/include}
 pp16=tmp/build/pp16.bin
 pp18=tmp/build/pp18
 cc15=tmp/build/cc15ae.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
@@ -399,12 +402,85 @@ pp_run_os() {
     return "$rc"
 }
 
+# 書庫の -I を順に出す。$2 は単位 (gcc/ では単位の階層 (c-family など) が
+# 探索パスに入るので要る。GCC の Makefile の INCLUDES の -I$(@D) と
+# -I$(srcdir)/$(@D))
 lib_dirs() {
     case $1 in
     libiberty) echo "-I$work/libiberty -I$src/libiberty -I$src/include" ;;
     libcpp)    echo "-I$work/libcpp -I$src/libcpp -I$src/libcpp/include -I$src/include" ;;
-    *) die "未知の書庫: $1 (libiberty | libcpp)" ;;
+    gcc)
+        # gcc/Makefile.in の INCLUDES と同じ順である。$work/gcc が build の
+        # 階層 (-I.)，GMPINC と DECNUMINC は configure_gcc が作ったもの
+        _d=$(dirname "${2:-x}")
+        _sub=""
+        [ "$_d" != . ] && _sub="-I$work/gcc/$_d -I$src/gcc/$_d"
+        echo "-I$work/gcc $_sub -I$src/gcc -I$src/include -I$src/libcpp/include" \
+             "-I$work/gmp -I$ext/mpfr/src -I$ext/mpc/src" \
+             "-I$src/libdecnumber -I$src/libdecnumber/bid -I$work/libdecnumber"
+        ;;
+    *) die "未知の書庫: $1 (libiberty | libcpp | gcc)" ;;
     esac
+}
+
+# 単位のソースの経路。libiberty / libcpp は <書庫>/<単位>.c だけである。
+#
+# gcc/ は 4 通りある —— 本体 (gcc/*.c)，c-family/，configure_gcc が生成した
+# もの (insn-*.c / gtype-desc.c / options*.c)，対象と host ごとの実装
+# (config/i386/i386.c など)。どこから来るかは Makefile の規則が決めているが，
+# 名前は重ならないので**順に探して最初にあったもの**で足りる
+unit_src() {
+    case $1 in
+    gcc)
+        for _c in "$src/gcc/$2.c" "$work/gcc/$2.c" \
+                  "$src/gcc/config/i386/$2.c" "$src/gcc/config/$2.c" \
+                  "$src/gcc/common/config/i386/$2.c"; do
+            [ -f "$_c" ] && { echo "$_c"; return 0; }
+        done
+        die "gcc/$2 のソースが見つからない"
+        ;;
+    *) echo "$src/$1/$2.c" ;;
+    esac
+}
+
+# 単位に与える -D と -I を 1 行に 1 つ出す。GCC の build は全単位に
+# -DIN_GCC -DCROSS_DIRECTORY_STRUCTURE (host と対象が違うとき) を与え，
+# 一部の単位には Makefile の CFLAGS-<単位>.o が足す (version.o の BASEVER，
+# lto-compress.o の zlib の -I など)。**Makefile から読む** —— 自分で書くと，
+# 何を与えたかが我々の記憶だけになる
+unit_flags() {
+    echo "-DHAVE_CONFIG_H"
+    [ "$1" = gcc ] || return 0
+    echo "-DIN_GCC"
+    echo "-DCROSS_DIRECTORY_STRUCTURE"
+    # $(info) は make の値をシェルに通さずに出す。そのあと set -- で
+    # シェルの引用を 1 度だけ外す (make がコマンド行へ渡すときと同じ)
+    _raw=$(make -s -C "$work/gcc-gen/gcc" -f Makefile -f "$work/print.mk" \
+               "print-CFLAGS-$2.o" 2> /dev/null) || _raw=""
+    [ -n "$_raw" ] || return 0
+    eval "set -- $_raw"
+    for _a in "$@"; do
+        case $_a in -D*|-I*) printf '%s\n' "$_a" ;; esac
+    done
+}
+
+# 単位の -I (lib_dirs の後ろに足す)。経路に空白は無い
+unit_incs() {
+    unit_flags "$1" "$2" | grep '^-I' || true
+}
+
+# 単位の -D を前処理の指令にして $3 へ書く。**-D をコマンド行に並べない。**
+# 値に空白を含むものがある (version.o の -DPKGVERSION="(GCC) ") ので，
+# 並べると語に割れる。host の cpp には -include で，我々の pp には
+# 駆動の file の先頭として同じ内容を与える
+unit_defs_file() {
+    unit_flags "$1" "$2" | grep '^-D' | sed 's/^-D//' \
+        | while IFS= read -r _d; do
+              case $_d in
+              *=*) printf '#define %s %s\n' "${_d%%=*}" "${_d#*=}" ;;
+              *)   printf '#define %s 1\n' "$_d" ;;
+              esac
+          done > "$3"
 }
 
 # config.h を host で作る。
@@ -443,6 +519,119 @@ configure() {
     echo '#define LOCALEDIR "/usr/local/share/locale"' > "$work/libcpp/localedir.h"
 }
 
+# gcc/ を測る準備 (docs/stage017-gcc.md 8.11)。
+#
+# gcc/ の単位は configure が作る header (auto-host.h / tm.h) と，gen*
+# プログラムが .md から作る header と .c (insn-*.h / insn-*.c /
+# gtype-desc.* / options.*) を読む。後者を作るには gen* を host で組んで
+# 走らせるしかない。そこで 2 段に分ける。
+#
+#   1. $work/gcc-gen  host 向けに普通に configure し，生成物を作る。gen* は
+#                     host の build 用 libiberty と host の gmp.h で組む
+#   2. $work/gcc      測る階層。1 の生成物を写し，auto-host.h だけを
+#                     **我々の libc と RV32 の語長で configure し直したもの**
+#                     に差し替える (libiberty の configure と同じ方法)。
+#                     libdecnumber と gmp.h も同じ条件で作る
+#
+# 対象は GCC17_TARGET (i686-pc-linux-gnu) である。GCC 4.7.4 に RISC-V の
+# backend は無い。我々の処理系と同じ ILP32 (int / long / pointer が 4
+# バイト) の対象を選んだ。対象ごとの単位 (config/i386/i386.c など) は
+# 測る単位に入るので，**どの対象を選んだかは表と一緒に記録する**
+GCC17_TARGET=i686-pc-linux-gnu
+
+configure_gcc() {
+    [ -d "$src" ] || die "GCC 4.7.4 が無い: $src (sh tools/fetch.sh gcc47)"
+    for d in gmp mpfr mpc; do
+        [ -d "$ext/$d" ] || die "$d が無い: $ext/$d (sh tools/fetch.sh $d)"
+    done
+    build=$(sh "$src/config.guess")
+    g="$work/gcc-gen"
+    mkdir -p "$g/gcc" "$g/build-$build/libiberty" "$g/gmp" "$work/gcc" \
+             "$work/gcc-cfg" "$work/libdecnumber" "$work/gmp"
+    # make の変数を展開させるための補助。$(info) はシェルを通さずに出す
+    printf 'print-%%:\n\t$(info $($*))@:\n' > "$work/print.mk"
+
+    # 古い C で書かれた gen* を今の host の cc で組むための指定。
+    # -fcommon: 4.7.4 は宣言だけの大域変数を複数の単位に置く (gcc 10 から既定が変わった)
+    hostcflags='-O0 -std=gnu89 -fcommon -w'
+
+    # 1-a. gen* が読む gmp.h (host の語長)
+    (cd "$g/gmp" && sh "$ext/gmp/configure" --disable-assembly \
+        --disable-shared > configure.log 2>&1) \
+        || die "host 向けの gmp の configure が落ちた ($g/gmp/configure.log)"
+    # 1-b. gen* が繋ぐ build 用 libiberty
+    (cd "$g/build-$build/libiberty" \
+        && CFLAGS="$hostcflags" sh "$src/libiberty/configure" \
+            --srcdir="$src/libiberty" > configure.log 2>&1 \
+        && make > make.log 2>&1) \
+        || die "build 用 libiberty が組めない ($g/build-$build/libiberty)"
+    # 1-c. gcc/ を host 向けに configure し，生成物を作る
+    (cd "$g/gcc" && CFLAGS="$hostcflags" sh "$src/gcc/configure" \
+        --srcdir="$src/gcc" --build="$build" --host="$build" \
+        --target="$GCC17_TARGET" --enable-languages=c --disable-plugin \
+        > configure.log 2>&1) \
+        || die "gcc/ の configure (host 向け) が落ちた ($g/gcc/configure.log)"
+    gmpinc="-I$g/gmp -I$ext/mpfr/src -I$ext/mpc/src"
+    (cd "$g/gcc" && make GMPINC="$gmpinc" \
+        config.h tm.h tm_p.h multilib.h specs.h tree-check.h genrtl.h \
+        insn-modes.h tm-preds.h tm-constrs.h gtype-desc.h gcov-iov.h \
+        insn-config.h insn-flags.h insn-codes.h insn-attr.h \
+        insn-constants.h options.h all-tree.def target-hooks-def.h \
+        insn-attr-common.h i386-builtin-types.inc \
+        c-family/c-target-hooks-def.h common/common-target-hooks-def.h \
+        insn-attrtab.c insn-automata.c insn-emit.c insn-extract.c \
+        insn-modes.c insn-opinit.c insn-output.c insn-peep.c insn-preds.c \
+        insn-recog.c insn-enums.c gtype-desc.c options-save.c options.c \
+        > gen.log 2>&1) \
+        || die "gcc/ の生成物が作れない ($g/gcc/gen.log)"
+    echo "generated ($g/gcc)"
+
+    # 2-a. 我々の libc と RV32 の語長で configure し直した auto-host.h
+    rv32='ac_cv_sizeof_short=2 ac_cv_sizeof_int=4 ac_cv_sizeof_long=4
+          ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4 ac_cv_c_bigendian=no'
+    # shellcheck disable=SC2086
+    (cd "$work/gcc-cfg" && env CPPFLAGS="-nostdinc -isystem $ours" $rv32 \
+        CFLAGS='-O0 -w' sh "$src/gcc/configure" --srcdir="$src/gcc" \
+        --build="$build" --host="$build" --target="$GCC17_TARGET" \
+        --enable-languages=c --disable-plugin > configure.log 2>&1) \
+        || die "gcc/ の configure (我々の libc) が落ちた ($work/gcc-cfg/configure.log)"
+    # 2-b. libdecnumber (gcc/ の単位が config.h と gstdint.h を読む)
+    # shellcheck disable=SC2086
+    (cd "$work/libdecnumber" && env CPPFLAGS="-nostdinc -isystem $ours" $rv32 \
+        sh "$src/libdecnumber/configure" --srcdir="$src/libdecnumber" \
+        --target="$GCC17_TARGET" > configure.log 2>&1) \
+        || die "libdecnumber の configure が落ちた ($work/libdecnumber/configure.log)"
+    # 2-c. gmp.h。**limb を 32 bit にする。** gmp.h の型は configure が
+    # 決める (GMP_LIMB_BITS)。host を "none" にすると GMP は機械語の実装を
+    # 使わず C だけで書かれた実装を選ぶ (我々が将来組むのもこちらになる)。
+    # host と build が違うので試験プログラムは走らず，語長は cache 変数で与える
+    (cd "$work/gmp" && env ac_cv_sizeof_unsigned_long=4 ac_cv_sizeof_mp_limb_t=4 \
+        ac_cv_sizeof_unsigned=4 ac_cv_sizeof_unsigned_short=2 \
+        ac_cv_sizeof_void_p=4 \
+        sh "$ext/gmp/configure" --host=none-unknown-elf --build="$build" \
+        --disable-assembly --disable-shared CC="$HOSTCC" CC_FOR_BUILD="$HOSTCC" \
+        > configure.log 2>&1) \
+        || die "gmp の configure (32 bit limb) が落ちた ($work/gmp/configure.log)"
+    grep -q 'define GMP_LIMB_BITS *32$' "$work/gmp/gmp.h" \
+        || die "gmp.h の limb が 32 bit になっていない ($work/gmp/gmp.h)"
+
+    # 2-d. 測る階層を組む。1 の header と生成した .c を写し，auto-host.h を
+    # 2-a のものに差し替える。**差し替えるのはこの 1 本だけ**である ——
+    # 他の生成物は対象 (i686) と .md で決まり，host の語長に依らない
+    rm -rf "$work/gcc"
+    mkdir -p "$work/gcc"
+    cp "$g/gcc"/*.h "$g/gcc"/all-tree.def "$g/gcc"/*.inc "$work/gcc/"
+    cp "$g/gcc"/insn-*.c "$g/gcc"/gtype-desc.c "$g/gcc"/options.c \
+       "$g/gcc"/options-save.c "$work/gcc/"
+    # 階層の下に作られる生成物 (c-family/ と common/ の target hooks)
+    for d in c-family common; do
+        mkdir -p "$work/gcc/$d"
+        cp "$g/gcc/$d"/*.h "$work/gcc/$d/"
+    done
+    cp "$work/gcc-cfg/auto-host.h" "$work/gcc/auto-host.h"
+    echo "configured gcc ($work/gcc。対象 $GCC17_TARGET)"
+}
+
 # 書庫が -c する翻訳単位の一覧。Makefile.in の変数から取る (自分で選ばない)
 unit_list() {
     case $1 in
@@ -458,6 +647,26 @@ unit_list() {
         awk '/^libcpp_a_OBJS *=/ { f = 1 } f { print } f && !/\\$/ { exit }' \
             "$src/libcpp/Makefile.in" \
             | tr -s ' \t\\' '\n' | grep -E '\.o$' | sed 's|\.o$||'
+        ;;
+    gcc)
+        # **C コンパイラ (cc1) を作る単位。** cc1 は C_OBJS と BACKEND
+        # (main.o と libbackend / libcommon-target / libcommon) から繋がる
+        # (gcc/Makefile.in 1818 行)。cc1-checksum.o は含めない —— 他の
+        # .o を繋いだ後にその checksum から生成する単位で，他が全部通るまで
+        # 作れない。対象ごとの単位 (i386.o など) は
+        # configure が OBJS へ足している。変数の値は configure 済みの
+        # Makefile から make 自身に展開させる (Makefile.in の @...@ は
+        # configure が置き換えるので，Makefile.in からは読めない)。
+        # 同じ単位が 2 つの変数に入ることがある (i386-c.o) ので 1 つにする
+        [ -s "$work/gcc-gen/gcc/Makefile" ] \
+            || die "gcc/ が configure されていない (sh tools/gcc17.sh configure-gcc)"
+        {
+            for v in C_OBJS C_TARGET_OBJS OBJS OBJS-libcommon-target OBJS-libcommon; do
+                make -s -C "$work/gcc-gen/gcc" -f Makefile -f "$work/print.mk" \
+                    "print-$v" 2> /dev/null
+            done
+            echo main.o
+        } | tr -s ' ' '\n' | grep -E '\.o$' | sed 's|\.o$||' | awk '!seen[$0]++'
         ;;
     esac
 }
@@ -476,14 +685,21 @@ unit_list() {
 closure() {
     lib=${1%%/*}; u=${1#*/}
     [ -s "$work/$lib/config.h" ] || die "config.h が無い (sh tools/gcc17.sh configure)"
-    mkdir -p "$work/out"
+    mkdir -p "$(dirname "$work/out/$lib.$u")"   # c-family/ の単位は階層を持つ
     m="$work/out/$lib.$u.M"
     # STONE_GCC17_STUB は headers が置く空の代役の階層。我々の libc の後ろ
     stubdir=""
-    [ -n "${STONE_GCC17_STUB:-}" ] && stubdir="-I$STONE_GCC17_STUB"
+    [ -n "${STONE_GCC17_STUB:-}" ] && stubdir="-isystem $STONE_GCC17_STUB"
+    # **我々の libc は -isystem で書庫の -I より後に探す** (本物の build で
+    # system の header が -I の後に探されるのと同じ)。gcc/ は build の階層に
+    # config.h などを持ち，それが先に見つからなければならない
+    unit_defs_file "$lib" "$u" "$work/out/$lib.$u.defs.h"
     # shellcheck disable=SC2046,SC2086
-    if ! "$HOSTCC" -M -std=c89 -undef -D__STONE__=1 -nostdinc -I"$ours" $stubdir \
-            $(lib_dirs "$lib") -DHAVE_CONFIG_H "$src/$lib/$u.c" > "$m" 2> "$m.err"; then
+    if ! "$HOSTCC" -M -std=c89 -undef -D__STONE__=1 -nostdinc \
+            $(lib_dirs "$lib" "$u") $(unit_incs "$lib" "$u") \
+            -isystem "$ours" $stubdir \
+            -include "$work/out/$lib.$u.defs.h" "$(unit_src "$lib" "$u")" \
+            > "$m" 2> "$m.err"; then
         grep -m1 -oE 'fatal error: [^:]+: No such file' "$m.err" \
             | sed 's/fatal error: //; s/: No such file//' >&2
         return 1
@@ -611,7 +827,7 @@ unit() {
     *)  [ -s "$pp16" ] || die "ビルドチェーンのイメージが無い: $pp16 (sh tools/build.sh all)" ;;
     esac
     [ -s "$cc15" ] || die "ビルドチェーンのイメージが無い: $cc15 (sh tools/build.sh all)"
-    mkdir -p "$work/out"
+    mkdir -p "$(dirname "$work/out/$lib.$u")"
     o="$work/out/$lib.$u"
     hdrs=$(closure_all "$1") || true
     missing=$(cat "$work/out/$lib.$u.missing")
@@ -641,6 +857,23 @@ unit_run() {
         *)         name=$(basename "$h") ;;
         esac
         members="$members $name=$h"; n=$((n + 1))
+        # **gcc/ は階層つきの名前でも含める** ("config/i386/i386.h" や
+        # "c-family/c-common.h")。pp18 は #include の綴りとメンバ名を
+        # そのまま比べるので，綴りの数だけ名前が要る。綴りは探索パス
+        # (-I) から見た相対経路である。同じ階層からの "c-common.def" の
+        # ような綴りは basename の方が受ける
+        [ "$lib" = gcc ] || continue
+        for _i in $(lib_dirs "$lib" "$u"); do
+            _dir=${_i#-I}
+            case $h in
+            "$_dir"/*/*)
+                _rel=${h#"$_dir"/}
+                case " $members " in *" $_rel="*) ;; *)
+                    members="$members $_rel=$h"; n=$((n + 1)) ;;
+                esac
+                ;;
+            esac
+        done
     done
     max=$(pp_members_max)
     if [ "$n" -gt "$max" ]; then
@@ -657,12 +890,14 @@ unit_run() {
     # -D は無い。同じ意味の駆動 file を本体にし，単位そのものはバンドルのメンバと
     # して 1 文字も変えずに含める。config.h が読まれないと HAVE_STRING_H
     # などが定義されず，<string.h> が読み飛ばされて size_t が無い .i になる
-    printf '#define HAVE_CONFIG_H 1\n#include "%s.c"\n' "$u" > "$o.drv.c"
+    # gcc/ はさらに IN_GCC などを与える (unit_flags)。定義は Makefile から読む
+    unit_defs_file "$lib" "$u" "$o.defs.h"
+    { cat "$o.defs.h"; printf '#include "%s.c"\n' "$u"; } > "$o.drv.c"
     # **バンドルは file に書き出してから渡す。** OS 側の pp はイメージへ詰めるので
     # 実体が要る。ベアメタル実行の pp16 も同じ file を読ませる —— 両方の系に同じ
     # バイト列を与えないと，違いが pp の世代のものだと言えない
     # shellcheck disable=SC2086
-    sh tools/bundle.sh $members "$u.c=$src/$lib/$u.c" "$o.drv.c" > "$o.b"
+    sh tools/bundle.sh $members "$u.c=$(unit_src "$lib" "$u")" "$o.drv.c" > "$o.b"
     if pp_run "$o.b" "$o.i" "$o.pp.err"; then
         rc=0
     else
@@ -687,8 +922,9 @@ unit_run() {
         # 我々の pp の不足 (pp) である
         # shellcheck disable=SC2046
         if "$HOSTCC" -E -std=c89 -pedantic-errors -undef -D__STONE__=1 -nostdinc \
-                -I"$ours" -I"$stub" $(lib_dirs "$lib") -DHAVE_CONFIG_H \
-                "$src/$lib/$u.c" > /dev/null 2> "$o.hpp.log"; then
+                $(lib_dirs "$lib" "$u") $(unit_incs "$lib" "$u") \
+                -isystem "$ours" -isystem "$stub" -include "$o.defs.h" \
+                "$(unit_src "$lib" "$u")" > /dev/null 2> "$o.hpp.log"; then
             printf 'pp\t%s\n' "$rc"
         else
             printf 'ppext\t%s (pp %s)\n' \
@@ -827,13 +1063,14 @@ case "$cmd" in
 measure) measure ;;
 pack) pack ;;
 configure) configure ;;
+configure-gcc) configure_gcc ;;
 headers) headers "${2:-}" ;;
 closure) [ -n "${2:-}" ] || die "closure <lib>/<unit>"; closure_all "$2"; cat "$work/out/${2%%/*}.${2#*/}.missing" >&2 ;;
 unit) [ -n "${2:-}" ] || die "unit <lib>/<unit>"; unit "$2" ;;
 units) units "${2:-}" ;;
 where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)
-    echo "usage: gcc17.sh {measure | pack | configure | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit>}" >&2
+    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit>}" >&2
     exit 2
     ;;
 esac

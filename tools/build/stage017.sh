@@ -217,6 +217,37 @@ build_stage017() {
             -- libc24_run "$f" "$n"
     done
 
+    # libc の第 25 世代 (docs/stage017-gcc.md 8.9)。
+    #
+    # 差は include/sys/times.h (新)・include/unistd.h・include/limits.h・
+    # posix/sys.c の 4 本で、**times / sysconf(_SC_CLK_TCK) /
+    # pathconf(_PC_PATH_MAX) / PATH_MAX を足した**ものである。GCC 4.7.4 の
+    # libiberty の 2 単位 (getruntime / lrealpath) がここで止まっていた。
+    # times はカーネルの times (153) を呼ぶので kernel27 が要る
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal; do
+        n=$(echo "$f" | tr / _)
+        step "l25_$n" "l25_$n.o" \
+            -- "stage017/libc25/$f.c" \
+               stage017/libc25/include/*.h \
+               stage017/libc25/include/sys/time.h \
+               stage017/libc25/include/sys/times.h \
+               stage017/libc25/include/sys/stat.h \
+               stage017/libc25/include/sys/types.h \
+               tmp/build/cc15ae.bin tmp/build/pp.bin \
+            -- libc25_run "$f" "$n"
+    done
+
+    # 第 25 世代の検査用のプログラム (tests/stage017 第 9 部)。子の時間が
+    # cutime へ入ることと，255 バイトの経路が stat を通ることを見る。
+    # **libc25 とリンクする**ので kernel27 の上でしか動かない
+    step tmx tmx \
+        -- tests/stage017/user/tmx.c tmp/build/cc15ae.bin tmp/build/pp16.bin \
+           tmp/build/ld17.bin tmp/build/l25_posix_sys.o \
+           tmp/build/l25_posix_stdio.o \
+        -- osprog25_run tmx tests/stage017/user/tmx.c
+
     # ---- configure が使うツール (docs/stage017-gcc.md 5.5〜5.9) ----
     #
     # GCC の configure は sed と awk が無ければ 1 行も進まない。
@@ -349,6 +380,13 @@ build_stage017() {
         -- stage017/kernel26.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
         -- kern17 kernel26 stage017/kernel26.c
+
+    # カーネルの第 27 世代。kernel26 との差は times (153) の 1 本と，
+    # それを支えるプロセスごとの時間の計上だけ (docs/stage017-gcc.md 8.9)
+    step kernel27 kernel27.bin \
+        -- stage017/kernel27.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin \
+        -- kern17 kernel27 stage017/kernel27.c
 }
 
 # カーネルを 1 つ作る (前置部は 'K')。stage016.sh の kern と同じ方法だが，
@@ -399,6 +437,19 @@ libc24_run() {
     echo "built tmp/build/l24_$2.o" >&2
 }
 
+libc25_run() {
+    sh tools/bundle.sh stage017/libc25/include/*.h \
+        "sys/time.h=stage017/libc25/include/sys/time.h" \
+        "sys/times.h=stage017/libc25/include/sys/times.h" \
+        "sys/stat.h=stage017/libc25/include/sys/stat.h" \
+        "sys/types.h=stage017/libc25/include/sys/types.h" \
+        "stage017/libc25/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l25_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15ae.bin < "tmp/build/l25_$2.i" \
+        > "tmp/build/l25_$2.o"
+    echo "built tmp/build/l25_$2.o" >&2
+}
+
 # libc23 と最前線のコンパイラ (cc15ab) で組む OS プログラム。
 # **新しいツールはここから作る** —— 凍結した世代 (libc19 / cc15p) は
 # 既存の成果物のためのもので、新しく書くものを縛る理由が無い
@@ -421,6 +472,31 @@ osprog23_run() {
         tmp/build/l23_posix_sys.o tmp/build/l23_posix_morecore.o \
         tmp/build/l23_posix_stdio.o tmp/build/l23_posix_assert.o \
         tmp/build/l23_posix_dir.o tmp/build/l23_posix_signal.o \
+        tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/build/$_nm"
+    echo "built tmp/build/$_nm" >&2
+}
+
+# libc25 と最前線のコンパイラ (cc15ae) で組む OS プログラム。
+# 第 25 世代の times / sysconf / pathconf を使う検査用のプログラムに使う
+osprog25_run() {
+    _nm=$1
+    _src=$2
+    sh tools/bundle.sh stage017/libc25/include/*.h \
+        "sys/time.h=stage017/libc25/include/sys/time.h" \
+        "sys/times.h=stage017/libc25/include/sys/times.h" \
+        "sys/stat.h=stage017/libc25/include/sys/stat.h" \
+        "sys/types.h=stage017/libc25/include/sys/types.h" \
+        "$_src" \
+        | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${_nm}.i"
+    sh tools/env.sh qemu tmp/build/cc15ae.bin < "tmp/build/${_nm}.i" \
+        > "tmp/build/${_nm}.o"
+    { printf 'E'; cat "tmp/build/${_nm}.o" \
+        tmp/build/l25_src_string.o tmp/build/l25_src_ctype.o \
+        tmp/build/l25_src_stdlib.o tmp/build/l25_src_misc15.o \
+        tmp/build/l25_posix_sys.o tmp/build/l25_posix_morecore.o \
+        tmp/build/l25_posix_stdio.o tmp/build/l25_posix_assert.o \
+        tmp/build/l25_posix_dir.o tmp/build/l25_posix_signal.o \
         tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
         | sh tools/env.sh qemu tmp/build/ld17.bin > "tmp/build/$_nm"
     echo "built tmp/build/$_nm" >&2
