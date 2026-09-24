@@ -235,7 +235,7 @@ build_stage017() {
                stage017/libc25/include/sys/times.h \
                stage017/libc25/include/sys/stat.h \
                stage017/libc25/include/sys/types.h \
-               tmp/build/cc15af.bin tmp/build/pp.bin \
+               tmp/build/cc15ag.bin tmp/build/pp.bin \
             -- libc25_run "$f" "$n"
     done
 
@@ -243,7 +243,7 @@ build_stage017() {
     # cutime へ入ることと，255 バイトの経路が stat を通ることを見る。
     # **libc25 とリンクする**ので kernel27 の上でしか動かない
     step tmx tmx \
-        -- tests/stage017/user/tmx.c tmp/build/cc15af.bin tmp/build/pp16.bin \
+        -- tests/stage017/user/tmx.c tmp/build/cc15ag.bin tmp/build/pp16.bin \
            tmp/build/ld17.bin tmp/build/l25_posix_sys.o \
            tmp/build/l25_posix_stdio.o \
         -- osprog25_run tmx tests/stage017/user/tmx.c
@@ -457,7 +457,7 @@ libc25_run() {
         "sys/types.h=stage017/libc25/include/sys/types.h" \
         "stage017/libc25/$1.c" \
         | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l25_$2.i"
-    sh tools/env.sh qemu tmp/build/cc15af.bin < "tmp/build/l25_$2.i" \
+    sh tools/env.sh qemu tmp/build/cc15ag.bin < "tmp/build/l25_$2.i" \
         > "tmp/build/l25_$2.o"
     echo "built tmp/build/l25_$2.o" >&2
 }
@@ -489,7 +489,7 @@ osprog23_run() {
     echo "built tmp/build/$_nm" >&2
 }
 
-# libc25 と最前線のコンパイラ (cc15af) で組む OS プログラム。
+# libc25 と最前線のコンパイラ (cc15ag) で組む OS プログラム。
 # 第 25 世代の times / sysconf / pathconf を使う検査用のプログラムに使う
 osprog25_run() {
     _nm=$1
@@ -501,7 +501,7 @@ osprog25_run() {
         "sys/types.h=stage017/libc25/include/sys/types.h" \
         "$_src" \
         | sh tools/env.sh qemu tmp/build/pp16.bin > "tmp/build/${_nm}.i"
-    sh tools/env.sh qemu tmp/build/cc15af.bin < "tmp/build/${_nm}.i" \
+    sh tools/env.sh qemu tmp/build/cc15ag.bin < "tmp/build/${_nm}.i" \
         > "tmp/build/${_nm}.o"
     { printf 'E'; cat "tmp/build/${_nm}.o" \
         tmp/build/l25_src_string.o tmp/build/l25_src_ctype.o \

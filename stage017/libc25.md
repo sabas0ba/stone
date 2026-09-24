@@ -4,7 +4,7 @@
 2 つの不足**に対応したものである。経緯は
 [docs/stage017-gcc.md](../docs/stage017-gcc.md) 8.9。
 
-触っているのは次の 4 本だけで、他は `libc24` と 1 バイトも変わらない。
+触っているのは次のファイルだけで、他は `libc24` と 1 バイトも変わらない。
 
 | ファイル | 変更 |
 |---|---|
@@ -12,6 +12,7 @@
 | `include/unistd.h` | `_SC_CLK_TCK` / `_PC_PATH_MAX` / `sysconf()` / `pathconf()` |
 | `include/limits.h` | `PATH_MAX` (256) |
 | `posix/sys.c` | `times()` / `sysconf()` / `pathconf()`。`realpath()` が呼び手の器を越えて書かないようにした |
+| `include/stdio.h` / `posix/stdio.c` | `BUFSIZ` / `_IOFBF` / `_IOLBF` / `_IONBF` / `setvbuf()` / `setbuf()` (下の 3 章の末尾) |
 
 ## 1. 立場
 
@@ -95,6 +96,24 @@ POSIX の約束では、名前が定義されていて `-1` が返れば「上�
 バイトを上限とし、越える結果は書かずに `ENAMETOOLONG` を返す。器を渡さない
 (NULL の) ときは従来どおり 1024 バイトまで扱う。
 
+### `BUFSIZ` と `setvbuf()` / `setbuf()` —— gcc/ を測って足したもの
+
+GCC の gcc/ は、`BUFSIZ`が定義されているかで`<stdio.h>`を読んだかを判断し、
+`asm_out_file` (`output.h`) や `dump_file` (`tree-pass.h`) の宣言をその下に
+置く。`BUFSIZ`が無いと宣言が消え、使う側が「宣言されていない」で止まる
+(gcc/ を途中まで測った 242 単位のうち 23 単位。docs/stage017-gcc.md 8.11)。
+
+C89 7.9.1 は`BUFSIZ` (256 以上) と`setbuf` / `setvbuf`を求める。**我々の
+`FILE`は緩衝しない**ので、次のようにした。
+
+| 名前 | 振る舞い |
+|---|---|
+| `setvbuf(f, buf, _IONBF, n)` | 0 (応じた。もともと無緩衝である) |
+| `setvbuf(f, buf, _IOFBF / _IOLBF, n)` | **非 0 (応じられない)**。C89 7.9.5.6 が認める返し方である |
+| `setbuf(f, NULL)` | `setvbuf(f, NULL, _IONBF, 0)` |
+| `setbuf(f, buf)` | `setvbuf(f, buf, _IOFBF, BUFSIZ)`。応じられないので無緩衝のまま (出力の中身は変わらない) |
+| `BUFSIZ` | 512。`setbuf`に渡す器の大きさの約束で、我々は器を使わない |
+
 ## 4. 測り方
 
 `tools/diff17.sh` の OS 側に `timesx` を足した (`tests/stage017/probe`)。
@@ -124,8 +143,8 @@ POSIX の約束では、名前が定義されていて `-1` が返れば「上�
 
 ```
 sh tools/build.sh stage017
-# cc15af + pp で l25_*.o を組む
+# cc15ag + pp で l25_*.o を組む
 ```
 
-最前線の `cc15af` で組む。`libc24` は `cc15ac` で組んでいたが、
+最前線の `cc15ag` で組む。`libc24` は `cc15ac` で組んでいたが、
 **最前線を 2 つに分けない**。

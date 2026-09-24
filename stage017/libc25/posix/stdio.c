@@ -192,6 +192,21 @@ int ferror(FILE *f) { return f->err; }
 /* 無バッファなので溜まっているものは無い */
 int fflush(FILE *f) { return 0; }
 
+/* 緩衝の指定 (第 25 世代)。我々は緩衝しないので，無緩衝の要求にだけ
+ * 応じる。緩衝の要求には非 0 (応じられない) を返す。include/stdio.h の註 */
+int setvbuf(FILE *f, char *buf, int mode, size_t size) {
+  (void)f;
+  (void)buf;
+  (void)size;
+  if (mode == _IONBF) return 0;
+  return 1;
+}
+
+void setbuf(FILE *f, char *buf) {
+  if (buf == 0) setvbuf(f, 0, _IONBF, 0);
+  else setvbuf(f, buf, _IOFBF, BUFSIZ);
+}
+
 int getchar(void) { return fgetc(stdin); }
 int putchar(int c) { return fputc(c, stdout); }
 

@@ -8,7 +8,8 @@
  * stdin / stdout / stderr を関数を呼ぶマクロにしているのは，初期値つきの
  * 大域構造体を避けるためである (C89 はこれらがマクロでもよいと定める)。
  *
- * 非目標: setvbuf，scanf 系，%f (浮動小数点)。
+ * 非目標: 緩衝 (setvbuf は無緩衝の要求にだけ応じる。第 25 世代)，scanf 系，
+ * %f (浮動小数点)。
  *
  * ---- 追記 ("a") について (第 21 世代) ----
  *
@@ -60,6 +61,26 @@ int fputs(char *s, FILE *f);
 int feof(FILE *f);
 int ferror(FILE *f);
 int fflush(FILE *f);
+
+/* 緩衝の指定 (C89 7.9.5.5 / 7.9.5.6。第 25 世代)。
+ *
+ * **我々の FILE は緩衝しない** (ファイル頭の註)。setvbuf は無緩衝 (_IONBF)
+ * の要求だけに応じ，緩衝 (_IOFBF / _IOLBF) の要求には「応じられない」と
+ * 非 0 を返す (7.9.5.6 が認める返し方である)。setbuf は setvbuf を呼ぶだけで，
+ * 緩衝を頼まれても無緩衝のままになる。出力の中身は変わらない。
+ *
+ * BUFSIZ は setbuf に渡す器の大きさの約束である (C89 は 256 以上を求める)。
+ * 我々は器を使わないので，値は約束としてだけ意味を持つ。
+ *
+ * GCC の gcc/ は BUFSIZ が定義されているかで <stdio.h> を読んだかを判断し，
+ * asm_out_file / dump_file などの宣言をその下に置く
+ * (docs/stage017-gcc.md 8.11) */
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
+#define BUFSIZ 512
+int setvbuf(FILE *f, char *buf, int mode, size_t size);
+void setbuf(FILE *f, char *buf);
 
 /* putc は **マクロとして**置く。
  *
