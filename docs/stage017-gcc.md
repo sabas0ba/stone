@@ -1828,3 +1828,49 @@ char *realloc ();
 8.3 は「C 適合の不足は 0」と書いた。**それは`regex`の手前までの話だった。**
 前処理で止まっている単位は、コンパイラの側を 1 行も測れていない。表の`cap`は
 「その先に何も無い」ではなく「その先は判らない」である。
+
+### 8.11 gcc/ 本体を測る (8.7 の 13)
+
+#### 測る準備 —— `gcc17.sh configure-gcc`
+
+gcc/ の単位は、configure が作る header (`auto-host.h`・`tm.h`) と、gen* プログラムが
+`.md` から作る header と `.c` (`insn-*.h`・`insn-*.c`・`gtype-desc.*`・`options.*`) を
+読む。後者は gen* を host で組んで走らせるしかないので、2 段に分けた。
+
+1. `tmp/g17u/gcc-gen` —— host 向けに普通に configure し、生成物を作る
+2. `tmp/g17u/gcc` —— 測る階層。1 の生成物を写し、`auto-host.h`だけを**我々の libc と
+   RV32 の語長で configure し直したもの**に差し替える (libiberty と同じ方法)。
+   libdecnumber と`gmp.h` (limb 32 bit) も同じ条件で作る
+
+**対象は`i686-pc-linux-gnu`とした。** GCC 4.7.4 に RISC-V の backend は無い。我々と
+同じ ILP32 の対象を選んだ。対象ごとの単位 (`config/i386/i386.c`など) は測る単位に
+入るので、表の頭に記録してある。
+
+測る単位は **cc1 を作る 347 単位**である (`C_OBJS`・`C_TARGET_OBJS`・`OBJS`・
+`OBJS-libcommon-target`・`OBJS-libcommon`・`main`。Makefile から make 自身に展開させる)。
+単位ごとの`-D`/`-I` (`CFLAGS-version.o`の`BASEVER`など) も Makefile から読む。
+
+**GMP・MPFR・MPC を固定して取得した** (docs/SOURCES.md)。gcc/ の単位は`double-int.h`
+から`gmp.h`を、`real.h`から`mpfr.h`を読み、生成物を作る gengtype も同じである。
+いずれ GCC を stone で組む段では、この 3 つも stone で組む対象になる。
+
+**host 側の閉包では、347 単位すべてが libc25 の header だけで閉じた** (header の
+不足は 0)。configure が我々の header の有無を見て`HAVE_*_H`を決めているためである。
+
+#### 前処理器の壁 —— [pp20](../stage017/pp20.md)
+
+`pp19`に通すと**全単位が容量超過 (6) で止まった**。gcc/ の単位は対象の記述を読むので
+マクロを 7,000〜15,000 個定義し、最長のマクロ名は 64 バイトある。`pp20`で表を
+32768 個に広げ、名前をハッシュ表で引くようにした (全スロットを先頭から比べていたので、
+広げるだけでは前処理が終わらない)。
+
+#### ハーネスの直し
+
+- **host の検査は ILP32 で読ませる** (`-m32 -fsyntax-only`)。gcc/ は RV32 の語長で
+  configure してあり、`real.h`などが翻訳時に語長を表明する。64 bit の host で読むと、
+  我々の`.i`が正しくても表明が負の大きさになって`decl`に見えた
+- **QEMU のメモリイメージはリポジトリからの相対で渡す。** QEMU はコンテナの中で走り、
+  host の絶対経路はそこに無い (`gcc17.sh`は絶対経路を渡していて、OS 側の測定が
+  1 単位も走らなかった)
+- **単位を並列に通す** (`STONE_GCC17_JOBS`)。OS 側の作業の置き場を単位ごとに分けた。
+  1 単位が 2〜4 MB あり、1 本ずつでは数時間かかる
