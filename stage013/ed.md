@@ -5,7 +5,7 @@ ed は行エディタである。OS (kernel13) の上で動く ELF 実行形式�
 UART の素の文字流の上でそのまま動く。設計は
 [stage013-tools.md](../docs/stage013-tools.md) 5 章。
 
-ソース [ed.c](ed.c) が正本である。自作の C89 + 第 13 世代の libc
+ソース [ed.c](ed.c) が原本である。自作の C89 + 第 13 世代の libc
 ([libc/](libc/)) で書かれている。バイナリはビルドで再現される生成物で
 あり，git 管理しない。
 

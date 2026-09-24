@@ -2,17 +2,17 @@
 
 cc14g は C コンパイラの Stage 14 第 9 部の世代である。
 [cc14f.sc](cc14f.sc) (第 8 部) を出発点に，**zlib 1.3.1 を当てて
-落ちた箇所**を潰した。設計は
+落ちた箇所**を修正した。設計は
 [stage014-external.md](../docs/stage014-external.md) 13 章。
 
-ソース [cc14g.sc](cc14g.sc) が正本である。
+ソース [cc14g.sc](cc14g.sc) が原本である。
 
 ## ビルド
 
 ```
 sh tools/build.sh stage014
 # cc14f(cc14g.sc) -> cc14g0     (1 段目)
-# cc14g0(cc14g.sc) -> cc14g     (正本。以降は固定点)
+# cc14g0(cc14g.sc) -> cc14g     (2 段目。以降は固定点)
 ```
 
 SHA-256: c0cd490dd56b3e5b4b7aaf6a11ae7e045bbc0dbf625be96aacb3e125addcbc89

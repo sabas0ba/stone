@@ -1,7 +1,7 @@
 // 各 Stage のプレイグラウンド定義。
 // steps は web/worker.js の composeInput が解釈する。
 //   bin:   実行するチェーン成果物 (assets/bin/)
-//   src:   'user' (入力テキスト) | 'bundle' (pp への束ね) | 'prev' (前段の出力)
+//   src:   'user' (入力テキスト) | 'bundle' (pp へのバンドル) | 'prev' (前段の出力)
 //   term:  'dot' | 'eot' | 'nul' (終端の規約。docs/dev-notes.md 4 章)
 // sample: 初期表示するソース (files/)
 // output: 'bin' (実行可能なフラットバイナリ) | 'text'
@@ -116,7 +116,7 @@ export const PIPELINES = {
         // 適合台帳 (tests/stage014/ledger.txt) の probe をそのまま選べる。
         // 手順は tests/stage014/test.sh の probe() と同じ (pp -> cc14g -> ld)
         // 見本の一覧は台帳 (coverage の kind:'ledger' の組) から作る。
-        // pipelines.js に名前を写さないので，台帳を直せば選択肢も直る
+        // pipelines.js に名前を複製しないので，台帳を修正すれば選択肢も更新される
         sampleDir: 'files/tests/stage014/probe',
         samplesFromLedger: true,
         inputLabel: 'Real-world C idioms — pick a conformance probe, or write your own',
@@ -169,7 +169,7 @@ export const PIPELINES = {
 // OS 世代のターミナル。kernel + sfs で起動し，UART をそのまま端末へつなぐ。
 // files: {name, asset} は成果物をそのまま，{name, build} はその場で
 // コンパイルして sfs へ置く (どちらもビルドチェーンの成果物で処理する)。
-// samples は「入力欄へ先置きする一連のコマンド」(Enter は利用者が押す)。
+// samples は「入力欄へ事前に設定する一連のコマンド」(Enter は利用者が押す)。
 const LIBC12 = ['ctype.h', 'errno.h', 'fcntl.h', 'limits.h', 'stdarg.h',
     'stddef.h', 'stdio.h', 'stdlib.h', 'string.h', 'unistd.h'];
 
@@ -183,8 +183,8 @@ const LIBC16 = ['assert.h', 'ctype.h', 'dirent.h', 'errno.h', 'fcntl.h',
 
 // libc15 / libc16 の実体 (リンクの並びは tests/stage015・016 と同一)。
 // **経路は文字列そのままで書く。** web/build-site.sh は pipelines.js を
-// 正規表現でなめて資産を集めるので，テンプレート文字列にすると
-// 参照が拾えない
+// 正規表現で走査して資産を集めるので，テンプレート文字列にすると
+// 参照を検出できない
 const L15_OBJS = [
     'assets/bin/l15_src_string.o', 'assets/bin/l15_src_stdlib.o',
     'assets/bin/l15_src_misc15.o', 'assets/bin/l15_posix_sys.o',
@@ -200,7 +200,7 @@ const L16_OBJS = [
     'assets/bin/rt64.o', 'assets/bin/rtfp.o',
 ];
 
-// 「ヘッダを束ねて pp16 -> cc15p -> ld16 ('E') で実行形式にする」手順。
+// 「ヘッダをバンドルして pp16 -> cc15p -> ld16 ('E') で実行形式にする」手順。
 // tests/stage015・016 が sh で書いているものと同じ並びである
 const guestBuild = (headers, incDir, unit, objs, opts = {}) => [
     {
@@ -302,7 +302,7 @@ export const TERMINALS = {
             { cmd: 'exit 0', note: 'end the session and list the files for download' },
         ],
     },
-    // Stage 15: 64 bit と浮動小数点が **libc の上で** 効くところを見せる。
+    // Stage 15: 64 bit と浮動小数点が **libc の上で** 動作するところを見せる。
     // lib15 は tests/stage015 が kernel15 / kernel16 の両方で走らせる
     // 検査そのもの (期待値は tests/stage015/expected/lib15.txt)
     stage015: {

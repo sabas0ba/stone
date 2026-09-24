@@ -64,7 +64,7 @@ ensure_build stage012
 buildrc=$?
 
 # ---------------------------------------------------------------------------
-section "sfs の往復 (ホスト側の道具)"
+section "sfs の往復 (ホスト側のツール)"
 
 sh tools/sfs.sh pack "$fix" tmp/s12/fs.img "$IMGSIZE" 128
 rm -rf tmp/s12/out
@@ -115,11 +115,11 @@ done
 [ "$ok" -eq 0 ]
 report $? "build: ld12.bin / kernel.bin の SHA-256 が各 .md 記載値と一致"
 
-# 'F' 形式は stage008 の ld と同一の像を作る (前置部に触れていないことの証明)
+# 'F' 形式は stage008 の ld と同一のイメージを作る (前置部に触れていないことの証明)
 #
-# **同じ入力・同じ道具でも答が揺らぐことがある** (docs/dev-notes.md 1.6)。
-# 食い違ったら，まず同じ道具を 2 回走らせて自己一致を見る。自己一致しない
-# なら比較の前提 (実行が再現すること) が崩れているので，鎖の退行ではなく
+# **同じ入力・同じツールでも結果が変動することがある** (docs/dev-notes.md 1.6)。
+# 食い違ったら，まず同じツールを 2 回走らせて自己一致を見る。自己一致しない
+# なら比較の前提 (実行が再現すること) が崩れているので，ビルドチェーンの退行ではなく
 # 環境の問題である。やり直して通ったものは通ったと数えるが，warned で
 # summary の 1 行に必ず出す
 ok=0
@@ -132,7 +132,7 @@ for o in pp.o cc10l.o ld.o; do
         r2=$?
         cmp -s tmp/s12/f_old.bin tmp/s12/f_new.bin && break
 
-        # 同じ道具・同じ入力をもう一度。ここで違えば環境である
+        # 同じツール・同じ入力をもう一度。ここで違えば環境である
         { cat "tmp/build/$o"; printf '\0'; } | sh tools/env.sh qemu "$ld" > tmp/s12/f_chk.bin
         if cmp -s tmp/s12/f_old.bin tmp/s12/f_chk.bin; then
             self=一致
@@ -144,7 +144,7 @@ for o in pp.o cc10l.o ld.o; do
         if [ "$n" -ge 3 ]; then
             # 落ちたときに何が起きたかを残す。無言だと CI で追えない。
             # **入力の素性まで出す。** 同じ入力を 2 つのリンカへ流している
-            # はずなのに答が違うなら，違っているのは入力か道具か環境の
+            # はずなのに結果が違うなら，違っているのは入力かツールか環境の
             # どれかである
             echo "   $o: ld rc=$r1 ($(wc -c < tmp/s12/f_old.bin) バイト) /" \
                  "ld12 rc=$r2 ($(wc -c < tmp/s12/f_new.bin) バイト)" \

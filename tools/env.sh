@@ -3,7 +3,7 @@
 #
 # 使用法:
 #   env.sh build            イメージを用意し，導入パッケージを env/packages.lock と照合する
-#                           (env/Containerfile から作った像が既にあればビルドを省く)
+#                           (env/Containerfile から作ったイメージが既にあればビルドを省く)
 #   env.sh lock             env/packages.lock を再生成する (アーカイブ時点を変更した場合のみ)
 #   env.sh run <cmd...>     repo を /work にマウントしてコンテナ内でコマンドを実行する
 #   env.sh qemu <bin> [...] tools/run-qemu.sh をコンテナ内で実行する (stdin/stdout はそのまま接続)
@@ -12,13 +12,13 @@
 #   STONE_ENGINE      コンテナエンジン (podman | docker)。未指定時は podman, docker の順に自動検出
 #   STONE_IMAGE       イメージ名 (default: stone-env)
 #   STONE_QEMU_TRACE      qemu: 実行トレースの記録先ファイル (tools/run-qemu.sh 参照)
-#   STONE_QEMU_RAM        qemu: RAM 量 (既定 128M)。RAMFILE を使うときだけ効く
+#   STONE_QEMU_RAM        qemu: RAM 量 (既定 128M)。RAMFILE を使うときだけ有効
 #   STONE_QEMU_TIMEOUT    qemu: 打ち切りまでの秒数 (既定 900。0 で無効)。
 #                         **コンテナへ渡すこと** —— 渡し忘れると，呼ぶ側で
 #                         伸ばしたつもりの値が中で既定に戻る
 #   STONE_QEMU_GDB        qemu: GDB stub の待受けポート。コンテナ外へは 127.0.0.1 のみに公開する
 #   STONE_CONTAINER_NAME  qemu: コンテナ名。テストからの停止操作に使用する
-#   STONE_REBUILD         build: 像が最新でもビルドし直す (env/ をいじりながら試すとき)
+#   STONE_REBUILD         build: イメージが最新でもビルドし直す (env/ を変更しながら試すとき)
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -50,9 +50,9 @@ installed_packages() {
     "$engine" run --rm "$image" dpkg-query -W -f '${Package}=${Version}\n'
 }
 
-# 像の素性を表す印。env/Containerfile は base image の digest と
-# snapshot の日付まで固定してあるので，この 1 枚が決まれば像は一意に決まる。
-# 作った像にラベルとして焼き，次回はそれを見てビルドを省く
+# イメージの出所を表す識別値。env/Containerfile は base image の digest と
+# snapshot の日付まで固定してあるので，この 1 ファイルが決まればイメージは一意に決まる。
+# 作ったイメージにラベルとして付与し，次回はそれを見てビルドを省く
 env_stamp() {
     sha256sum "$repo_root/env/Containerfile" | cut -d' ' -f1
 }
@@ -65,10 +65,10 @@ cmd=${1:-}
 
 case "$cmd" in
 build)
-    # 像が既に手元にあり，env/Containerfile から作ったものなら作り直さない。
-    # CI では像を丸ごとキャッシュして持ち込むので，ここが効いて毎回の
-    # apt-get (snapshot.debian.org からの取得) が丸ごと省ける。
-    # packages.lock の照合は像を作ったかどうかに関わらず必ず行う
+    # イメージが既に手元にあり，env/Containerfile から作ったものなら作り直さない。
+    # CI ではイメージ全体をキャッシュして持ち込むので，ここが有効に働いて毎回の
+    # apt-get (snapshot.debian.org からの取得) がすべて省略される。
+    # packages.lock の照合はイメージを作ったかどうかに関わらず必ず行う
     stamp=$(env_stamp)
     if [ -n "${STONE_REBUILD:-}" ] || [ "$(image_stamp)" != "$stamp" ]; then
         # base image の取得は registry の一時的な拒否 (rate limit) で

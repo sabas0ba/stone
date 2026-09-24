@@ -102,7 +102,7 @@ sh tools/build.sh stage007
 ```
 
 occ1.bin (B1) と occ.bin (B2) はビルドで再現される生成物であり git 管理しない。
-以降の正本は occ.bin (B2) である。
+以降の実行に用いるのは 2 段目の occ.bin (B2) である。
 
 ## 5. 検証計画 (tests/stage007)
 

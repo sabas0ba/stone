@@ -4,7 +4,7 @@
 #
 # 使用法:
 #   mkref.sh tcc          tcc の Makefile で見る (第 3 部の 3 の 1 の完了条件)
-#   mkref.sh <dir> [目標...]  任意の木で見る
+#   mkref.sh <dir> [目標...]  任意のツリーで見る
 #
 # tcc の素材 (docs/external/tcc) は repo に入れない決まりなので，
 # CI ではこの突き合わせは走らない (tests/stage017/test.sh は同じ形を
@@ -25,7 +25,7 @@ mkdir -p "$out"
 command -v make > /dev/null 2>&1 || { echo "error: host に make が無い" >&2; exit 1; }
 command -v gcc  > /dev/null 2>&1 || { echo "error: host に gcc が無い" >&2; exit 1; }
 
-# mk20 をホストで走らせる身代わりを作る。**mk20.c そのもの**を取り込む
+# mk20 をホストで走らせる代替版を作る。**mk20.c そのもの**を取り込む
 # ので，見ているのは OS 上のものと同じ読み手である
 gcc -w -o "$out/mk20host" tests/stage017/host/mk20host.c
 mk=$(CDPATH= cd -- "$out" && pwd)/mk20host

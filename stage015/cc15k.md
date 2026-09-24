@@ -6,14 +6,14 @@ double) を入れた。`printf("%llu", x)` が tcc の数値文字列化で実�
 走るため，第 4 部 (libc) の前提になる
 ([stage015-tcc.md](../docs/stage015-tcc.md) 11.3)。
 
-ソース [cc15k.sc](cc15k.sc) が正本である。
+ソース [cc15k.sc](cc15k.sc) が原本である。
 
 ## ビルド
 
 ```
 sh tools/build.sh stage015
 # cc15j(cc15k.sc) -> cc15k0     (1 段目)
-# cc15k0(cc15k.sc) -> cc15k     (正本。以降は固定点)
+# cc15k0(cc15k.sc) -> cc15k     (2 段目。以降は固定点)
 ```
 
 SHA-256: b4f3c83c731e790bc01e16e09304b2ead990930e6edf48a1dae59e2e1b11682a

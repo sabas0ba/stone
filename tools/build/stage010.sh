@@ -28,7 +28,7 @@ build_stage010() {
         | sh tools/env.sh qemu tmp/build/ld.bin > tmp/build/cc10b.bin
     echo "built tmp/build/cc10b.bin" >&2
     # 第 2 部の 2 はフレームの割付け方を変えるので，1 段目 (cc10b が作ったもの)
-    # と正本は一致しない。正本はその 1 段目が自分自身を再コンパイルしたもので，
+    # と 2 段目は一致しない。2 段目はその 1 段目が自分自身を再コンパイルしたもので，
     # 以降は固定点になる (B2 == B3)
     { cat stage010/cc3.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc10b.bin > tmp/build/cc10c0.o

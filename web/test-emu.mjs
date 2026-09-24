@@ -1,4 +1,4 @@
-// web/rv32.js (展示用エミュレータ) の検証。
+// web/rv32.js (デモ用エミュレータ) の検証。
 //
 // チェーンの実成果物 (tmp/build/。QEMU + コンテナで生成したもの) を
 // エミュレータで実行し，出力が QEMU での出力とビット一致することを確かめる。
@@ -254,7 +254,7 @@ const dec = (b) => new TextDecoder().decode(b);
     'os12: kernel12 が hello (ELF) を U モードで走らせ argv と終了コード 3 を返す');
 }
 
-// --- OS: kernel13 で sh と ed の同居 (spawn の逐次性) ----------------------
+// --- OS: kernel13 で sh と ed の共存 (spawn の逐次性) ----------------------
 {
     const r = runOS('tmp/build/kernel13.bin', [
         { name: 'sh', data: read('tmp/build/sh13') },
@@ -341,7 +341,7 @@ const dec = (b) => new TextDecoder().decode(b);
 // ===========================================================================
 // sfs2 と Stage 16 のカーネル。手順・素材・期待値は tests/stage016 と同一
 
-// --- sfs2: JS 版がホスト側の道具 (tools/sfs2.sh) とバイト一致すること ----
+// --- sfs2: JS 版がホスト側のツール (tools/sfs2.sh) とバイト一致すること --
 {
     const dir = mkdtempSync(`${tmpdir()}/stone-sfs2-`);
     try {
@@ -365,7 +365,7 @@ const dec = (b) => new TextDecoder().decode(b);
         const mine = packSfs2(tree, 1 << 20, 64);
         const ref = read(`${dir}/ref.img`);
         report(eq(mine, ref),
-            'sfs2: JS の pack がホスト側 tools/sfs2.sh の像とバイト一致');
+            'sfs2: JS の pack がホスト側 tools/sfs2.sh のイメージとバイト一致');
 
         const back = unpackSfs2(mine);
         const got = Object.fromEntries(back.map((f) => [f.path, f]));
@@ -375,13 +375,13 @@ const dec = (b) => new TextDecoder().decode(b);
             && got['src/a/b'].dir === true
             && got['empty'].dir === true
             && got['inc/empty.h'].data.length === 0,
-        'sfs2: unpack が木をそのまま戻す (空の階層・同名別階層を含む)');
+        'sfs2: unpack がツリーをそのまま戻す (空の階層・同名別階層を含む)');
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
 }
 
-// sfs2 の木でカーネルを起動する (tests/stage016 と同じ注入位置・大きさ)
+// sfs2 のツリーでカーネルを起動する (tests/stage016 と同じ注入位置・大きさ)
 const runOS2 = (kernel, files, opts = {}) => {
     const imgSize = opts.imgSize || (4 << 20);
     const m = new Machine(read(kernel), { ramSize: opts.ramSize });
@@ -431,7 +431,7 @@ function guestElf(gen, unit, extraHeaders = []) {
     return elf.output;
 }
 
-// --- OS: libc15 の 64 bit / 浮動小数点が OS の上で効く (Stage 15 第 4 部) --
+// --- OS: libc15 の 64 bit / 浮動小数点が OS の上で動作する (Stage 15 第 4 部)
 // 手順・素材・期待値は tests/stage015 の lib15 と同じ。ただしリンカは
 // ld14 (tests/stage015 と同じ) で，走らせるのは kernel16
 {
@@ -453,7 +453,7 @@ function guestElf(gen, unit, extraHeaders = []) {
     'os15: kernel16 の上で %llu / %f / snprintf / strto / sscanf / setjmp / lseek が通る');
 }
 
-// --- OS: kernel17 が sfs2 の木を経路で引く (第 1 部) ----------------------
+// --- OS: kernel17 が sfs2 のツリーを経路で参照する (第 1 部) --------------
 {
     const r = runOS2('tmp/build/kernel17.bin', [
         { name: 'top.txt', data: text('TOP\n') },
@@ -484,8 +484,8 @@ function guestElf(gen, unit, extraHeaders = []) {
         },
         boot('dirprobe\n'),
     ]);
-    // 走らせたあとの像に out/ と out/f.txt が増えていること
-    // (プレイグラウンドの木表示が見せるのはこれである)
+    // 走らせたあとのイメージに out/ と out/f.txt が増えていること
+    // (プレイグラウンドのツリー表示が見せるのはこれである)
     const made = unpackSfs2(r.m.mem.subarray(SFS_OFFSET, SFS_OFFSET + r.imgSize));
     const out = made.find((f) => f.path === 'out');
     const made2 = made.find((f) => f.path === 'out/f.txt');

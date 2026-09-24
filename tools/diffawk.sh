@@ -1,17 +1,17 @@
 #!/bin/sh
-# 我々の awk とホストの awk に**同じ台本と同じ入力**を食わせ，出力と
+# 我々の awk とホストの awk に**同じ台本と同じ入力**を与え，出力と
 # 終了コードを突き合わせる (docs/stage017-gcc.md 5.8)。
 #
-#   sh tools/diffawk.sh        ホストで組んだ我々の awk と突き合わせる
+#   sh tools/diffawk.sh        ホストでビルドした我々の awk と突き合わせる
 #   sh tools/diffawk.sh os     **我々の OS の上で走らせた** awk と突き合わせる
 #
 # ## なぜ要るか
 #
-# awk は言語ひとつぶんある。**我々が期待値を書くと，我々の読み違いが
+# awk は言語 1 つ分の規模がある。**我々が期待値を書くと，我々の読み違いが
 # そのまま期待値になる** —— 値と文字列の二面性 (strnum)，数を字にする
 # 形 (CONVFMT / OFMT)，欄を書き換えたときの $0 の組み直し方は，どれも
-# 文言だけでは決まらない。物差しはホストの awk である (5.3 / 5.5 と
-# 同じ筋)。
+# 文言だけでは決まらない。基準はホストの awk である (5.3 / 5.5 と
+# 同じ方針)。
 #
 # ## 台本はファイルに置く
 #
@@ -132,7 +132,7 @@ mkcase in1.txt 'BEGIN { print (1 == 1), (1 != 2), (1 < 2), (2 <= 2), (3 > 2), (3
 mkcase in1.txt 'BEGIN { print ("abc" < "abd"), ("B" < "a"), ("" == 0) }'
 mkcase in1.txt 'BEGIN { print 1 && 0, 1 || 0, !0, !"", !"x" }'
 
-# ---- 文字列の道具 ----
+# ---- 文字列関数 ----
 mkcase in1.txt 'BEGIN { print substr("hello world", 7), substr("hello", 2, 3) }'
 # substr の開始位置が 1 未満の形は**ホストと分かれる**。POSIX の文言と
 # gawk は「位置 m..m+n-1 のうち在るものだけ」を返すので substr("hello",0,3)
@@ -193,7 +193,7 @@ mkcase in2.txt 'BEGIN { RS = ":" } { print NR, $0 }'
 mkcase in1.txt 'BEGIN { print (1, 2); print (3); x[1] = 1; print ((1) in x) }'
 mkcase in1.txt '{ printf ("%s-%s\n", $1, $2) }'
 # 自分自身への代入。**右辺が左辺そのものを指す**ので，解放の順を
-# 間違えると解放済みの領域を読む (欄と配列の両方で踏んだ)
+# 間違えると解放済みの領域を読む (欄と配列の両方で遭遇した)
 mkcase in1.txt 'BEGIN { a["k"] = "v"; a["k"] = a["k"]; print a["k"] }
 { $1 = $1; $0 = $0; print }'
 
@@ -227,12 +227,12 @@ cmpcase() {
 }
 
 if [ "$mode" = host ]; then
-    # **対照はここで組む。** 手順を外に置くと，走らせる人によって
+    # **対照はここでビルドする。** 手順を外に置くと，走らせる人によって
     # 何を測ったかが変わる
     if [ -z "${STONE_AWK:-}" ]; then
         "${CC:-gcc}" -w -o "$OURS" stage017/awk1.c stage017/re2.c \
             stage017/awkfmt1.c \
-            || { echo "error: $OURS を組めない (gcc が要る)" >&2; exit 1; }
+            || { echo "error: $OURS をビルドできない (gcc が要る)" >&2; exit 1; }
     fi
     if [ ! -x "$OURS" ]; then
         echo "error: $OURS が無い" >&2
@@ -271,7 +271,7 @@ else
             sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
             > "$out/run.out" 2>&1
     if ! grep -q '^@@end$' "$out/run.out"; then
-        echo "FAIL 走行が最後まで届かなかった ($out/run.out を見よ)"
+        echo "FAIL 実行が最後まで完了しなかった ($out/run.out を見よ)"
         exit 1
     fi
     while read -r inf prog rest; do

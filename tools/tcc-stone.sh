@@ -5,11 +5,11 @@
 #   tcc-stone.sh run    T1 を OS 上で走らせて in.c を翻訳し，ホストの
 #                       riscv32-tcc の出力と突き合わせる
 #
-# tools/tcc.sh (ホストの gcc で作る開発道具) とは別物である。こちらは
+# tools/tcc.sh (ホストの gcc で作る開発ツール) とは別物である。こちらは
 # **ブートストラップのビルドチェーンの一部**であり，入力は我々の処理系の成果物だけ。
 #
 # 素材は docs/external/tcc に要る (無ければ tools/fetch.sh tcc)。
-# patch を当てた木は tmp/tcc/src (tools/tcc.sh src が作る)。
+# patch を当てたツリーは tmp/tcc/src (tools/tcc.sh src が作る)。
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -25,12 +25,12 @@ need() {
 
 # ---- 段ごとのスタンプ ----
 #
-# T1 は約 25 分，T2 / T3 は各 30 分かかる。**途中で殺されると 1 時間半が
-# 丸ごと消える**ので，段ごとにスタンプを持って既にできているものを飛ばす
-# (docs/dev-notes.md 1.5)。鍵は「その段の入力の SHA-256」である。
+# T1 は約 25 分，T2 / T3 は各 30 分かかる。**途中で強制終了されると 1 時間半が
+# すべて失われる**ので，段ごとにスタンプを持って既にできているものを省略する
+# (docs/dev-notes.md 1.5)。キーは「その段の入力の SHA-256」である。
 # STONE_FORCE_TCC=1 で無視して作り直す。
 #
-#   stamped <名前> <生成物> <入力...>   -> できていれば 0 (飛ばす)
+#   stamped <名前> <生成物> <入力...>   -> できていれば 0 (省略する)
 stamped() {
     _sname=$1; _sout=$2; shift 2
     _sstamp=$out/step-$_sname.stamp
@@ -60,8 +60,8 @@ prepare() {
     done
 }
 
-# ONE_SOURCE の束ね。並べた最後が翻訳単位で，前のものは #include の対象。
-# config.h は stone 用のものを載せる (上流の configure はホスト専用)
+# ONE_SOURCE のバンドル。並べた最後が翻訳単位で，前のものは #include の対象。
+# config.h は stone 用のものを入れる (上流の configure はホスト専用)
 bundle() {
     sh tools/bundle.sh \
         $inc/stddef.h $inc/stdarg.h $inc/stdlib.h $inc/stdio.h \
@@ -117,7 +117,7 @@ do_t1() {
     stamp_put t1 $(t1inputs)
 }
 
-# sfs の像を組んで kernel15 の上で走らせる。$1 は boot に書く 1 行
+# sfs のイメージを構築して kernel15 の上で走らせる。$1 は boot に書く 1 行
 run_os() {
     rm -rf "$out/root"
     mkdir -p "$out/root"
@@ -135,7 +135,7 @@ run_os() {
         < /dev/null
 }
 
-# 像から sfs を取り出す (走らせた後にできたファイルを見る)
+# イメージから sfs を取り出す (走らせた後にできたファイルを見る)
 unpack_os() {
     dd if="$out/ram" of="$out/fs2.img" bs=64K iflag=skip_bytes \
         skip=67108864 count=64 2> /dev/null
@@ -165,7 +165,7 @@ EOF
     fi
 }
 
-# T2 の作業場 (tcc のソース一式 + T1 + ヘッダ) を組む。
+# T2 の作業領域 (tcc のソース一式 + T1 + ヘッダ) を構築する。
 # 平らな名前空間なので stdarg.h / stddef.h は **tcc 自身のもの**を置く
 # (我々の stdarg.h は cc 専用の隠しローカル __va_ptr を使うため)
 t2tree() {
@@ -197,12 +197,12 @@ t2tree() {
         cp "stage015/libc/$f.c" "$out/t2fs/"
     done
     cp tmp/build/sh13 "$out/t2fs/sh"
-    # 作業場の中身を 1 つのハッシュにまとめる (段のスタンプの鍵に使う)
+    # 作業領域の中身を 1 つのハッシュにまとめる (段のスタンプのキーに使う)
     find "$out/t2fs" -type f | LC_ALL=C sort | tr '\n' '\0' \
         | xargs -0 sha256sum > "$out/t2fs.list"
 }
 
-# 作業場でシェルにスクリプトを食わせる (boot 行は 8 語までなので，
+# 作業領域でシェルにスクリプトを与える (boot 行は 8 語までなので，
 # 手順が 1 行に収まらないものはこちらを使う)。sh は 1 行 9 語まで。
 t2sh() {
     printf 'sh\n' > "$out/t2fs/boot"
@@ -220,9 +220,9 @@ t2sh() {
     sh tools/sfs.sh unpack "$out/t2fs2.img" "$out/t2out" > /dev/null
 }
 
-# T1 に **tcc の実行形式まるごと**を作らせる (= T2)。
+# T1 に **tcc の実行形式全体**を作らせる (= T2)。
 # 手順は tools/tcc.sh os の tccH と同じでなければならない (直に比べる
-# ため)。シェルの 1 行は 9 語までなので -r で畳んでから繋ぐ。
+# ため)。シェルの 1 行は 9 語までなので -r でまとめてからリンクする。
 t2script() {
     cat <<'EOF'
 tcc1 -c start.S -o start.o
@@ -246,7 +246,7 @@ exit
 EOF
 }
 
-# 作業場で 1 つコマンドを走らせ，結果のファイル木を $out/t2out へ出す。
+# 作業領域で 1 つコマンドを走らせ，結果のファイルツリーを $out/t2out へ出す。
 # 引数はカーネルの boot 行に書ける 8 語まで
 t2exec() {
     printf '%s\n' "$1" > "$out/t2fs/boot"
@@ -279,8 +279,8 @@ do_t2() {
         && echo "一致した" >&2 || echo "まだ食い違う (12.12)" >&2
 }
 
-# tccH (ホストの交差 tcc が作った， stone の OS 用の tcc) を OS の上で
-# 走らせる。**これは鎖の検査ではない。** 実行環境 (start.S・libc15・
+# tccH (ホストのクロス tcc が作った， stone の OS 用の tcc) を OS の上で
+# 走らせる。**これはビルドチェーンの検査ではない。** 実行環境 (start.S・libc15・
 # kernel16 の ELF 読み・libtcc1 相当) が揃っているかだけを見る対照で
 # ある。ここが通れば，T2 が動かないときの原因は我々の cc に絞れる。
 do_th() {
@@ -320,7 +320,7 @@ EOF
 }
 
 # T2 を作る。T1 に実行環境 (start.S・libtcc1 相当・libc15) と tcc 本体を
-# 翻訳させ，繋いで実行形式にする。手順は tccH と同一である。
+# 翻訳させ，リンクして実行形式にする。手順は tccH と同一である。
 do_t2b() {
     t2tree
     stamped t2b "$out/tcc2.bin" "$out/tcc1.bin" "$out/t2fs.list" && return 0
@@ -342,10 +342,10 @@ do_t2b() {
 #
 # 手順は t2script と 1 語だけ違う (翻訳器が tcc1 か tcc2 か，出力の名前が
 # tcc2 か tcc3 か)。入力のファイル名は同じでなければならない —— tcc は
-# 記号表にファイル名を入れるためである。出力の名前は像に入らない。
+# 記号表にファイル名を入れるためである。出力の名前はイメージに入らない。
 do_t3() {
     [ -f "$out/tcc2.bin" ] || do_t2b
-    t2tree                              # 作業場を作り直す (中身は T2 と同一)
+    t2tree                              # 作業領域を作り直す (中身は T2 と同一)
     cp "$out/tcc2.bin" "$out/t2fs/tcc2"
     t2script | sed 's/^tcc1 /tcc2 /; s/-o tcc2 /-o tcc3 /' > "$out/t3.sh"
     t2sh "$out/t3.sh" 2>&1 | grep -v 'warning\|In file included' || true

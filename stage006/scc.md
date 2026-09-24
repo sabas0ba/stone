@@ -4,11 +4,11 @@ scc は sc コンパイラの sc 言語による再記述 (セルフホスト) �
 設計は [stage006-scc.md](../docs/stage006-scc.md)，言語仕様は
 [stage005-sc.md](../docs/stage005-sc.md) 2 章を参照。
 
-ソース [scc.sc](scc.sc) が以降の正本である。バイナリはビルドで再現される
+ソース [scc.sc](scc.sc) が以降の原本である。バイナリはビルドで再現される
 生成物であり，git 管理しない:
 
 - scc1.bin (B1): Stage 5 の sc コンパイラで bootstrap したもの
-- scc.bin (B2): scc が自分自身をコンパイルしたもの (以降の実行に用いる正本)
+- scc.bin (B2): scc が自分自身をコンパイルしたもの (以降の実行に用いる 2 段目)
 
 ## ビルド
 

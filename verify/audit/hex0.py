@@ -2,7 +2,7 @@
 # hex0 言語の参照実装 (独立監査用)。仕様: docs/stage001-hex0.md 2 章。
 #
 # stage001/hex0.bin とは独立に，仕様書だけから書き起こした実装である。
-# 両者の出力一致をもって「listing・バイナリ・仕様の三者整合」の裏を取る
+# 両者の出力一致をもって「listing・バイナリ・仕様の三者整合」を裏付ける
 # (verify/audit/README.md)。ビルド経路には使用しない。
 #
 # 使用法: python3 hex0.py < input > output

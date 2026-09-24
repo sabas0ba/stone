@@ -1,16 +1,16 @@
 #!/bin/sh
-# tcc を**ホストの gcc で**ビルドする。Stage 15 第 5 部の開発道具。
+# tcc を**ホストの gcc で**ビルドする。Stage 15 第 5 部の開発ツール。
 #
 # 使用法: tcc.sh [host|riscv64|riscv32|src|clean]
 #
 #   src       素材を tmp/tcc/src へ写し stage015/tcc/*.patch を当てる
 #   host      ホスト向けの tcc を作る (tmp/tcc/build/tcc)
-#   riscv64   RV64 向けの交差 tcc を作る (上流のまま。手本と対照用)
-#   riscv32   RV32 向けの交差 tcc を作る (我々が足す対象)
-#   os        stone の OS の上で走る tcc (tccH) を交差 tcc で作る。
-#             第 6 部で「実行環境の不足」と「我々の cc の誤訳」を
+#   riscv64   RV64 向けのクロス tcc を作る (上流のまま。手本と対照用)
+#   riscv32   RV32 向けのクロス tcc を作る (我々が足す対象)
+#   os        stone の OS の上で走る tcc (tccH) をクロス tcc で作る。
+#             第 6 部で「実行環境の不足」と「我々の cc の誤コンパイル」を
 #             切り分けるための対照 (下の 3 を見よ)
-#   base      patch を当てない素の RV64 tcc を作る (tmp/tcc/base/build)。
+#   base      patch を当てない未変更の RV64 tcc を作る (tmp/tcc/base/build)。
 #             patch が RV64 の生成コードを変えていないことの対照に使う
 #   clean     tmp/tcc を消す
 #
@@ -24,7 +24,7 @@
 # 用途は 2 つ。
 #
 #   1. `riscv32-gen.c` 相当の改訂 (stage015/tcc/riscv32.patch) を書くとき，
-#      ホストで作った交差 tcc に RV32 のコードを吐かせて，我々の QEMU と
+#      ホストで作ったクロス tcc に RV32 のコードを出力させて，我々の QEMU と
 #      OS の上で走らせて確かめる。処理系の側 (第 2〜4 部) の進み具合に
 #      関係なく進められる
 #   2. 第 6 部で我々の処理系が作った tcc (T1) と突き合わせるときの，
@@ -83,10 +83,10 @@ riscv32)
     make -C "$bld" riscv32-tcc
     ;;
 os)
-    # stone の OS の上で走る tcc (tccH) を，**ホストの交差 tcc で**作る。
+    # stone の OS の上で走る tcc (tccH) を，**ホストのクロス tcc で**作る。
     #
     # 第 6 部の切り分けのための対照である。T2 が動かないとき，原因は
-    # 「我々の cc の誤訳」か「実行環境 (start.S・libc15・kernel16 の
+    # 「我々の cc の誤コンパイル」か「実行環境 (start.S・libc15・kernel16 の
     # ELF 読み) の不足」のどちらかだが，tccH は前者を取り除いた形なので，
     # tccH が動けば実行環境は正しい，と言い切れる。
     #
@@ -134,14 +134,14 @@ os)
         done
         "$xtcc" -nostdinc -I. -c tcc.c -o tcc.o
         # ここから先は **T2 と同じ手順**でなければならない。OS の側は
-        # シェルが 1 行 9 語までなので，-r で 3 つに畳んでから繋ぐ
+        # シェルが 1 行 9 語までなので，-r で 3 つにまとめてからリンクする
         # (docs/stage015-tcc.md 12.18)。手順が違うと配置が変わり，
         # tccH と T2 を直に比べられなくなる
         "$xtcc" -r -o libc1.o string.o ctype.o stdlib.o misc15.o
         "$xtcc" -r -o libc2.o sys.o morecore.o stdio.o assert.o
         "$xtcc" -r -o rt.o start.o riscv32.o libtcc1.o
         "$xtcc" -r -o all.o rt.o tcc.o libc1.o libc2.o
-        # kernel16 はユーザ像を UBASE = 0x8600_0000 へ載せる
+        # kernel16 はユーザイメージを UBASE = 0x8600_0000 へ配置する
         "$xtcc" -nostdlib -static -Wl,-Ttext=0x86000000 -o ../tccH all.o
     ) 2>&1 | grep -v 'warning:\|^In file included' || true
     [ -f "$bld/tccH" ] || { echo "error: tccH ができていない" >&2; exit 1; }

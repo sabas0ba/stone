@@ -6,9 +6,9 @@
 # 作り直しになっていた)。
 
 # Stage 13 はリンカの新世代 (ld13 = ld12 + sys_ecall) を Stage 8 の ld で，
-# カーネル (kernel13 = spawn とつなぎ替え) とシェル (sh13) を pp + cc +
+# カーネル (kernel13 = spawn とリダイレクト) とシェル (sh13) を pp + cc +
 # ld13 で作る (docs/stage013-tools.md 3 章)。libc は第 13 世代
-# (stage013/libc。spawn の包みを足した) をオブジェクトのまま置く
+# (stage013/libc。spawn のラッパを足した) をオブジェクトのまま置く
 build_stage013() {
     { cat stage013/ld13.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc.bin > tmp/build/ld13.o
@@ -29,7 +29,7 @@ build_stage013() {
         sh tools/env.sh qemu tmp/build/cc.bin < "tmp/build/l13_$n.i" > "tmp/build/l13_$n.o"
         echo "built tmp/build/l13_$n.o" >&2
     done
-    # OS 上の道具 (ELF 実行形式)。どれも libc の第 13 世代を並べる
+    # OS 上のツール (ELF 実行形式)。どれも libc の第 13 世代を並べる
     for t in sh ed bundle ldin eot mk; do
         sh tools/bundle.sh stage013/libc/include/*.h "stage013/$t.c" \
             | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/${t}13.i"

@@ -46,7 +46,7 @@ report $? "error: 奇数桁 + 終端で終了コード 2"
 # 5. verify 層 (docs/stage001-hex0.md 6 章 5)。
 # .md の SHA-256 は初回ビルドの自己記録なので，独立系の逆アセンブラで
 # listing の注釈そのものを照合する。バイト列が正しくても注釈がドリフト
-# していれば，ここで捕まる
+# していれば，ここで検出される
 sh verify/checklisting.sh stage001/hex0.hex "$bin" > tmp/hex0-listing.txt 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || cat tmp/hex0-listing.txt

@@ -10,19 +10,19 @@
  *
  *   *.c   翻訳する
  *   *.o   そのままリンクへ回す
- *   *.a   書庫。**展開して員をリンクへ回す**
+ *   *.a   書庫。**展開してメンバをリンクへ回す**
  *   -     標準入力を翻訳する
  *
  * ---- 設計の要 (7.2) ----
  *
- * **リンカにも前処理器にも手を入れない。**
+ * **リンカにも前処理器にも変更を加えない。**
  *
  * ld16 の入力は 'E' + .o の連結 + '\0' なので，書庫はこちらで展開して
  * 並べればよい。リンカは書庫という概念を知らないままでよく，凍結済みの
- * 世代に手が入らない。
+ * 世代に変更が入らない。
  *
- * pp16 は引数を取らない (標準入力から束ねを読むだけ) ので，-I は
- * 「その階層のヘッダを束ねの員に足す」，-D / -U は「翻訳単位の頭に
+ * pp16 は引数を取らない (標準入力からバンドルを読むだけ) ので，-I は
+ * 「その階層のヘッダをバンドルに足す」，-D / -U は「翻訳単位の頭に
  * #define / #undef を挿む」という形で表す。**与えられた順に並べる**
  * ——  コマンド行の順が意味を持つからである。
  */
@@ -112,7 +112,7 @@ static int endswith(char *s, char *suf) {
   return n >= m && strcmp(s + n - m, suf) == 0;
 }
 
-/* 束ねに 1 つ足す */
+/* バンドルに 1 つ足す */
 static void member(int fd, char *nm, char *from) {
   long sz;
   char h[600];
@@ -123,11 +123,11 @@ static void member(int fd, char *nm, char *from) {
   if (copyinto(fd, from) != sz) die("short read", from);
 }
 
-/* dir の下のふつうのファイルを束ねへ入れる。pre が空でなければ
+/* dir の下のふつうのファイルをバンドルへ入れる。pre が空でなければ
  * 名乗る名前の前に付ける (sys/ の階層のため)。
  *
  * dir を **その場で控えを取る**。呼ぶ側が大域の path を渡すことが
- * あり，そのまま使うと最初の 1 件で path を潰してしまい，2 件目から
+ * あり，そのまま使うと最初の 1 件で path を上書きしてしまい，2 件目から
  * "/include/sys/stat.h/time.h" のような経路が建つ */
 static void adddir(int fd, char *dir, char *pre) {
   DIR *d;
@@ -160,7 +160,7 @@ static void addheaders(int fd) {
 }
 
 /* -D / -U を並べた前置きを書き，そのあとに src の中身を続ける。
- * **翻訳単位そのものを作り直している**ので，束ねの員としては
+ * **翻訳単位そのものを作り直している**ので，バンドルのメンバとしては
  * この一時ファイルを渡す */
 static char *makeunit(char *src) {
   int fd;
@@ -231,7 +231,7 @@ static void compile1(char *src, char *out) {
   if (st != 0) { fputs("cc: compile failed\n", stderr); exit(st); }
 }
 
-/* 書庫を展開する。員を _a<n>.o として置き，objs へ積む */
+/* 書庫を展開する。メンバを _a<n>.o として置き，objs へ積む */
 static void expand(char *arch) {
   int fd;
   int n;
@@ -348,7 +348,7 @@ int main(int argc, char **argv) {
   }
   if (nin == 0) die("no input file", 0);
 
-  /* -c のときは各 .c を .o にして終わる。-o は入力が 1 つのときだけ効く
+  /* -c のときは各 .c を .o にして終わる。-o は入力が 1 つのときだけ有効
    * (本物と同じ。複数入力に -o を付ける形は本物も拒む) */
   if (conly) {
     if (out && nin > 1) die("-o with -c allows only one input", 0);

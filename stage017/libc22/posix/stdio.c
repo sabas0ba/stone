@@ -36,11 +36,11 @@ FILE *__stdfile(int i) {
   return &files[i];
 }
 
-/* 追記の流れは**書く前に必ず末尾へ寄せる** (第 21 世代)。
+/* 追記の流れは**書く前に必ず末尾へ移動する** (第 21 世代)。
  *
  * カーネルに O_APPEND が無いので libc の側でやる。単一の走行なので
  * (spawn は子の終わりを待つ)，これで POSIX の O_APPEND と同じ意味に
- * なる。**寄せられなければ書かない** —— 書くと先頭を潰すからである
+ * なる。**移動できなければ書かない** —— 書くと先頭を壊すからである
  * (docs/stage017-cc.md 32 章)。
  */
 static int wr(FILE *f, void *buf, int n) {
@@ -62,9 +62,9 @@ FILE *fopen(char *path, char *mode) {
   app = 0;
   if (mode[0] == 'r') flags = O_RDONLY;
   else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
-  /* **O_APPEND は渡さない。** カーネルが知らない旗を黙って捨てるので，
-   * 渡しても効かない —— そして open() はそれを拒む (fcntl.h の註)。
-   * 追記はここ (libc) で実装する。印だけ立てて，書く前に末尾へ寄せる */
+  /* **O_APPEND は渡さない。** カーネルが知らないフラグを黙って捨てるので，
+   * 渡しても無効である —— そして open() はそれを拒む (fcntl.h の註)。
+   * 追記はここ (libc) で実装する。印だけ立てて，書く前に末尾へ移動する */
   else if (mode[0] == 'a') { flags = O_WRONLY | O_CREAT; app = 1; }
   else return NULL;
   fd = open(path, flags);
@@ -522,7 +522,7 @@ FILE *fdopen(int fd, char *mode)
             files[k].err = 0;
             /* **印は mode で決める。** fclose は fd を -1 にするだけ
              * なので，追記の流れが閉じた枠には app = 1 が残る。
-             * 落とさないと次にこの枠を取った流れが末尾へ寄せてしまう。
+             * 落とさないと次にこの枠を取った流れが末尾へ移動してしまう。
              * かといって落とすだけだと fdopen(fd, "a") が追記に
              * ならない —— **どちらも黙って誤る形である** (第 21 世代) */
             files[k].app = (mode != 0 && mode[0] == 'a');

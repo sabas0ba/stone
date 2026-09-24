@@ -6,7 +6,7 @@
  * stage013/sh.c (73 行) とは別物で，複製ではなく新規に書いた。あちらは
  * 「語に分割して spawn」しかせず，構文という概念を持っていない。
  *
- * 作り: 素直な再帰下降で**構文木を作ってから歩く**。こうすると eval と
+ * 作り: 単純な再帰下降で**構文木を作ってから歩く**。こうすると eval と
  * 関数がどちらも「文字列を構文木にして歩く」だけになる (10.2)。
  *
  * 持たないもの (要らないと確かめた。10.1):
@@ -289,7 +289,7 @@ static void lex(void) {
     if (c == '\\' && ip[1]) { ip = ip + 2; continue; }
     if (q == 0 && (c == '\'' || c == '"')) { q = c; ip = ip + 1; continue; }
     if (q != 0 && c == q) { q = 0; ip = ip + 1; continue; }
-    /* $( ... ) と ` ... ` の中は括弧の対応を数えて丸ごと取る */
+    /* $( ... ) と ` ... ` の中は括弧の対応を数えてまとめて取る */
     if (q != '\'' && c == '$' && ip[1] == '(') {
       int d;
       d = 0;
@@ -514,7 +514,7 @@ static int p_if(void) {
   expect("then");
   nd[n].b = p_list();           /* then 側 */
   if (iskw("elif")) {
-    /* elif は「else の中に if がある」ものとして畳む */
+    /* elif は「else の中に if がある」ものとして扱う */
     nd[n].c = p_if();
     return n;
   }
@@ -607,7 +607,7 @@ static int p_case(void) {
   return n;
 }
 
-/* 複合コマンドの後ろに付くリダイレクトを拾う。
+/* 複合コマンドの後ろに付くリダイレクトを読み取る。
  * **case や if にも付く** —— configure の 611 行目が
  *   case $source_path in ... esac >>config.mak
  * である。簡単コマンドだけ見ていると，ここの出力が端末へ漏れる
@@ -741,7 +741,7 @@ static int p_list(void) {
  * POSIX の順序を守る (10.3)。
  *   1. パラメータ展開  2. コマンド置換  3. 語分割  4. 引用の除去
  *
- * 3 が効くのは**引用の外から来た部分だけ**である。"$1" は切らないが
+ * 3 が適用されるのは**引用の外から来た部分だけ**である。"$1" は切らないが
  * $1 は切る。したがって展開しながら「この文字は引用の中から来たか」を
  * 対で持ち歩く (ebuf と eqf)。
  */
@@ -753,7 +753,7 @@ static int noquote;
 /* この語に引用が現れたか。**引用のあった空語は 1 個の空引数になる。**
  * "$CC" で CC が未設定なら「空の引数が 1 つ」であって「引数なし」では
  * ない。ここを落とすと test -n "$CC" が test -n になり，引数 1 個の
- * test として**真になってしまう** (configure 57 行目でこれを踏んだ) */
+ * test として**真になってしまう** (configure 57 行目でこれに遭遇した) */
 static int wquoted;
 
 /* この語で "$@" を展開したか。**"$@" は位置パラメータが無ければ
@@ -791,7 +791,7 @@ static void tmpname(char *out) {
   sprintf(out, "/tmp.sh2.%d", tmpseq);
 }
 
-/* 中身を丸ごと読んで返す (末尾の改行は落とす) */
+/* 中身をすべて読んで返す (末尾の改行は落とす) */
 static char *slurpfile(char *path, int strip) {
   int fd;
   int n;
@@ -813,7 +813,7 @@ static char *slurpfile(char *path, int strip) {
 }
 
 /* 出力の行き先。**カーネルに dup2 が無い**ので，fd を差し替える代わりに
- * 「いまの出力先のファイル名」を持ち回す。
+ * 「いまの出力先のファイル名」を保持する。
  *
  * 外部コマンドは spawn(path, argv, in, out) がファイル名を受けるので
  * そのまま渡せる (docs/stage013-tools.md 3.2)。組込みは outs() を通して
@@ -822,7 +822,7 @@ static char *curout;            /* 0 なら標準出力 */
 static int curapp;              /* 1 なら追記 */
 static char *curin;             /* 0 なら標準入力 */
 /* 組込みの誤り出力の行き先。**外部コマンドは spawn2 が受けるが，
- * 組込みは自分で振り分けないと 2>/dev/null が効かない** (実際に
+ * 組込みは自分で振り分けないと 2>/dev/null が有効にならない** (実際に
  * cat の「開けない」が漏れた) */
 static char *curerr;
 
@@ -1171,7 +1171,7 @@ static char *expandone(char *w) {
 /* ---- パターン照合 (case と ${V#...} が使う) ----
  *
  * 経路展開は要らない (10.1) ので，**文字列に対する照合だけ**でよい。
- * * があるので後戻りが要る。素直に再帰で書く。
+ * * があるので後戻りが要る。単純に再帰で書く。
  */
 static int patmatch(char *pat, char *s) {
   for (;;) {
@@ -1340,7 +1340,7 @@ static int b_test(int ac, char **av) {
     if (n > 1 && strcmp(av[n - 1], "]") == 0) n = n - 1;
   }
   if (n <= 1) return 1;
-  /* ! を剥がす */
+  /* ! を除去する */
   if (strcmp(av[1], "!") == 0) {
     char *sub[NARG];
     int i;
@@ -1491,7 +1491,7 @@ static int runsimple(int n) {
        * 標準エラーは端末へ出たままになる。
        *
        * configure は cc_msg.txt に警告を溜めて grep するので，この差は
-       * 「警告が見つからない = その選択肢を有効にする」方向に効く。
+       * 「警告が見つからない = その選択肢を有効にする」方向に作用する。
        * 停まらないが結果は変わりうる。塞ぐには spawn の記録を 1 語
        * 伸ばす (err の欄を足す) 必要があり，第 4 部の 3 の課題とする */
       errdup = 1;
@@ -1547,7 +1547,7 @@ static int runsimple(int n) {
   }
 
   /* 組込みか，あるいは組込みとして持っている道具か。
-   * リダイレクトは curout / curin を差し替えて効かせる */
+   * リダイレクトは curout / curin を差し替えて適用する */
   sin = curin; sout = curout; sapp = curapp; serr = curerr;
   if (in) curin = in;
   if (out) { curout = out; curapp = app; }
@@ -1598,7 +1598,7 @@ static int runpipe(int n) {
   return st;
 }
 
-/* 節に付いたリダイレクトを効かせて中を走らせる (簡単コマンド以外) */
+/* 節に付いたリダイレクトを適用して中を走らせる (簡単コマンド以外) */
 static int runrd(int n);
 
 static int runtree(int n) {
@@ -1692,7 +1692,7 @@ static int runtree(int n) {
         if (patmatch(pat, subj)) return runtree(nd[it].a);
       }
     }
-    lastst = 0;                 /* どの枝にも当たらなければ 0 */
+    lastst = 0;                 /* どの分岐にも当たらなければ 0 */
     return 0;
   }
   default:
@@ -1701,7 +1701,7 @@ static int runtree(int n) {
 }
 
 /* 節のリダイレクトを curin / curout へ移してから中を走らせる。
- * 走らせている間だけ効く */
+ * 走らせている間だけ有効である */
 static int runrd(int n) {
   char *sin;
   char *sout;
@@ -1813,7 +1813,7 @@ int main(int argc, char **argv) {
  * ようになったら main() を被せて別々にリンクすればよい (11.2)。
  */
 
-/* ファイルを丸ごと読んで返す。長さを *np へ。開けなければ 0 */
+/* ファイル全体を読んで返す。長さを *np へ。開けなければ 0 */
 static char *readall(char *path, int *np) {
   int fd;
   int n;
@@ -2074,7 +2074,7 @@ static int t_mv(int ac, char **av) {
 }
 
 /* ln は複写にする。**sfs2 にリンクが無い**ので，同じ中身の別ファイルを
- * 作るのが最も近い。configure は lib / tests を張るのに使うだけである */
+ * 作るのが最も近い。configure は lib / tests を作成するのに使うだけである */
 static int t_ln(int ac, char **av) {
   char *a[NARG];
   int n;
@@ -2129,8 +2129,8 @@ static int t_uname(int ac, char **av) {
 
 
 /* 組込みの入力。**curin を見る** —— カーネルに dup2 が無いので、
- * 入力の差し替えもファイル名の持ち回しである (出力の curout と同じ)。
- * getchar() を直に呼ぶと `< file` が効かず、端末を待って止まる */
+ * 入力の差し替えもファイル名の保持で行う (出力の curout と同じ)。
+ * getchar() を直に呼ぶと `< file` が有効にならず、端末を待って止まる */
 static FILE *inopen(void) {
   if (curin == 0) return stdin;
   return fopen(curin, "r");
@@ -2142,7 +2142,7 @@ static int inclose(FILE *f) {
 }
 
 /* 組込みの書き出し (書式つき)。printf を直に呼ぶと curout を素通りして
- * リダイレクトが効かない */
+ * リダイレクトが有効にならない */
 static int outn(int v) {
   char b[32];
   sprintf(b, "%d", v);
@@ -2455,7 +2455,7 @@ static int t_sort(int ac, char **av) {
 }
 
 /* 無ければ作る (touch)。**時刻は更新しない** —— sfs3 は書いた時点の
- * 時刻を持つので，中身を変えずに時刻だけ動かす道が無い。無いものは
+ * 時刻を持つので，中身を変えずに時刻だけ動かす手段が無い。無いものは
  * 無いと言う: 既にあるファイルには何もしない */
 static int t_touch(int ac, char **av) {
   int i;

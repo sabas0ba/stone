@@ -4,14 +4,14 @@ cc15o は C コンパイラの Stage 15 第 6 部の世代である。
 [cc15n.sc](cc15n.sc) を出発点に，**局所の構造体を式で初期化する宣言**を
 実装した。黙って初期化を落とす (bad) 誤りが 1 つ直っている。
 
-ソース [cc15o.sc](cc15o.sc) が正本である。
+ソース [cc15o.sc](cc15o.sc) が原本である。
 
 ## ビルド
 
 ```
 sh tools/build.sh stage015
 # cc15n(cc15o.sc) -> cc15o0     (1 段目)
-# cc15o0(cc15o.sc) -> cc15o     (正本。以降は固定点)
+# cc15o0(cc15o.sc) -> cc15o     (2 段目。以降は固定点)
 ```
 
 SHA-256: 50f8eb98eaf56cfb42981a335d0ab2e9c0b01d770e928b63ade138b20cfd0c04

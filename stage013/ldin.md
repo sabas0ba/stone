@@ -4,7 +4,7 @@ ldin はリンカへの入力を組み立てるコマンドである。ホスト
 `{ printf 'E'; cat a.o b.o; printf '\0'; }` のゲスト版で，設計は
 [stage013-tools.md](../docs/stage013-tools.md) 7.2。
 
-ソース [ldin.c](ldin.c) が正本である。
+ソース [ldin.c](ldin.c) が原本である。
 
 ## ビルド
 

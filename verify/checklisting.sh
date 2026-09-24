@@ -36,7 +36,7 @@ trap 'rm -rf "$tmpd"' EXIT
 
 # 数の表記ゆれを吸収する awk 関数群。listing は読みやすさで 16 進と 10 進を
 # 使い分け，objdump は命令ごとに決め打ちで出す。どちらも符号つき 10 進へ
-# 畳んでから比べる。
+# 正規化してから比べる。
 #
 # 分岐・jal の飛び先は listing では `8000000c` と 0x なしで書くので，
 # その位置だけは 16 進として読む (命令名で決まる)。
@@ -71,7 +71,7 @@ function ops(s, mn, ab,   n, a, i, o, isaddr) {
         isaddr = (i == n && (mn == "jal" || mn ~ /^b(eq|ne|lt|ge|ltu|geu)$/))
         if (a[i] ~ /^[-+]?(0[xX])?[0-9a-fA-F]+$/) a[i] = num(a[i], isaddr) + (isaddr ? ab : 0)
         else if (a[i] ~ /^[-+]?(0[xX])?[0-9a-fA-F]+\(x[0-9]+\)$/) {
-            # 5(x5) の形。変位だけ畳む
+            # 5(x5) の形。変位だけ正規化する
             split(a[i], _p, "(")
             a[i] = num(_p[1], 0) "(" _p[2]
         }
@@ -86,14 +86,14 @@ awk -v base="$base" "$canon"'
 /^[0-9a-fA-F][0-9a-fA-F ]*#[ \t]*[0-9a-fA-F]+:/ {
     p = index($0, "#")
     rest = substr($0, p + 1)
-    c = index(rest, ";")                 # 人間向けの説明は落とす
+    c = index(rest, ";")                 # 人間向けの説明は除去する
     if (c > 0) rest = substr(rest, 1, c - 1)
     a = index(rest, ":")
     addr = rest; sub(/[ \t]*/, "", addr); addr = substr(rest, 1, a - 1)
     gsub(/[ \t]/, "", addr)
     body = substr(rest, a + 1)
     sub(/^[ \t]+/, "", body); sub(/[ \t]+$/, "", body)
-    # 命令を主張していない注釈は飛ばす。listing は空き語を "(未使用)" の
+    # 命令を主張していない注釈は読み飛ばす。listing は空き語を "(未使用)" の
     # ように括弧つきの注記で埋める (objdump はそれを c.unimp と読む)
     if (body == "" || substr(body, 1, 1) == "(") next
     sp = match(body, /[ \t]/)

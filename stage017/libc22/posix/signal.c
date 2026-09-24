@@ -3,7 +3,7 @@
  * 設計は include/signal.h の註。 stone の OS にシグナルは無いので，
  * 登録は受け付けて何も起こさない。
  *
- * **表は持たない。** 持っても誰も引かないので，持つと「効いている
+ * **表は持たない。** 持っても誰も引かないので，持つと「有効である
  * ように見える」だけである。返り値は常に SIG_DFL (直前の扱い) とする。
  */
 #include <errno.h>
@@ -14,7 +14,7 @@ __sighandler_t signal(int sig, __sighandler_t func) {
     errno = EINVAL;
     return SIG_ERR;
   }
-  /* func は捨てる。呼ぶ道が無い */
+  /* func は捨てる。呼ぶ手段が無い */
   return SIG_DFL;
 }
 

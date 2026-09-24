@@ -36,7 +36,7 @@ int chdir(char *path);
 char *getcwd(char *buf, size_t size);
 
 /* ファイルを消す (第 17 世代。docs/stage016-os.md 9.4)。
- * ディレクトリには効かない (EISDIR)。開いている fd はそのまま使える */
+ * ディレクトリには適用できない (EISDIR)。開いている fd はそのまま使える */
 int unlink(char *path);
 
 /* 記憶域の末尾を n バイト伸ばし，伸ばす前の末尾を返す。失敗は (void *)-1 */

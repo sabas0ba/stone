@@ -8,7 +8,7 @@
  *   3. $(wildcard) の * と ?
  *   4. $(MAKE) と -C            lib/ へ降りる
  *
- * **1 がいちばん効く。** 本物の make はこれを「既にある規則への依存の
+ * **1 が最も効果が大きい。** 本物の make はこれを「既にある規則への依存の
  * 追加」と読み，どう作るかは型規則が持ったままにする。mk19 は目標行を
  * 見るたびに新しい規則を立てていたので，命令を持たない規則が型規則より
  * 先に見つかり，**何も作らずに「作った」ことになっていた** (14.1)。
@@ -92,7 +92,7 @@
  *
  * **関数 ($(subst ...) など) は第 3 部の 2 である。** ここでは
  * 実装せず，**見つけたら落とす**。変数名として引いて空に展開すると，
- * 我々が何度も踏んだ「動くように見えて意味が違う」型になる。
+ * 我々が何度も遭遇した「動くように見えて意味が違う」型になる。
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -315,7 +315,7 @@ static int looksfn(char *s) {
 
 /* 関数の作業領域。**局所に置くと cc15p のフレームの上限
  * (およそ 32 KB。docs/stage017-cc.md 10.2) を超えて 0 バイトの .o が
- * 出る。** 実際に出た。入れ子で潰れないよう深さで分ける */
+ * 出る。** 実際に出た。入れ子で上書きされないよう深さで分ける */
 char fnpool[NFND][4][NEXP];
 int fndepth;
 
@@ -713,7 +713,7 @@ static int callfn1(char *name, char *body, char *out, int cap,
 }
 
 /* 深さぶんの作業領域を割り当てて callfn1 を呼ぶ。
- * **戻り道が多いので，深さの上げ下げはここ 1 箇所に集める** */
+ * **戻り経路が多いので，深さの上げ下げはここ 1 箇所に集める** */
 static int callfn(char *name, char *body, char *out, int cap) {
   int r;
   if (fndepth >= NFND) die("functions nested too deep", name);
@@ -832,8 +832,8 @@ static int slurp(char *path, char *buf, int cap) {
 }
 
 /* 条件の状態 */
-int cond[NCOND];                /* 1 = 今の枝が生きている */
-int condseen[NCOND];            /* 1 = すでに生きた枝があった */
+int cond[NCOND];                /* 1 = 今の分岐が有効である */
+int condseen[NCOND];            /* 1 = すでに有効な分岐があった */
 int ncond;
 
 static int active(void) {
@@ -843,7 +843,7 @@ static int active(void) {
   return 1;
 }
 
-/* ifeq (a,b) / ifeq "a" "b" の 2 つを剥がして比べる */
+/* ifeq (a,b) / ifeq "a" "b" の 2 つを取り出して比べる */
 static int cmpargs(char *s) {
   char e[NEXP];
   char *a;
@@ -912,7 +912,7 @@ static void parselines(char *buf, char *path) {
   char *p;
   char line[8192];
   /* 直前の目標行が立てた規則。**命令行はその全部に付く** ——
-   * `m1 m2:` と書いた行の命令は m1 にも m2 にも効く */
+   * `m1 m2:` と書いた行の命令は m1 にも m2 にも適用される */
   int curr[64];
   int ncurr;
   ncurr = 0;
@@ -933,8 +933,8 @@ static void parselines(char *buf, char *path) {
       line[len] = 0;
       p = (*e == 0) ? e : e + 1;
       if (len > 0 && line[len - 1] == '\\') {
-        /* 継続。**前後の空白ごと空白 1 つに畳む** (GNU make と同じ)。
-         * 畳まないと `a \` + `   b` が "a  b" になる */
+        /* 継続。**前後の空白ごと空白 1 つにまとめる** (GNU make と同じ)。
+         * まとめないと `a \` + `   b` が "a  b" になる */
         len = len - 1;
         while (len > 0 && isblank_(line[len - 1])) len = len - 1;
         line[len] = ' ';
@@ -1425,7 +1425,7 @@ static void runcmd(char *raw) {
   }
   if (dryrun && !recur) return;
   /* 我々の stdio は緩衝しないので何もしないが，ホストで一巡させる
-   * ときは順序が狂う。**同じ道を通す**ために置く */
+   * ときは順序が狂う。**同じ経路を通す**ために置く */
   fflush(stdout);
 
   fd = open(TMP, O_WRONLY | O_CREAT | O_TRUNC, 0666);
@@ -1523,7 +1523,7 @@ static void fire(int *srcs, int nsrc, int rrec, char *t, char *stem) {
   int nv;
   int n;
 
-  /* 依存を先に作る。**自動変数を立てる前に**やる (入れ子で潰れる) */
+  /* 依存を先に作る。**自動変数を立てる前に**やる (入れ子で上書きされる) */
   for (k = 0; k < nsrc; k = k + 1)
     for (i = 0; i < rdepn[srcs[k]]; i = i + 1) {
       patsub(list[rdep0[srcs[k]] + i], stem, dep, (int)sizeof dep);

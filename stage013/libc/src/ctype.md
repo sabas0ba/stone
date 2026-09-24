@@ -5,7 +5,7 @@ ctype.o はフリースタンディング libc の一部で，文字の分類と
 [stage011-libc.md](../docs/stage011-libc.md) 3.3。
 
 ソース [ctype.c](ctype.c) とヘッダ
-[../include/ctype.h](../include/ctype.h) が正本である。
+[../include/ctype.h](../include/ctype.h) が原本である。
 オブジェクトはビルドで再現される生成物であり，git 管理しない。
 
 ## ビルド

@@ -1,6 +1,6 @@
 /* awkfmt1.c --- awk の数と書式 (docs/stage017-gcc.md 5.8)
  *
- * 設計の意図は awkfmt1.h の註にある。数を十進へ寄せる所と，書式に
+ * 設計の意図は awkfmt1.h の註にある。数を十進へ変換する所と，書式に
  * 値を並べる所だけが入っている。
  */
 #include <stdio.h>
@@ -13,12 +13,12 @@ static int fmtint(unsigned long long v, int base, int up, char *out);
 /* 浮動小数点の 3 つの形 (%e / %f / %g) は **libc に任せる**。
  *
  * 第 1 世代を書いたときは `libc22` が `%g` と `%e` を `%f` と同じに
- * 扱っていたので awk の側で持っていた。`libc23` がその穴を埋めた
+ * 扱っていたので awk の側で持っていた。`libc23` がその不足を解消した
  * (docs/stage017-gcc.md 6.3) ので，**写しを 2 つ持つ理由が消えた** ——
  * 同じ規則を書く場所が 2 つあると必ず片方だけ直す誤りが出る
  * (stage018-ext.md 3.2 / 5.1 と同じ形)。
  *
- * 桁寄せと半端の倒し方 (Dekker の手で積を正確に求めて偶数へ倒す) は
+ * 正規化と半端の丸め方 (Dekker の方法で積を正確に求めて偶数へ丸める) は
  * `libc23/posix/stdio.c` にある。 */
 static int fpone(double v, int kind, int prec, int up, int alt, char *out) {
   char spec[16];
@@ -200,7 +200,7 @@ int awk_fmt(char *fmt, int argc, char **as, double *an, int *aisnum,
       }
       if (ch == 0) { tmp[0] = 0; sl = 0; }
       else { tmp[0] = (char)ch; tmp[1] = 0; sl = 1; }
-      /* 幅だけ効く */
+      /* 幅だけ有効 */
       pad = width - sl;
       if (!flagminus) { while (pad > 0) { if (n < outmax - 1) { out[n] = ' '; n = n + 1; } pad = pad - 1; } }
       for (k = 0; k < sl; k = k + 1) { if (n < outmax - 1) { out[n] = tmp[k]; n = n + 1; } }

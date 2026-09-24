@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stage 15 テスト: 64 bit 整数の土台 (docs/stage015-tcc.md 6 章)。
+# Stage 15 テスト: 64 bit 整数の基盤 (docs/stage015-tcc.md 6 章)。
 #
 # probe/ の各ソースを pp -> cc15a -> ld に通し，結果を ledger.txt と
 # 突き合わせる。表と実測が食い違えば失敗する (Stage 14 と同じ枠組み)。
@@ -229,7 +229,7 @@ done
 [ "$ok" -eq 0 ]
 report $? "regress: cc15ae が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
-# **ld17 は診断だけを足したもの。** 通る道が 1 ビットも変わっていない
+# **ld17 は診断だけを足したもの。** 正常系の経路が 1 ビットも変わっていない
 # ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる
 ok=0
 for o in ld16 pp16 cc15v; do
@@ -240,10 +240,10 @@ for o in ld16 pp16 cc15v; do
         && cmp -s "tmp/s15/l16_$o.bin" "tmp/s15/l17_$o.bin" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: ld17 が ld16 と同じ像を出す (診断を足しただけ)"
+report $? "regress: ld17 が ld16 と同じイメージを出す (診断を足しただけ)"
 
-# **落ちる道では名前を言うこと。** ld16 は黙って exit(2) するので，
-# 呼ぶ側には "link failed" しか出ない。5.1 でこれが行き止まりになった
+# **失敗する経路では名前を出力すること。** ld16 は黙って exit(2) するので，
+# 呼ぶ側には "link failed" しか出ない。5.1 ではこれが原因で調査が進まなくなった
 cat > tmp/s15/undef.sc <<'UNDEF'
 int nosuchfunc(int a);
 int alsomissing();
@@ -264,12 +264,12 @@ UNDEF
     && cmp -s tmp/s15/undef.out tmp/s15/undef.want
 report $? "diag: ld17 が未定義シンボルの名前を全部並べる (同じ名前は 1 度だけ)"
 
-section "差分試験 (我々の鎖とホストの処理系で値を突き合わせる)"
+section "差分試験 (我々のビルドチェーンとホストの処理系で値を突き合わせる)"
 
 # **台帳の期待値は我々が書いている。** だから我々が「正しい」と思った値が
 # そのまま期待値になる。cc15u (複合代入の符号) も cc15v (スカラの初期化子の
-# 溢れ) も，**固定点・再現性・バイト一致・往復検査のどれにも捕まらず**，
-# 我々が書いていない物差しと突き合わせて初めて出た
+# 溢れ) も，**固定点・再現性・バイト一致・往復検査のどれにも検出されず**，
+# 我々が書いていない基準と突き合わせて初めて出た
 # (docs/stage017-gcc.md 5.2)。
 #
 # 走行は 90 秒ほど。飛ばすものは名前と理由を tools/diff17.sh が必ず出す
@@ -280,10 +280,10 @@ else
     r=$?
     sed 's/^/   /' tmp/s15/diff17.log
     [ "$r" -eq 0 ]
-    report $? "diff: プローブの値が我々の鎖とホストの処理系で一致する"
+    report $? "diff: プローブの値が我々のビルドチェーンとホストの処理系で一致する"
 fi
 
-section "適合台帳の照合 (64 bit の土台)"
+section "適合台帳の照合 (64 bit の基盤)"
 
 nok=0
 ngap=0
@@ -361,7 +361,7 @@ packrc=$?
 
 # **落ちたときに「出力が違う」のか「実行が再現していない」のかを
 # 分ける** (docs/dev-notes.md 1.6)。この 2 件は CI で実際に揺らいだ。
-# 像は毎回作り直す —— 走らせた側が共有領域を書き換えるので，
+# イメージは毎回作り直す —— 走らせた側が共有領域を書き換えるので，
 # 使い回すと 2 度目の入力が 1 度目と違ってしまう
 runlib15() {
     _rk=$1; _ro=$2
@@ -376,11 +376,11 @@ genk15() { [ "$packrc" -eq 0 ] && runlib15 kernel15 "$1"; }
 stable_cmp "lib15(kernel15)" genk15 tests/stage015/expected/lib15.txt
 report $? "run: printf %llu / snprintf / strto / sscanf / setjmp / lseek が kernel15 で通る"
 
-# kernel16 (PT_LOAD を全部載せる。第 6 部) が従来の 'E' 形式をこれまで
-# どおり読めることを見る。像は上と同じものを使う
+# kernel16 (PT_LOAD をすべてロードする。第 6 部) が従来の 'E' 形式をこれまで
+# どおり読めることを見る。イメージは上と同じものを使う
 genk16() { [ "$packrc" -eq 0 ] && runlib15 kernel16 "$1"; }
 stable_cmp "lib15(kernel16)" genk16 tests/stage015/expected/lib15.txt
-report $? "run: 同じ像が kernel16 でも同じ出力になる ('E' 形式の後方互換)"
+report $? "run: 同じイメージが kernel16 でも同じ出力になる ('E' 形式の後方互換)"
 
 # U モードの浮動小数点 (ld16 の 'K' 前置部が mstatus.FS を立てる)。
 # tcc が作った実行形式はハードウェアの浮動小数点を使うので，これが
@@ -415,7 +415,7 @@ fi
 
 section "第 6 部: tcc の自己ホスト (docs/stage015-tcc.md 12 章)"
 
-# cc15m で入れた言語の穴を 1 つずつ確かめる (33 検査を 1 行で出す)
+# cc15m で入れた言語の不足を 1 つずつ確かめる (33 検査を 1 行で出す)
 sh tools/bundle.sh tests/stage015/probe/gap15m.c 2> /dev/null \
     | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/s15/gap15m.i 2> /dev/null \
     && sh tools/env.sh qemu "$cc" < tmp/s15/gap15m.i > tmp/s15/gap15m.o 2> /dev/null \
@@ -550,17 +550,17 @@ else
 
     # patch は RV32 と RV64 で同じファイル (riscv64-gen.c) を触る。
     # 「ビルドが通る」だけでは足りないので，**素の tcc と同じバイト列の
-    # オブジェクトを吐くこと**まで見る。XLEN が 8 のときは以前と同じ定数に
-    # 畳まれるはずで，畳まれていなければここで捕まる
+    # オブジェクトを出力すること**まで見る。XLEN が 8 のときは以前と同じ定数に
+    # 畳み込まれるはずで，畳み込まれていなければここで検出される
     sh tools/tcc.sh base > tmp/s15/tcc-base.log 2>&1
     report $? "tcc: patch を当てない素の RV64 tcc がビルドできる (対照)"
 
     # 対象は tcc 自身の実行時支援 (自前のヘッダだけで閉じており，RV64 の
     # sysroot が無くてもコンパイルできる) と，その 2 の検査ソース。
-    # libtcc1.c は 64 bit 演算と浮動小数点の塊なので効きがよい
+    # libtcc1.c は 64 bit 演算と浮動小数点を多く含むので検査として有効である
     same=0
     # **入力は両方とも素の木から取る。** オブジェクトにはソースの経路が
-    # 入るので，別の木を食わせると経路の差だけで違うバイト列になる
+    # 入るので，別のソース木を入力すると経路の差だけで違うバイト列になる
     for f in lib/libtcc1.c lib/builtin.c lib/stdatomic.c lib/va_list.c \
              lib/armflush.c lib/dsohandle.c; do
         rm -f tmp/s15/tcc-a.o tmp/s15/tcc-b.o
@@ -593,9 +593,9 @@ else
         cls=$(od -An -tu1 -j 4 -N 1 tmp/s15/tccadd.o | tr -d ' ')
         mach=$(od -An -tu2 -j 18 -N 2 tmp/s15/tccadd.o | tr -d ' ')
         [ "$cls" = 1 ] && [ "$mach" = 243 ]
-        report $? "tcc: 吐いたオブジェクトが ELF32 の RISC-V である (class=$cls machine=$mach)"
+        report $? "tcc: 出力したオブジェクトが ELF32 の RISC-V である (class=$cls machine=$mach)"
 
-        # 整数の範囲を一通り吐かせ，**RV32 に無い命令が 1 つも無い**ことを
+        # 整数の範囲を一通り出力させ，**RV32 に無い命令が 1 つも無い**ことを
         # 見る。逆アセンブラは不正な語を .insn と表示するので数えられる
         # (docs/stage015-riscv32.md 7 章)
         if ! command -v riscv64-unknown-elf-objdump > /dev/null 2>&1; then
@@ -623,13 +623,13 @@ else
             -o tmp/s15/run32.elf \
             tests/stage015/tccprobe/head.S tests/stage015/tccprobe/run32.c \
             > /dev/null 2>&1
-        report $? "tcc: 実走用の像 (head.S + run32.c) がリンクできる"
+        report $? "tcc: 実行用のイメージ (head.S + run32.c) がリンクできる"
 
         # 乗除算・シフト・幅の狭い型・繰返し・配列。char は符号なし (RISC-V の ABI)
         want='006ae9bc:ffffff72:00000006:00300000:ffffff80:00f00000:0000eaf7:000013ba:00000054'
         got=$(sh tools/env.sh qemu tmp/s15/run32.elf < /dev/null 2>/dev/null)
         [ "$got" = "$want" ]
-        report $? "tcc: 吐いたものが我々の QEMU で走り，答が合う"
+        report $? "tcc: 出力したものが我々の QEMU で走り，答が合う"
         [ "$got" = "$want" ] || { echo "     期待 $want"; echo "     実測 $got"; }
 
         # 呼出し規約 (その 3)。実行時支援を並べて走らせる

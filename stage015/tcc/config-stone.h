@@ -1,7 +1,7 @@
 /* config-stone.h --- stone 上で tcc を組むときの config.h
  *
  * 上流の configure はホストでしか動かないので，stone 用の設定を
- * 手で固定する。束ねでは "config.h" の名前で載せる
+ * 手で固定する。バンドルでは "config.h" の名前で格納する
  * (tools/bundle.sh の 名前=パス の形)。
  *
  * - 対象は riscv32 (riscv32.patch の DEF-riscv32 と同じ 2 つの定義)

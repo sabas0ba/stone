@@ -16,20 +16,20 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ext="$repo_root/docs/external"
 
-# manifest: 名前 URL 印
+# manifest: 名前 URL 照合値
 #   URL は '|' で区切って**複数書ける**。前から順に試し，SHA-256 が
-#   合ったものを使う。**印が記録であって URL は記録ではない** ——
-#   同じ書庫がどこから来ても，印が合えば同じ物である。
+#   合ったものを使う。**照合値が記録であって URL は記録ではない** ——
+#   同じ書庫がどこから来ても，照合値が合えば同じ物である。
 #
-#   写しを足すのは取得先が落ちたとき・網が拒むときのためである。
-#   実際 zlib.net はこの作業環境から引くと HTML の関門を返してきて
+#   ミラーを足すのは取得先が停止したとき・ネットワークが拒否するときのためである。
+#   実際 zlib.net はこの作業環境から取得すると HTML の中間ページを返してきて
 #   書庫が取れなかった (docs/stage017-cc.md 32 章)。madler/zlib の
 #   release にある書庫は**記録した SHA-256 とバイト単位で同じ**だった
-#   ので写しとして足した。**印を書き換えたのではない。**
+#   のでミラーとして足した。**照合値を書き換えたのではない。**
 #
-#   書庫 (.tar.gz / .tar.bz2) なら印は SHA-256。
-#   それ以外は git の取得元とみなし，印は commit とする。git の commit は
-#   木と履歴の内容ハッシュなので，書庫の SHA-256 と同じ役目を果たす
+#   書庫 (.tar.gz / .tar.bz2) なら照合値は SHA-256。
+#   それ以外は git の取得元とみなし，照合値は commit とする。git の commit は
+#   tree と履歴の内容ハッシュなので，書庫の SHA-256 と同じ役目を果たす
 #   (git 自身が取得時に検証する)。**ただし git の commit は SHA-1 である**
 #   ことは意識しておく (docs/stage015-tcc.md 3 章)
 manifest() {
@@ -59,7 +59,7 @@ if [ -z "$line" ]; then
 fi
 urls=${line%% *}
 want=${line##* }
-# 形式の判定には先頭の URL を使う (写しは同じ物なので同じ形式である)
+# 形式の判定には先頭の URL を使う (ミラーは同じ物なので同じ形式である)
 url=${urls%%|*}
 
 # 書庫の形式は URL の末尾で決める (tar.gz / tar.bz2)。
@@ -68,9 +68,9 @@ case "$url" in
 *.tar.bz2) ext_sfx=tar.bz2; taropt=-xjf ;;
 *.tar.gz|*.tgz) ext_sfx=tar.gz; taropt=-xzf ;;
 *)
-    # git: 印は「枝またはタグ:commit」。**commit を直接取りに行く**。
-    # 枝の先頭を取ると，枝が動いた瞬間に照合が壊れて取得できなくなる
-    # (mob のような開発枝は日々動く)。名札は記録のためだけに持つ
+    # git: 照合値は「branch またはタグ:commit」。**commit を直接取りに行く**。
+    # branch の先頭を取ると，branch が動いた瞬間に照合が壊れて取得できなくなる
+    # (mob のような開発 branch は日々動く)。ラベルは記録のためだけに持つ
     lbl=${want%%:*}
     com=${want##*:}
     echo "fetch: $url ($lbl $com)" >&2
@@ -96,8 +96,8 @@ esac
 
 mkdir -p "$ext"
 tarball="$ext/$name.$ext_sfx"
-# **写しを前から順に試す。** 印が合った時点で採る。1 つ目が落ちていても
-# 網に拒まれていても，印が合う物が手に入れば同じ作業ができる
+# **ミラーを前から順に試す。** 照合値が合った時点で採る。1 つ目が停止していても
+# ネットワークに拒否されても，照合値が合う物が手に入れば同じ作業ができる
 got=
 _rest=$urls
 while [ -n "$_rest" ]; do
@@ -105,13 +105,13 @@ while [ -n "$_rest" ]; do
     case "$_rest" in *\|*) _rest=${_rest#*|} ;; *) _rest= ;; esac
     echo "fetch: $_u" >&2
     if ! curl -fL --proto '=https' -o "$tarball" "$_u"; then
-        echo "  取れなかった (次の写しを試す)" >&2
+        echo "  取れなかった (次のミラーを試す)" >&2
         rm -f "$tarball"
         continue
     fi
     got=$(sha256sum "$tarball" | cut -d' ' -f1)
     [ "$got" = "$want" ] && break
-    echo "  SHA-256 が一致しない (次の写しを試す)" >&2
+    echo "  SHA-256 が一致しない (次のミラーを試す)" >&2
     echo "    期待: $want" >&2
     echo "    実際: $got" >&2
     rm -f "$tarball"
@@ -119,7 +119,7 @@ while [ -n "$_rest" ]; do
 done
 if [ "$got" != "$want" ]; then
     rm -f "$tarball"
-    echo "fetch.sh: どの取得先からも印の合う書庫が取れなかった" >&2
+    echo "fetch.sh: どの取得先からも照合値の合う書庫が取れなかった" >&2
     echo "  期待: $want" >&2
     exit 1
 fi

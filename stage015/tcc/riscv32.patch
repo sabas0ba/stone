@@ -8,7 +8,7 @@ RISC-V の backend (riscv64-gen.c / riscv64-link.c) は RV32 と RV64 で
 形にしてある。この patch の差分がそのまま「RV32 に要る違い」である。
 
 RV32 の対応とは別に，**上流の誤りの修正が 1 つ入っている** (store が
-番地を絶対値で書くときに枠の指し手 s0 を潰す)。RV64 でも同じ誤りが
+番地を絶対値で書くときにフレームポインタ s0 を上書きする)。RV64 でも同じ誤りが
 出るので RV32 固有ではない。docs/stage015-riscv32.md 10 章。
 
 対象は -DTCC_TARGET_RISCV64 -DTCC_TARGET_RISCV32 の 2 つを定義して選ぶ。
@@ -374,7 +374,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          int64_t si = sv->c.i;
 -        ptrreg = 8; // s0
 +        /* 番地を絶対値で書く場合の base。**s0 を使ってはいけない。**
-+           s0 は枠の指し手であり，ここで潰すと後片付け (mv sp,s0 と
++           s0 はフレームポインタであり，ここで上書きすると後片付け (mv sp,s0 と
 +           ra / s0 の復元) が壊れる。t0 は割付けの対象外なので安全 */
 +        ptrreg = 5; // t0
          si >>= 32;
@@ -401,7 +401,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
  }
  #endif
  
-+/* 語 1 本 (XLEN バイト) に収まる大きさ size を，載せる型で表す。
++/* 語 1 本 (XLEN バイト) に収まる大きさ size を，格納する型で表す。
 +   端数のときは狭い型にして，はみ出しを読まないようにする */
 +static int chunkt(int size)
 +{
@@ -425,7 +425,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
 +    } else if (rc[0] == 2 || rc[0] < 0 || IS_LDBL(type->t & VT_BTYPE))
 +      rc[0] = -1;
 +    else if (!is_float(type->t) && type_size(type, &ofs_align) > XLEN)
-+      /* 語より大きい整数 (RV32 の long long) はレジスタ 1 本に載らない。
++      /* 語より大きい整数 (RV32 の long long) はレジスタ 1 本に収まらない。
 +         -1 にして reg_pass の「大きさで語ごとに割る」方へ落とす。
 +         RV64 では long long は語ちょうどなのでここは通らない */
        rc[0] = -1;
@@ -451,7 +451,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
      }
  }
  
-+/* レジスタ 2 本に載る「まとまった値」か。RV64 では long double，
++/* レジスタ 2 本に収まる「まとまった値」か。RV64 では long double，
 +   RV32 では long long がこれにあたる。構造体と違って記憶域から
 +   読み直せない (定数でありうる) ので，レジスタ対のまま運ぶ */
 +static int is_pair_scalar(int bt)
@@ -703,7 +703,7 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
 +           tccgen.c の gen_opl がこれを使う (i386 と arm も同じ形)。
 +
 +           結果はいったん t0 / t1 (割付けの対象外) に置く。行き先を
-+           先に取ると，取った先が掛ける側と重なって値を潰しうる */
++           先に取ると，取った先が掛ける側と重なって値を上書きしうる */
 +        int ml, mh, ma, mb;
 +        gv2(RC_INT, RC_INT);
 +        ma = ireg(vtop[-1].r);
@@ -731,10 +731,10 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
 +#ifdef TCC_TARGET_RISCV32
 +    /* 64 bit の加減算を 32 bit 2 回に分けるための桁上げ付き演算
 +       (tccgen.c の gen_opl が下位で C1，上位で C2 を呼ぶ)。
-+       RISC-V に桁上げの旗は無いので，**t2 に持って次へ渡す**。
++       RISC-V に桁上げフラグは無いので，**t2 に持って次へ渡す**。
 +       t0 / t2 は割付けの対象外なので，行き先が掛ける側と重なっても
 +       壊れない。C1 と C2 の間に挟まるのは退避の書出しだけであり，
-+       これらは t2 を触らない (旗を使う i386 / arm と同じ前提) */
++       これらは t2 を触らない (フラグを使う i386 / arm と同じ前提) */
 +    case TOK_ADDC1: // 下位: 足して桁上げを t2 へ
 +        ER(0x33, 0, 5, a, b, 0);   // add  t0, a, b
 +        ER(0x33, 3, 7, 5, a, 0);   // sltu t2, t0, a
@@ -1060,13 +1060,13 @@ diff -u -r --unidirectional-new-file -x .git -x '*.o' -x '*.a' -x config.h -x co
          a = 0;
          b = 0;
 +#ifdef TCC_TARGET_RISCV32
-+        /* **旗の無い機械では「直前の比較の続き」が書けない。**
-+           下の non equal test は，i386 や arm では直前の比較が立てた旗を
-+           そのまま読み直すことで成り立っている。RISC-V に旗は無く，
++        /* **フラグの無い機械では「直前の比較の続き」が書けない。**
++           下の non equal test は，i386 や arm では直前の比較が立てたフラグを
++           そのまま読み直すことで成り立っている。RISC-V にフラグは無く，
 +           比較は 2 つのレジスタを名指しする分岐そのものなので，
 +           上位語をもう一度比べる必要がある。そのために**上位語の複製を
 +           先に積んでおく** (比較で消費される前に取っておく)。
-+           複製は値スタックに載るので，割付けがそのレジスタを取ることも
++           複製は値スタックに積まれるので，割付けがそのレジスタを取ることも
 +           無い */
 +        if (op != TOK_EQ && op != TOK_NE) {
 +            vpushv(vtop - 1);   /* H1 の複製 */

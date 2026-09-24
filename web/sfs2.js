@@ -7,7 +7,7 @@
 // データは追記割付け・4 バイト境界。置き場所は sfs1 と同じ (SFS_OFFSET)。
 //
 // 項目の並び順は tools/sfs2.sh と同一にしてある (ディレクトリを深さ順・
-// 経路順に，そのあとファイルを経路順)。同じ木からは同じイメージが出る。
+// 経路順に，そのあとファイルを経路順)。同じツリーからは同じイメージが出る。
 import { SFS_OFFSET } from './sfs.js';
 
 export { SFS_OFFSET };
@@ -20,7 +20,7 @@ const F_DIR = 2;
 
 const depth = (p) => p.split('/').length;
 
-// 経路の親をすべて洗い出す ('a/b/c.h' -> 'a', 'a/b')
+// 経路の親をすべて列挙する ('a/b/c.h' -> 'a', 'a/b')
 function ancestors(path) {
     const parts = path.split('/');
     const out = [];

@@ -1,12 +1,12 @@
 # stage016 のビルド手順と，入力・生成物の宣言。
 #
 # 第 1 部はファイル系 (sfs2)。カーネルの新世代 kernel17 が sfs2 を読み，
-# 経路をディレクトリの木として解決する (docs/stage016-os.md 6 章)。
+# 経路をディレクトリのツリーとして解決する (docs/stage016-os.md 6 章)。
 # 第 2 部はディレクトリの操作。kernel18 が作業ディレクトリと
-# getdents64 / mkdirat / chdir / getcwd を持ち，libc16 がそれを包む
+# getdents64 / mkdirat / chdir / getcwd を持ち，libc16 がそれをラップする
 # (7 章)。どちらも最前線の cc15p / pp16 / ld16 で作る。
 #
-# 世代ごとに step のスタンプを持つので，途中で殺されても失うのは
+# 世代ごとに step のスタンプを持つので，途中で強制終了されても失うのは
 # 高々 1 つである (docs/dev-notes.md 1.5)。
 
 # カーネルを 1 つ作る (前置部は 'K')。kern <名前> <ソース>
@@ -35,8 +35,8 @@ build_stage016() {
     kern kernel22 stage016/kernel22.c        # 第 4 部の 3 (/dev/null)
 
     # libc の第 16 世代。libc15 との差は dirent / mkdir / chdir / getcwd と，
-    # open が先頭の '/' を剥がすのをやめたこと (docs/stage016-os.md 7.4)。
-    # 翻訳は libc15 と同じ cc15k で行う (器の都合。stage015c.sh と揃える)
+    # open が先頭の '/' を除去するのをやめたこと (docs/stage016-os.md 7.4)。
+    # 翻訳は libc15 と同じ cc15k で行う (コンパイラの都合。stage015c.sh と揃える)
     for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
              posix/sys posix/morecore posix/stdio posix/assert posix/dir; do
         n=$(echo "$f" | tr / _)

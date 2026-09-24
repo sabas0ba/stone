@@ -46,8 +46,8 @@ mkroot() {
     cp tmp/build/sh2.bin "$_r/sh2"
 }
 
-# 根を像にして kernel23 で走らせる。出力は $2 へ。
-# 像の大きさは $3 (既定 16 MB) / 項目数は $4 (既定 256)
+# 根をイメージにして kernel23 で走らせる。出力は $2 へ。
+# イメージの大きさは $3 (既定 16 MB) / 項目数は $4 (既定 256)
 runroot() {
     sh tools/sfs2.sh pack "$1" "$out/img" "${3:-16777216}" "${4:-256}" \
             > /dev/null \
@@ -60,7 +60,7 @@ runroot() {
             > "$2" 2>&1
 }
 
-# 走ったあとの像を $out/ram から切り出して $2 へ展開する。
+# 走ったあとのイメージを $out/ram から切り出して $2 へ展開する。
 # **走らせる前に詰めた $out/img は走ったあとの姿ではない。**
 # カーネルが書き換えるのは記憶の 67108864 から先である
 unpackback() {
@@ -71,7 +71,7 @@ unpackback() {
 
 section "cc: 駆動役が我々の OS の上で C を翻訳する (docs/stage017-cc.md)"
 
-# 平らな像を OS の実行形式へ組み直したものが ELF であること。
+# フラットなイメージを OS の実行形式へ組み直したものが ELF であること。
 # **ここを取り違えると spawn が ENOEXEC で落ちる**
 ok=0
 for f in pp16cmd cc15pcmd ld16cmd cc17 cc18 ar17 mk17; do
@@ -165,10 +165,10 @@ section "第 2 部: 複数の翻訳単位と書庫 (docs/stage017-cc.md 7 章)"
 #   ar rcs で書庫にまとめ
 #   cc18 が main.c + 書庫 をリンクする
 #
-# 書庫の員 (addx / mulx / lenx / catx) と /lib の員 (printf / strcat) の
-# **両方が引けること**を見る。-I は /include に無いヘッダを拾わせ，
+# 書庫のメンバ (addx / mulx / lenx / catx) と /lib のメンバ (printf / strcat) の
+# **両方が引けること**を見る。-I は /include に無いヘッダを検出させ，
 # -D は VERSION を外から与える (定義が無ければ翻訳が落ちるので，
-# -D が効いていることが結果に出る)
+# -D が有効であることが結果に出る)
 r=$out/mroot
 mkroot "$r"
 mkdir -p "$r/inc"
@@ -228,7 +228,7 @@ else
     mkdir -p "$out/xx" && (cd "$out/xx" && rm -f ./*.o && ar x "../back/libx.a")
     cmp -s "$out/xx/mathx.o" "$out/back/mathx.o" \
         && cmp -s "$out/xx/strx.o" "$out/back/strx.o"
-    report $? "interop: 本物の ar x が取り出した員が元とバイト一致する"
+    report $? "interop: 本物の ar x が取り出したメンバが元とバイト一致する"
 
     # **索引を書いていないことを確かめる** (7.4)。書いたことにして
     # いないか，こちらから見にいく
@@ -246,7 +246,7 @@ section "第 2 部: libc 自身を書庫にする (docs/stage017-cc.md 7.6)"
 #   3. その書庫だけを頼りにプログラムをリンクして走らせる
 #
 # /lib に置くのは走り時の下働き (rt64 / rtfp) だけにする。libc の .o を
-# 置いたままだと，書庫の員と /lib の員が同じ符号を二重に定義して ld が
+# 置いたままだと，書庫のメンバと /lib のメンバが同じ符号を二重に定義して ld が
 # 落ちる。**書庫から本当に引けていることを見るための配置である**
 r=$out/lroot
 rm -rf "$r"
@@ -285,15 +285,15 @@ rc=$?
 report $? "run: libc の 8 本が書庫になり，それだけでリンクが通る"
 [ -s "$out/libc.diff" ] && sed -n '4,$p' "$out/libc.diff"
 
-# **員が 8 つ揃っていること**を書庫の側からも見る。kernel22 は 9 語目
-# から先を黙って捨てていたので，ここは 5 員で通ってしまっていた (8.2)
+# **メンバが 8 つ揃っていること**を書庫の側からも見る。kernel22 は 9 語目
+# から先を黙って捨てていたので，ここはメンバ 5 個で通ってしまっていた (8.2)
 if unpackback 33554432 "$out/lback" && [ -f "$out/lback/libc.a" ] \
         && command -v ar > /dev/null 2>&1; then
     ar t "$out/lback/libc.a" > "$out/libcar.t" 2>&1
     printf 'string.o\nstdlib.o\nmisc15.o\nsys.o\nmorecore.o\nstdio.o\nassert.o\ndir.o\n' \
         > "$out/libcar.want"
     diff -q "$out/libcar.want" "$out/libcar.t" > /dev/null
-    report $? "interop: 本物の ar t が 8 員すべてを列挙する"
+    report $? "interop: 本物の ar t が 8 メンバすべてを列挙する"
 else
     echo "   skip: 書庫を取り出せない (host に ar が無いか展開に失敗)"
 fi
@@ -301,7 +301,7 @@ fi
 section "引数の上限は黙って超えない (docs/stage017-cc.md 8.2)"
 
 # kernel23 の上限は 64 語である。**溢れたら E2BIG で落ちる**ことを見る。
-# 落ちずに成功が返るなら，捨てられた語がどこかで静かに効いている
+# 落ちずに成功が返るなら，捨てられた語がどこかで静かに影響している
 r=$out/aroot
 mkroot "$r"
 cat > "$r/args.c" <<'EOF'
@@ -346,7 +346,7 @@ section "第 3 部の 1: make が libc を組む (docs/stage017-cc.md 9.5)"
 
 # **第 3 部の 1 の完了条件である。** 第 2 部では go.sh に 8 行並べて
 # 書いていたものを，型規則と自動変数で書き直した記述 (tests/stage017/mk/
-# libc.mk) を mk に食わせる。同じことを 1 つの規則で言えることが，
+# libc.mk) を mk に入力する。同じことを 1 つの規則で言えることが，
 # make を持った意味である。
 #
 # /lib に置くのは走り時の下働きだけ (第 2 部と同じ配置)。書庫から
@@ -383,7 +383,7 @@ rc=$?
 report $? "run: mk が Makefile どおりに libc を組み，繋いだものが走る"
 [ -s "$out/mk.diff" ] && sed -n '4,$p' "$out/mk.diff"
 
-# **同じ記述を本物の make に食わせたとき，命令の並びが一致すること。**
+# **同じ記述を本物の make に与えたとき，命令の並びが一致すること。**
 # 出来上がりだけ見ていると，別の順で別のものを作っても気づけない
 if command -v make > /dev/null 2>&1 && command -v gcc > /dev/null 2>&1; then
     d=$out/mkdry
@@ -535,7 +535,7 @@ else
     report 1 "run: OS が書いたファイルに今の時刻が立つ"
 fi
 
-# ホスト側の詰め直し。**中身だけ見ていると 11 章で踏んだ誤りを見落とす**
+# ホスト側の詰め直し。**中身だけ見ていると 11 章で遭遇した誤りを見落とす**
 s3=$out/s3rt
 rm -rf "$s3" "$s3.back"
 mkdir -p "$s3/sub"
@@ -549,7 +549,7 @@ r2=$?
 [ "$r2" -eq 0 ] && diff -r "$s3" "$s3.back" > /dev/null 2>&1
 report $? "roundtrip: sfs3 に詰めて展開すると中身が元と一致する"
 
-# **実物の木が丸ごと載るか。** GCC を載せる前に，いま手元にある実物
+# **実物の木が全体として収まるか。** GCC を載せる前に，いま手元にある実物
 # (tcc のソース。546 ファイル・深さ 6・4.5 MB) で確かめる
 # (docs/stage017-gcc.md 6.2)
 if [ ! -d docs/external/tcc ]; then
@@ -571,8 +571,8 @@ fi
 # 超えられない。sfs4 が表現しない symbolic link その他の entry も同時に
 # 数え、0件であることを期待値で固定する。
 #
-# **木が無くても算術は検査する。** 上限の側 (名前・項目幅・窓) は
-# tools/sfs4.sh と stage017/kernel25.c から読んでいるので，世代を刻んだ
+# **木が無くても算術は検査する。** 上限の側 (名前・項目幅・ウィンドウ) は
+# tools/sfs4.sh と stage017/kernel25.c から読んでいるので，新しい世代を作った
 # ときに式が置き去りになりうる。答の判っている小さな木で先に確かめる
 rm -rf "$out/mt"; mkdir -p "$out/mt/d1/d2"
 printf '12345' > "$out/mt/a"            # 5 バイト -> 詰めて 8
@@ -752,7 +752,7 @@ rc=$?
 report $? "run: 関数で導いた並びから libc が組め，繋いだものが走る"
 [ -s "$out/fn.diff" ] && sed -n '4,$p' "$out/fn.diff"
 
-# **同じ記述を本物の make に食わせて突き合わせる。** 関数は結果が
+# **同じ記述を本物の make に与えて突き合わせる。** 関数は結果が
 # 静かに空になる形の誤りが出やすいので，並びそのものを見る
 if command -v make > /dev/null 2>&1 && command -v gcc > /dev/null 2>&1; then
     gcc -w -o "$out/mk19host" tests/stage017/host/mk19host.c 2> /dev/null
@@ -837,7 +837,7 @@ runroot3 "$r" "$out/tccish.out"
 rc=$?
 [ "$rc" -eq 0 ] && diff -u tests/stage017/expected/tccish.txt "$out/tccish.out" \
     > "$out/tccish.diff"
-report $? "run: 6 つの形が我々の OS の上で順に効く (再帰する MAKE を含む)"
+report $? "run: 6 つの形が我々の OS の上で順に機能する (再帰する MAKE を含む)"
 [ -s "$out/tccish.diff" ] && sed -n '4,$p' "$out/tccish.diff"
 
 # **本物の make と突き合わせる。** 我々の -n の出力だけを見ていても，
@@ -867,19 +867,19 @@ else
     echo "   skip: host に make か gcc が無い (裏取りができない)"
 fi
 
-section "第 3 部の 3 の 2: -I を探す道として持つ (docs/stage017-cc.md 19 章)"
+section "第 3 部の 3 の 2: -I を探索パスとして持つ (docs/stage017-cc.md 19 章)"
 
 # **第 3 部の 3 の 2 の要である。**
 #
-# ヘッダを inc/ にだけ置き，束ねには入れない。cc18 の「-I は階層ごと
-# 束ねる」ではこれも通るが，tcc の木では員が上限を超えて落ちる (16.2)。
+# ヘッダを inc/ にだけ置き，バンドルには入れない。cc18 の「-I は階層ごと
+# バンドルする」ではこれも通るが，tcc の木ではメンバが上限を超えて落ちる (16.2)。
 # cc19 は -I を pp17 へ渡し，pp17 が要るものだけを開く。
 #
-# **道は変えたが出るものは変わっていないこと**を，cc18 の出力と
+# **経路は変えたが出るものは変わっていないこと**を，cc18 の出力と
 # バイトで突き合わせて見る。
 #
 # 併せて 19.3 の破壊が戻っていないことを見る。cc18 は -o を付けた
-# 結合で「最後に走査したヘッダ」を .o で潰していた。**症状が出ない**
+# 結合で「最後に走査したヘッダ」を .o で上書きしていた。**症状が出ない**
 # 壊れ方なので，出力ではなく**入力が無傷であること**を見るしかない。
 r=$out/proot
 rm -rf "$r"
@@ -926,16 +926,16 @@ rc=$?
 report $? "run: ヘッダが -I にしか無くても cc19 が翻訳・結合し，走る"
 [ -s "$out/pi.diff" ] && sed -n '4,$p' "$out/pi.diff"
 
-# 走った後の像を戻して中身を見る
+# 走った後のイメージを戻して中身を見る
 if [ "$rc" -eq 0 ]; then
     dd if="$out/r3" of="$out/pi.img" bs=64K skip=1024 2> /dev/null
     rm -rf "$out/piback"
     sh tools/sfs3.sh unpack "$out/pi.img" "$out/piback" > /dev/null 2>&1
 fi
 
-# **束ねる道と探す道が同じ .o を出すこと** (19.2 の C)
+# **バンドルする経路と探索パスの経路が同じ .o を出すこと** (19.2 の C)
 [ "$rc" -eq 0 ] && cmp -s "$out/piback/m18.o" "$out/piback/m19.o"
-report $? "same: cc18 (束ねる) と cc19 (探す道) が同じ .o を出す"
+report $? "same: cc18 (バンドル) と cc19 (探索パス) が同じ .o を出す"
 
 # **入力が無傷であること** (19.3 の破壊が戻っていないこと)
 ok=0
@@ -948,7 +948,7 @@ done
 [ "$rc" -eq 0 ] && [ "$ok" -eq 0 ]
 report $? "spec: 結合しても入力のヘッダとソースが 1 バイトも変わらない (19.3)"
 
-# .o が名前どおりの場所にできていること (潰した先へ書いていない証拠)
+# .o が名前どおりの場所にできていること (上書きした先へ書いていない証拠)
 [ "$rc" -eq 0 ] && [ -s "$out/piback/_t0.o" ]
 report $? "spec: 中間の .o が _t0.o として在る (19.3)"
 
@@ -956,7 +956,7 @@ section "第 3 部の 3 の 2 の完了条件: tcc の Makefile を回す (21 �
 
 # **これが第 3 部の 3 の 2 の完了条件である。**
 #
-# 上の節までは「同じ形が同じに読める」「-I が探す道として効く」を
+# 上の節までは「同じ形が同じに読める」「-I が探索パスとして機能する」を
 # 見ているだけで，**本物の tcc の Makefile を回してはいない**。
 # 素材 (docs/external/tcc) は repo に入れない決まりなので CI では
 # 取得できず，ここは走らない。手元では必ず走らせること。
@@ -983,7 +983,7 @@ elif [ ! -s tmp/s17/tcc-mk ] || [ ! -s tmp/s17/tcc ] \
     echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link \\"
     echo "     && sh tools/tcc17.sh mk && sh tools/tcc17.sh check"
 else
-    # **同じものが出ること。** 道が 2 つあって違うものが出るなら，
+    # **同じものが出ること。** 経路が 2 つあって違うものが出るなら，
     # どちらかが間違っている。
     #
     # **両方を同じ回で作ること。** 片方だけ作り直すと出所の違うものを
@@ -1011,9 +1011,9 @@ section "第 3 部の 3 の 3: libtcc1.a (手元でのみ走る)"
 #
 #   sh tools/tcc17.sh lib
 #
-# **ファイルが出たことを完了条件にしてはいけない。** 実際に，員の
+# **ファイルが出たことを完了条件にしてはいけない。** 実際に，メンバの
 # 見出しが 2 進数のまま 50,412 バイトの「書庫でないファイル」が出て
-# いた (docs/stage017-cc.md 27〜28 章)。見るのは ar17 が読めた員の
+# いた (docs/stage017-cc.md 27〜28 章)。見るのは ar17 が読めたメンバの
 # 並びである
 LIBTCC1_MEMBERS="libtcc1.o riscv32.o stdatomic.o atomic.o builtin.o
 alloca.o alloca-bt.o tcov.o armflush.o dsohandle.o"
@@ -1023,7 +1023,7 @@ if [ ! -d docs/external/tcc ]; then
     echo "   **第 3 部の 3 の 3 の完了条件はこの節である。CI では走らない**"
 elif [ ! -s tmp/s17/libtcc1.a ]; then
     # **飛ばしてよいのは「書庫がまだ無い」ときだけ。** 書庫が在るのに
-    # 員の並びが無い (ar17 が読めなかった) のは壊れているということで，
+    # メンバの並びが無い (ar17 が読めなかった) のは壊れているということで，
     # それは飛ばさず落とす —— **「材料が無い」と「壊れている」は別**
     echo "   skip: tmp/s17 の材料が揃っていない"
     echo "   sh tools/tcc17.sh all && sh tools/tcc17.sh link \\"
@@ -1034,14 +1034,14 @@ else
     # libtcc1.list が空 (読めなかった) ならここで落ちる
     printf '%s\n' $LIBTCC1_MEMBERS > tmp/s17/libtcc1.want
     cmp -s tmp/s17/libtcc1.list tmp/s17/libtcc1.want
-    report $? "lib: 我々の OS の上で組んだ tcc の -ar が作った libtcc1.a を ar17 が読め，員が 10 本そろっている"
+    report $? "lib: 我々の OS の上で組んだ tcc の -ar が作った libtcc1.a を ar17 が読め，メンバが 10 本そろっている"
     # **最後まで通ること。** libtcc1.a の後にも作るものがある (runmain.o)。
     # 逆進 (backtrace) を切る前は bt-exe.c で止まっていた (29 章)
     grep -q '^lib 0$' tmp/s17/lib.log
     report $? "lib: lib/Makefile が最後まで通る (mk -C t/lib が rc 0)"
 fi
 
-section "第 5 部 (撤回): tcc の生成物を我々の OS に置く道は落とした"
+section "第 5 部 (撤回): tcc の生成物を我々の OS に置く方式は取りやめた"
 
 # **30〜32 章でやったことは方針に反していた** (docs/stage017-cc.md 34 章)。
 # tcc・GCC・Linux は stone の処理系の成熟度を測る**的**であって道具ではない
@@ -1086,7 +1086,7 @@ else
     [ "$ok" -eq 0 ]
     report $? "ext: 値がホストの gcc / Python の zlib と一致する (往復だけで済ませない)"
 
-    # **zlib 自身の検査も通す。** 我々が書いた駆動は我々が思いついた道しか
+    # **zlib 自身の検査も通す。** 我々が書いた駆動は我々が思いついた経路しか
     # 通らない。example.c は gzopen / gzprintf / gzseek / gzgets /
     # gzungetc / inflateSync / 辞書つき伸長まで通し，**libc のファイル層
     # まで一緒に測る**。出力はホストで組んだものと 1 行ずつ一致すること
@@ -1102,17 +1102,17 @@ else
     report $? "ext: zlib 自身の検査 (test/example.c) の出力がホストと一致する"
 fi
 
-section "第 5 部: 長い名前と広い窓 (sfs4 / kernel25。docs/stage017-gcc.md 7 章)"
+section "第 5 部: 長い名前と広いウィンドウ (sfs4 / kernel25。docs/stage017-gcc.md 7 章)"
 
-# **なぜ世代を刻んだか。** GCC 4.7.4 の配布木は名前の最長が 92 バイト
+# **なぜ新しい世代を作ったか。** GCC 4.7.4 の配布木は名前の最長が 92 バイト
 # あり，最小のイメージが 473,459,336 バイト要る
 # (tests/stage017/expected/gcc47-tree.txt)。sfs3 は名前が 47 バイトまで，
-# kernel24 の窓は SFSA から UBASE までの 32 MiB までである。どちらも
+# kernel24 のウィンドウは SFSA から UBASE までの 32 MiB までである。どちらも
 # 届かない。
 #
 # sfs4 は**名前の枠を広げただけ**である (72 -> 128 バイト，名前は
-# 48 -> 104)。kernel25 は**sfs4 を読み，像を退避領域より上へ移しただけ**
-# である (SFSA 0x8400_0000 -> 0xa000_0000。窓 32 MiB -> 512 MiB)。
+# 48 -> 104)。kernel25 は**sfs4 を読み，イメージを退避領域より上へ移しただけ**
+# である (SFSA 0x8400_0000 -> 0xa000_0000。ウィンドウ 32 MiB -> 512 MiB)。
 
 G92=$(printf 'g%.0s' $(seq 1 92))       # GCC の木の最長と同じ長さ
 
@@ -1140,11 +1140,11 @@ done
 [ "$r4" -eq 0 ] && [ "$ok" -eq 0 ]
 report $? "roundtrip: sfs4 の時刻もナノ秒まで一致する (ディレクトリを含む)"
 
-# **同じ木を sfs3 は拒む。** 世代を刻んだ理由がここにある。
+# **同じ木を sfs3 は拒む。** 新しい世代を作った理由がここにある。
 # 通ってしまうなら sfs4 は要らなかったことになる
 sh tools/sfs3.sh pack "$s4" "$out/rt3.img" 262144 32 > "$out/rt3.log" 2>&1
 [ $? -ne 0 ] && grep -q 'name too long' "$out/rt3.log"
-report $? "cap: 同じ木を sfs3 は名指しで拒む (だから世代を刻んだ)"
+report $? "cap: 同じ木を sfs3 は名指しで拒む (だから新しい世代を作った)"
 
 # 上限は 103 バイト。104 バイトは黙って切らずに拒む
 rm -rf "$out/nm4"; mkdir -p "$out/nm4"
@@ -1174,10 +1174,10 @@ report $? "cap: 深さ 12 の木 (経路 131 バイト) が sfs4 に載って戻
 
 # 根を sfs4 で詰めて kernel25 で走らせる。$1=根 $2=出力 $3=大きさ $4=件数
 #
-# **記憶は 1G でなければならない。** kernel25 は sfs の像を
+# **記憶は 1G でなければならない。** kernel25 は sfs のイメージを
 # SFSA = 0xa000_0000 に置く。512M (0x8000_0000〜0xa000_0000) では
-# 像の置き場そのものが無く，何も出さずに落ちる。
-# 像は記憶の 0x2000_0000 (536870912) から先に置く
+# イメージの置き場そのものが無く，何も出さずに落ちる。
+# イメージは記憶の 0x2000_0000 (536870912) から先に置く
 runroot4() {
     sh tools/sfs4.sh pack "$1" "$out/i4" "${3:-4194304}" "${4:-128}" \
             > /dev/null \
@@ -1232,7 +1232,7 @@ rc=$?
 report $? "run: 92 バイトの名前と 131 バイトの経路を，引き・読み・作り・stat する"
 [ -s "$out/n4.diff" ] && sed -n '4,$p' "$out/n4.diff"
 
-# **走った後の像をホスト側で開く。** 「cat できた」だけでは，カーネルが
+# **走った後のイメージをホスト側で開く。** 「cat できた」だけでは，カーネルが
 # 表に書いた項目が sfs4 の形になっているとは言えない。記憶から切り出して
 # sfs4.sh で展開し，ゲストが作った長い名前がそこに在ることを確かめる
 rm -rf "$out/n4.back"
@@ -1242,12 +1242,12 @@ dd if="$out/r4" of="$out/i4.after" bs=64K \
     && [ "$(cat "$out/n4.back/$G92B" 2> /dev/null)" = 'ninety-two' ]
 report $? "run: ゲストが作った 92 バイトの名前がホスト側でも開ける"
 
-# **第 5 部の完了条件の 2 つめ。** 旧世代の窓 (32 MiB) の外に置いた
+# **第 5 部の完了条件の 2 つめ。** 旧世代のウィンドウ (32 MiB) の外に置いた
 # 中身が読めること。
 #
-# kernel24 では SFSA + 32 MiB が UBASE である。そこから先へ像を伸ばすと，
-# 詰めた中身がユーザ像のロード先と重なる。40 MiB の像の，34 MiB を
-# 過ぎた位置にあるファイルが読めれば，窓が本当に広がっている
+# kernel24 では SFSA + 32 MiB が UBASE である。そこから先へイメージを伸ばすと，
+# 詰めた中身がユーザイメージのロード先と重なる。40 MiB のイメージの，34 MiB を
+# 過ぎた位置にあるファイルが読めれば，ウィンドウが本当に広がっている
 r=$out/farroot
 rm -rf "$r"; mkdir -p "$r/bin"
 cp tmp/build/sh2.bin "$r/bin/sh2"
@@ -1260,10 +1260,10 @@ printf 'beyond the old window\nfar 0\n' > "$out/far.want"
 runroot4 "$r" "$out/far.out" 41943040 128
 rc=$?
 [ "$rc" -eq 0 ] && diff -u "$out/far.want" "$out/far.out" > "$out/far.diff"
-report $? "run: 旧世代の窓 (32 MiB) の外に置いた中身が読める"
+report $? "run: 旧世代のウィンドウ (32 MiB) の外に置いた中身が読める"
 [ -s "$out/far.diff" ] && sed -n '4,$p' "$out/far.diff"
 
-# **形の違うものは黙って動かない。** sfs3 の像を kernel25 に食わせても，
+# **形の違うものは黙って動かない。** sfs3 のイメージを kernel25 に与えても，
 # 項目の幅が違うので名前も親も別の場所を指す。読めたつもりで壊すより，
 # magic を見て止まるほうがよい
 rm -rf "$out/mixroot"; mkdir -p "$out/mixroot/bin"
@@ -1280,10 +1280,10 @@ STONE_QEMU_RAMFILE="$out/rmix" STONE_QEMU_RAM=1G \
     sh tools/env.sh qemu tmp/build/kernel25.bin < /dev/null \
     > "$out/mix.out" 2>&1 || true
 grep -qx '?' "$out/mix.out"
-report $? "run: sfs3 の像は kernel25 が '?' で拒む (読めたつもりにならない)"
+report $? "run: sfs3 のイメージは kernel25 が '?' で拒む (読めたつもりにならない)"
 
-# **窓に入らない像は載せない。** はみ出した先は何も無い番地なので，
-# 書いた中身が黙って消える。頭の大きさの欄だけを窓より大きく書き換え，
+# **ウィンドウに入らないイメージは載せない。** はみ出した先は何も無い番地なので，
+# 書いた中身が黙って消える。頭の大きさの欄だけをウィンドウより大きく書き換え，
 # 中身は正しいままにして，カーネルが大きさを見ているかを確かめる
 # 頭の +4 が大きさの欄。中身は正しいまま，そこだけ書き換える。
 # $1 = 欄に書く 4 バイト (8 進のエスケープ)  $2 = 出力
@@ -1300,13 +1300,13 @@ bigsize() {
         > "$2" 2>&1 || true
 }
 
-# 0x20000001 = 窓 (512 MiB) より 1 バイト大きい
+# 0x20000001 = ウィンドウ (512 MiB) より 1 バイト大きい
 bigsize '\001\000\000\040' "$out/big4.out"
 grep -qx 'S' "$out/big4.out"
-report $? "run: 窓を超える大きさの像は kernel25 が 'S' で拒む"
+report $? "run: ウィンドウを超える大きさのイメージは kernel25 が 'S' で拒む"
 
 # **符号つきで比べていたら通り抜ける値。** 0xffffffff は int で見ると
-# -1 であり，窓より小さいことになってしまう
+# -1 であり，ウィンドウより小さいことになってしまう
 bigsize '\377\377\377\377' "$out/neg4.out"
 grep -qx 'S' "$out/neg4.out"
 report $? "run: 2^31 を超える大きさも 'S' で拒む (符号なしで比べている)"
@@ -1317,13 +1317,13 @@ section "第 6 部: 展開の結果に現れた defined (pp18。docs/stage017-gc
 # `system.h` 379 行が defined を含む本体のマクロを定義し，`internal.h`
 # 577 行が #if でそれを使う。dodefined() は展開より先に走るので
 # (C89 の規定)，展開してはじめて現れる defined は残ってしまい，pp17 まで
-# は識別子として 0 に潰して続く '(' で構文が壊れていた。
+# は識別子として 0 に置き換えて続く '(' で構文が壊れていた。
 #
 # **原文をそのまま置く。** 縮めて書くと「縮めた形では通る」ことしか
 # 言えない。GCC の 2 つのファイルから写した形で見る。
 #
 # 3 つ見る ——
-#   a  GCC の原文。pp17 は 4 で拒み，pp18 は通して正しい枝を選ぶ
+#   a  GCC の原文。pp17 は 4 で拒み，pp18 は通して正しい分岐を選ぶ
 #   b  operand が未定義の名前。pp18 が 0 を出す
 #   c  **operand が定義済みマクロ。pp18 も 4 で拒む** (限界。下の註)
 # **記録した印は照合する。** 誰も見ない SHA-256 は註釈にすぎない
@@ -1407,12 +1407,12 @@ report $? "run: 展開の後に残った defined を pp18 が評価する (pp17 
 section "第 7 部: putc をマクロとして持つ (libc22。docs/stage017-gcc.md 8.3 の 8)"
 
 # **GCC の libcpp 3 単位 (lex / line-map / mkdeps) がこの 1 つで止まって
-# いた。** C89 7.9.7.8 の putc を我々は持っておらず、しかも鎖の前置部が
+# いた。** C89 7.9.7.8 の putc を我々は持っておらず、しかもビルドチェーンの前置部が
 # **1 引数の putc** を primitive として持つので、関数として宣言しても
 # 器の組込みが勝つ (引数個数の不一致 5)。C89 7.9.1 が認めるマクロで置いた
 # (stage017/libc22.md)。
 
-# **鎖は変わらない。** 我々自身のソースは putc を 1 度も呼んでいないので、
+# **ビルドチェーンは変わらない。** 我々自身のソースは putc を 1 度も呼んでいないので、
 # マクロを置いても展開される場所が無い。.o がバイト一致することで示す
 ok=0
 for n in src_string src_ctype src_stdlib src_morecore src_misc15 \
@@ -1425,7 +1425,7 @@ report $? "build: libc22 の .o 11 本が libc21 とバイト一致 (header だ�
 
 # **header を足しただけでは「訳せた」までしか言えない。** stone の OS の
 # 上で cc19 に訳させ、走らせて、fputc へ書き換わった先が本当に書けることを
-# 見る。第 6 部と同じく像を詰めて kernel24 で起動する
+# 見る。第 6 部と同じくイメージを詰めて kernel24 で起動する
 r=$out/putc
 rm -rf "$r"
 mkdir -p "$r/bin" "$r/include/sys" "$r/lib" "$r/t"
@@ -1463,7 +1463,7 @@ report $? "run: 我々の OS の上で putc(c, stdout) が書ける (libc22 の�
 # 第 8 部: configure が使う道具 (docs/stage017-gcc.md 5.5〜5.9)
 #
 # **物差しはホストの実装で，期待値は我々が書かない。** どの段も
-# 同じ台本を両方に食わせて出力を突き合わせる
+# 同じ台本を両方に与えて出力を突き合わせる
 
 section "sed --- 我々の OS の上でホストの sed と突き合わせる (5.5)"
 
@@ -1501,7 +1501,7 @@ section "経路展開 --- 我々のシェルの glob をホストのシェルと
 
 # sh2 は glob を持たなかった。GCC の Makefile は `*.c` を使うので，
 # **無いと落ちるのではなく語がそのまま残って進む**。同じ台本を両方の
-# シェルに食わせて測る (tools/diffglob.sh)
+# シェルに与えて測る (tools/diffglob.sh)
 if [ -s tmp/build/sh5 ]; then
     sh tools/diffglob.sh os > "$out/diffglob.log" 2>&1
     r=$?
@@ -1571,7 +1571,7 @@ fi
 
 section "差分試験の OS 側 (libc を我々の OS の上でホストと突き合わせる)"
 
-# **libc の穴は，我々が書いた期待値では出ない。** 我々は自分が使う
+# **libc の不足は，我々が書いた期待値では出ない。** 我々は自分が使う
 # 書き方しか試さないからである (cc15u と同じ構図)。前置部だけで走る
 # 側は Stage 15 が見ているので，ここは libc を繋いで OS の上で走らせる
 # 側だけを見る (docs/stage017-gcc.md 5.3)。

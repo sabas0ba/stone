@@ -1,7 +1,7 @@
 # stage015c のビルド手順と，入力・生成物の宣言。
 #
-# OS の側の成果物 (実行時支援・カーネル・libc15)。原文が C なので
-# 手を入れる回数がいちばん多い。ここを触っても cc の世代 (stage015a /
+# OS の側の成果物 (実行時支援・カーネル・libc15)。ソースが C なので
+# 変更する回数がいちばん多い。ここを変更しても cc の世代 (stage015a /
 # stage015b) は作り直されない。
 
 build_stage015c() {
@@ -20,7 +20,7 @@ build_stage015c() {
         | sh tools/env.sh qemu tmp/build/ld14.bin > tmp/build/kernel15.bin
     echo "built tmp/build/kernel15.bin" >&2
     # カーネル第 16 世代 (第 6 部)。tcc の出す ELF は PT_LOAD を 2〜3 本
-    # 持つが kernel15 は先頭しか載せない。全部載せるようにしたもの
+    # 持つが kernel15 は先頭しか読み込まない。全部読み込むようにしたもの
     # (docs/stage015-tcc.md 12.10)。最前線の cc15p / ld16 で作る
     sh tools/bundle.sh stage015/kernel16.c \
         | sh tools/env.sh qemu tmp/build/pp16.bin > tmp/build/kernel16.i

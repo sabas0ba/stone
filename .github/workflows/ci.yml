@@ -18,7 +18,7 @@ on:
 permissions:
   contents: read
 
-# 同じ PR へ続けて push したとき，走行中の古い run を新しい run が取り消す。
+# 同じ PR へ続けて push したとき，実行中の古い run を新しい run が取り消す。
 # main への push と週次 (schedule) は検証そのものなので取り消さない
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,19 +30,19 @@ jobs:
     # draft の PR では走らせない。作業中の push でキャッシュと計算時間を
     # 使い切らないための措置で，見せるための draft は draft のまま置ける
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    # 鎖は世代を足すたびに長くなる。キャッシュが完全に外れた回
+    # ビルドチェーンは世代を足すたびに長くなる。キャッシュが完全に無効な回
     # (新しい Stage の手順を足した直後など) はゼロから全段を作るので，
     # その回だけ突出して長い。第 6 部で cc15o / ld16 を足したときに
     # 60 分でも足りなくなった (60 分でジョブが cancelled)。
     #
     # cancelled ではキャッシュが保存されないので，上限が足りないと
     # 「毎回コールドビルド -> 毎回 cancelled」から抜けられない。上限は
-    # 温まった回の実測 (15 分前後) ではなく，**コールドビルドが収まる
+    # キャッシュが有効な回の実測 (15 分前後) ではなく，**コールドビルドが収まる
     # 値**にしておく必要がある。
     #
-    # 温まった回を短くするほうの手当ては tools/build/stage015{a,b,c}.sh の
-    # 分割である (docs/dev-notes.md 1.4)。封じた世代 (stage015a) は
-    # 原文が変わらないので，一度キャッシュに入れば以後は必ず飛ばせる
+    # キャッシュが有効な回を短くするほうの対策は tools/build/stage015{a,b,c}.sh の
+    # 分割である (docs/dev-notes.md 1.4)。凍結した世代 (stage015a) は
+    # ソースが変わらないので，一度キャッシュに入れば以後は必ず省略できる
     timeout-minutes: 120
     env:
       STONE_ENGINE: podman
@@ -50,16 +50,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # コンテナ像は env/Containerfile だけで決まる (base image は digest 固定，
+      # コンテナイメージは env/Containerfile だけで決まる (base image は digest 固定，
       # パッケージ取得先は snapshot.debian.org の日付固定)。したがって
-      # そのハッシュを鍵にすれば，像をそのまま持ち回してよい。
+      # そのハッシュをキーにすれば，イメージをそのまま再利用してよい。
       # 復元できれば tools/env.sh build がビルドを省くので，毎回の apt-get が
-      # 丸ごと消える。復元できなければ従来どおりビルドして次回のために保存する。
+      # 不要になる。復元できなければ従来どおりビルドして次回のために保存する。
       #
-      # 鍵には実行系 (podman / OCI ランタイム) の版も含める。runner の更新で
-      # 実行系が変わると，古い版で保存した tar の像が
+      # キーには実行系 (podman / OCI ランタイム) の版も含める。runner の更新で
+      # 実行系が変わると，古い版で保存した tar のイメージが
       # "crun: unknown version specified" で実行できなくなることがある
-      # (docs/dev-notes.md 4 章)。版が変われば鍵が変わり，像を作り直す
+      # (docs/dev-notes.md 4 章)。版が変わればキーが変わり，イメージを作り直す
       - name: Container runtime version (for cache key)
         id: rt
         run: |
@@ -78,13 +78,13 @@ jobs:
         run: podman load -i tmp/stone-env.tar
 
       # 生成物キャッシュ。ビルドは決定的なので，入力が一致すれば生成物を
-      # 持ち回してよい (docs/dev-notes.md 1.3)。鍵が完全一致しなくても
+      # 再利用してよい (docs/dev-notes.md 1.3)。キーが完全一致しなくても
       # restore-keys で直近のものを復元し，スタンプが変更のあったぶんだけ
       # 作り直す。schedule ではキャッシュを使わない。
       #
-      # tmp/test も一緒に持ち回す。テストのスタンプ (docs/dev-notes.md
-      # 1.5) がここにあり，入力の変わらない Stage の検査を飛ばせる。
-      # 生成物と .md の SHA-256 照合は，飛ばさない Stage では従来どおり
+      # tmp/test も一緒に再利用する。テストのスタンプ (docs/dev-notes.md
+      # 1.5) がここにあり，入力の変わらない Stage の検査を省略できる。
+      # 生成物と .md の SHA-256 照合は，省略しない Stage では従来どおり
       # 毎回行われる (週次の schedule は STONE_FORCE_TEST で全部走る)
       - name: Restore build artifacts
         if: github.event_name != 'schedule'
@@ -103,16 +103,16 @@ jobs:
           STONE_FORCE_TEST: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: bash tools/test.sh
 
-      # 展示層のエミュレータ (web/rv32.js) を，いま作った成果物で検証する。
+      # Web 層のエミュレータ (web/rv32.js) を，いま作った成果物で検証する。
       # pages.yml も同じものを配信の前に走らせるが，そちらは main への
-      # push でしか動かない。**PR の時点で落としたい**ので ここでも走らせる
+      # push でしか動かない。**PR の時点で失敗を検出したい**ので ここでも走らせる
       # (落ちたまま merge すると，気付くのは配信が止まったときになる)。
       # 素材は tmp/build にあるものだけで，コンテナも QEMU も要らない
       - name: Verify emulator against chain artifacts
         run: node web/test-emu.mjs
 
       # 保存は取り出せなかったときだけ。actions/cache の post 段が
-      # tmp/stone-env.tar を拾って次回へ持ち越す
+      # tmp/stone-env.tar を取得して次回へ引き継ぐ
       - name: Save container image
         if: steps.image.outputs.cache-hit != 'true'
         run: |

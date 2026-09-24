@@ -1,5 +1,5 @@
 #!/bin/sh
-# ソース群を pp への入力 (束ね) へ変換する。形式は docs/stage009-pp.md 2.2。
+# ソース群を pp への入力 (バンドル) へ変換する。形式は docs/stage009-pp.md 2.2。
 #
 #   bundle := "#!stone-bundle\n" member* EOT
 #   member := "@" name " " size "\n" content

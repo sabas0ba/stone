@@ -31,7 +31,7 @@ long long atoll(char *s);
 double strtod(const char *s, char **endptr);
 float strtof(const char *s, char **endptr);
 /* long double は double と同じ 8 バイトである (cc も tcc の RV32 も)。
- * ただし tcc は型としては別に数えるので，マクロで strtod に潰すと
+ * ただし tcc は型としては別に数えるので，マクロで strtod に代えると
  * tcc.h の extern 宣言と型が食い違う。実体のある関数として持つ */
 long double strtold(const char *s, char **endptr);
 void qsort(void *base, size_t nmemb, size_t size, int (*cmp)(void *, void *));
@@ -41,9 +41,9 @@ long strtol(const char *s, char **endptr, int base);
 int atoi(char *s);
 int abs(int n);
 
-/* 経路を絶対形に直し . と .. を畳む (POSIX。第 17 世代)。
+/* 経路を絶対形に直し . と .. を解決する (POSIX。第 17 世代)。
  * resolved が NULL なら malloc して返す (GNU の拡張。tcc が使う)。
- * シンボリックリンクが無いので字句的な畳み込みで足りる */
+ * シンボリックリンクが無いので字句的な正規化で足りる */
 char *realpath(char *path, char *resolved);
 div_t div(int numer, int denom);
 

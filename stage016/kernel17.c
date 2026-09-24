@@ -1,22 +1,22 @@
 /* kernel14.c --- 簡易 OS のカーネル (Stage 14 世代)
  *
- * stage013/kernel.c を出発点に，2 つの穴を塞いだものである
+ * stage013/kernel.c を出発点に，2 つの不足を解消したものである
  * (docs/stage014-external.md 13 章)。機能は足していない。
  *
  *   sfs の上書き  既存ファイルを元の割付けより長く書き直しても隣接
  *                 ファイルを壊さない。割付けに収まらない書込みは末尾へ
  *                 引っ越してから行い，カーソルは決して巻き戻らない
  *                 (kernel13 は隣を上書きし，カーソルも巻き戻した)
- *   ELF の検査    セグメントの載せ先がユーザ領域に収まることを確かめて
+ *   ELF の検査    セグメントのロード先がユーザ領域に収まることを確かめて
  *                 から複写する。壊れた ELF でカーネル・退避領域を
  *                 上書きできない。spawn の資源検査も出力ファイルの
  *                 切詰めより前へ移した
  *
- * kernel13 から引き継ぐもの: spawn (500) による逐次実行と親の像の退避，
+ * kernel13 から引き継ぐもの: spawn (500) による逐次実行と親のイメージの退避，
  * fd 0 / fd 1 のつなぎ替え，fd 0 の read の待ち合わせ。
  *
  * kernel16 (第 6 部): **PT_LOAD をすべて載せる**。kernel15 までは
- * プログラムヘッダの 1 本目だけを見ていた。tcc が吐く実行形式は
+ * プログラムヘッダの 1 本目だけを見ていた。tcc が生成する実行形式は
  * R / RX / RW の 3 本に分かれるので，1 本目だけでは走らない
  * (docs/stage015-tcc.md 12.11)。
  *
@@ -43,7 +43,7 @@ int urun(void);
 #define SAVEA   0x81000000      /* spawn の退避領域 (ここから上へ積む) */
 #define SAVETOP 0x83700000      /* 退避領域の上限 (= TFA) */
 #define SFSA    0x84000000      /* 共有領域 (sfs イメージ) */
-#define UBASE   0x86000000      /* ユーザ像のロード位置 */
+#define UBASE   0x86000000      /* ユーザイメージのロード位置 */
 #define USP     0x87000000      /* ユーザのフレームスタック上端 */
 #define UBRKMAX 0x86e00000      /* brk の上限 */
 #define UARTA   0x10000000      /* UART */
@@ -102,7 +102,7 @@ int depth;
 unsigned savecur;
 unsigned sbase[8];              /* MAXDEP 段 */
 
-/* spawn / boot の引数の写し。親の像は子の配置で消えるので，文字列は
+/* spawn / boot の引数の写し。親のイメージは子の配置で消えるので，文字列は
  * 先にカーネル側へ写す (docs/stage013-tools.md 3.2) */
 char kargs[512];                /* 引数文字列の連結 (NUL 区切り) */
 int kargo[8];                   /* kargs 内の各引数の開始位置 */
@@ -340,7 +340,7 @@ int sys_write(int fd, unsigned buf, int n) {
 }
 
 /* 読み書き位置を動かす (第 4 部で追加。SEEK_SET/CUR/END = 0/1/2)。
- * tcc が .o と .a を読むときに使う。標準入出力には効かない */
+ * tcc が .o と .a を読むときに使う。標準入出力には適用されない */
 int sys_lseek(int fd, int off, int whence) {
   int base;
   if (fd < 3 || fd >= NFD || fdent[fd] < 0) return 0 - EBADF;
@@ -430,8 +430,8 @@ int phex(unsigned v) {
  *
  * kernel13 は先頭 2 バイトしか見ずに p_vaddr / p_filesz / p_memsz を
  * そのまま信じて複写していた。壊れた ELF はユーザ領域の外——カーネル
- * 本体や spawn の退避領域——を書き潰せた (#49)。載せる前にここで
- * 「ファイルの中に収まっているか」と「載せ先がユーザ領域か」を確かめる。
+ * 本体や spawn の退避領域——を上書きできた (#49)。載せる前にここで
+ * 「ファイルの中に収まっているか」と「ロード先がユーザ領域か」を確かめる。
  *
  * 引き算はすべて「引かれる側が大きいこと」を確かめてから行う。
  * unsigned なので a + b > c の形は桁あふれで通ってしまう */
@@ -471,8 +471,8 @@ int elfok(int i) {
     if (fsz > msz) return 0;                    /* ファイル上のサイズがメモリ上のサイズを超える */
     if (poff > flen || flen - poff < fsz) return 0;   /* 中身がファイルの外 */
     if (msz > UBRKMAX - UBASE) return 0;        /* ユーザ領域より大きい */
-    if (pva < UBASE) return 0;                  /* 載せ先が下に外れる */
-    if (pva > UBRKMAX - msz) return 0;          /* 載せ先が上に外れる */
+    if (pva < UBASE) return 0;                  /* ロード先が下に外れる */
+    if (pva > UBRKMAX - msz) return 0;          /* ロード先が上に外れる */
   }
   return 1;
 }
@@ -551,10 +551,10 @@ int cpystr(char *d, unsigned s, int cap) {
   return -1;
 }
 
-/* 親の像を退避して子を配置する。返り値は 0 か -errno。
+/* 親のイメージを退避して子を配置する。返り値は 0 か -errno。
  * 退避レコードの配置 (バイト): +0 tf 33 語, +132 fdent 16 語,
  * +196 fdpos 16 語, +260 つなぎ替え 4 語, +276 ubrk/sp/imgsz/stksz の 4 語,
- * +292 から像 [UBASE, ubrk) とフレームスタック [sp, USP) の複写 */
+ * +292 からイメージ [UBASE, ubrk) とフレームスタック [sp, USP) の複写 */
 int sys_spawn(unsigned sa) {
   unsigned *tf;
   char path[64];

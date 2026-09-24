@@ -2,7 +2,7 @@
 # 我々のシェルの経路展開 (glob) を，ホストのシェルと突き合わせる
 # (docs/stage017-gcc.md 5.9)。
 #
-#   sh tools/diffglob.sh        ホストで組んだ我々のシェルと突き合わせる
+#   sh tools/diffglob.sh        ホストでビルドした我々のシェルと突き合わせる
 #   sh tools/diffglob.sh os     **我々の OS の上で走らせた**シェルと突き合わせる
 #
 # ## なぜ要るか
@@ -13,7 +13,7 @@
 #
 # 展開の細目 (合うものが無いときの振舞い・先頭の `.` の扱い・並びの
 # 順序・引用されたメタ文字・成分の途中にメタ文字がある形) は文言だけ
-# では決まらないので，**同じ台本を両方のシェルに食わせて**測る。
+# では決まらないので，**同じ台本を両方のシェルに与えて**測る。
 #
 # ## 台本はファイルに置く
 #
@@ -36,7 +36,7 @@ rm -rf "$out"
 mkdir -p "$out/root/sub"
 
 OURS=${STONE_SH:-tmp/sh5host}
-# **対照はここで組む。** sh5.c は外部コマンドの起動を spawn2 (我々の
+# **対照はここでビルドする。** sh5.c は外部コマンドの起動を spawn2 (我々の
 # カーネルの呼出し 501) に集めているので，ホストにはその実体が無い。
 # tests/hostshim/shim-sh.c が fork / exec で同じ約束を与える ——
 # 経路展開そのものはカーネルに依らないので，これで同じソースを
@@ -47,7 +47,7 @@ HOSTSH=${HOSTSH:-sh}
 for f in a.txt b.txt ab.c xy.c; do : > "$out/root/$f"; done
 for f in x.txt y.c; do : > "$out/root/sub/$f"; done
 
-# **カーネルが見せる /dev/null に合わせる。** 我々の OS では像に入って
+# **カーネルが見せる /dev/null に合わせる。** 我々の OS ではイメージに入って
 # いなくても `dev/null` が一覧に出るので，ホスト側にも同じものを置く。
 # これはシェルの差ではなく OS の差である (置かないと `echo *` が
 # 食い違い，シェルの差でないものを直しにいくことになる)
@@ -96,7 +96,7 @@ printf 'echo @@end\n' >> "$out/root/g.sh"
 if [ "$mode" = host ] && [ -z "${STONE_SH:-}" ]; then
     "${CC:-gcc}" -w -o "$OURS" stage017/sh5.c stage017/re2.c \
         tests/hostshim/shim-sh.c \
-        || { echo "error: $OURS を組めない (gcc が要る)" >&2; exit 1; }
+        || { echo "error: $OURS をビルドできない (gcc が要る)" >&2; exit 1; }
 fi
 
 if [ "$mode" = host ]; then
@@ -126,7 +126,7 @@ printf 'sh5 g.sh\n' > "$out/root/boot"
 if [ "$mode" = host ]; then
     ( cd "$out/root" && ./sh5 g.sh ) > "$out/ours.out" 2> /dev/null
 else
-    # 像には dev を入れない —— カーネルが見せるものと二重になる
+    # イメージには dev を入れない —— カーネルが見せるものと二重になる
     rm -rf "$out/root/dev"
     sh tools/sfs3.sh pack "$out/root" "$out/fs.img" 16777216 256 > /dev/null \
         && rm -f "$out/ram" \
@@ -138,7 +138,7 @@ else
             sh tools/env.sh qemu tmp/build/kernel24.bin < /dev/null \
             > "$out/run.out" 2>&1
     if ! grep -q '^@@end$' "$out/run.out"; then
-        echo "FAIL 走行が最後まで届かなかった ($out/run.out を見よ)"
+        echo "FAIL 実行が最後まで完了しなかった ($out/run.out を見よ)"
         exit 1
     fi
     sed -n '/^@@1$/,/^@@end$/p' "$out/run.out" > "$out/ours.out"

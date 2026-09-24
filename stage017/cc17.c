@@ -9,15 +9,15 @@
  * である (docs/stage016-os.md 11.7)。configure が外へ出た 6 回は
  * すべてこれだった。
  *
- * **束ねは自分で書く。** ホストの tools/bundle.sh とゲストの
+ * **バンドルは自分で書く。** ホストの tools/bundle.sh とゲストの
  * stage013/bundle.c はどちらも「引数の綴りをそのまま名前にする」ので，
  * /include/stdio.h を渡すと名前が "/include/stdio.h" になり
- * #include <stdio.h> から引けない。sfs2 に階層ができた今，束ねる側は
+ * #include <stdio.h> から引けない。sfs2 に階層ができた今，バンドルする側は
  * 「置いてある場所」と「名乗る名前」を別に持つ必要がある。駆動役は
- * 両方を知っているので，ここで組むのが素直である。
+ * 両方を知っているので，ここで組むのが直接的である。
  *
  * 段取り:
- *   1. /include の下を読んで束ねを作る (最後に翻訳単位を置く)
+ *   1. /include の下を読んでバンドルを作る (最後に翻訳単位を置く)
  *   2. pp16  で前処理
  *   3. cc15p で翻訳 (-c ならここまで)
  *   4. 'E' + .o の連結 + '\0' を組んで ld16 へ流す
@@ -59,7 +59,7 @@ static void die(char *m, char *a) {
   exit(1);
 }
 
-/* from を fd へ丸ごと写す。戻り値は写したバイト数 (-1 = 開けない) */
+/* from の全体を fd へ写す。戻り値は写したバイト数 (-1 = 開けない) */
 static long copyinto(int fd, char *from) {
   int s;
   int n;
@@ -88,7 +88,7 @@ static long fsize(char *p) {
   return n;
 }
 
-/* 束ねに 1 つ足す。nm で名乗り，中身は from から取る */
+/* バンドルに 1 つ足す。nm で名乗り，中身は from から取る */
 static void member(int fd, char *nm, char *from) {
   long sz;
   char hdr[600];
@@ -99,7 +99,7 @@ static void member(int fd, char *nm, char *from) {
   if (copyinto(fd, from) != sz) die("short read", from);
 }
 
-/* /include とその下の sys/ を束ねへ入れる。**名乗る名前は
+/* /include とその下の sys/ をバンドルへ入れる。**名乗る名前は
  * #include が書く綴りである** (sys/stat.h は "sys/stat.h") */
 static void addheaders(int fd) {
   DIR *d;
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
     src = "_cc0.c";
   }
 
-  /* 1. 束ね */
+  /* 1. バンドル */
   fd = open(TB, O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (fd < 0) die("cannot create", TB);
   write(fd, "#!stone-bundle\n", 15);

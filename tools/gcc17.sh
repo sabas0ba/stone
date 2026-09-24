@@ -2,7 +2,7 @@
 # GCC 4.7.4 を Stage 17 の測定対象として扱う。
 #
 #   gcc17.sh measure   取得済みソースと現在の sfs4/kernel25 の容量を比較する
-#   gcc17.sh pack      全配布木を窓と同じ大きさの sfs4 に実際に詰める (手動)
+#   gcc17.sh pack      全配布ツリーをウィンドウと同じ大きさの sfs4 に実際に詰める (手動)
 #
 #   gcc17.sh configure            libiberty / libcpp を host で configure し config.h を作る
 #   gcc17.sh headers [lib]        単位ごとに header の閉包を取り，我々の libc に無いものを数える
@@ -16,10 +16,10 @@
 # qemu-system-riscv32 は呼ぶ側の環境で与える (tools/env.sh の契約のまま)。
 #
 # STONE_GCC17_PP=os で pp の段を**stone の OS の上の pp18** に替える
-# (既定は裸の pp16)。docs/stage017-gcc.md 8.7 の 2。
+# (既定はベアメタル実行の pp16)。docs/stage017-gcc.md 8.7 の 2。
 #
-# STONE_GCC47_SRC で測る木を差し替えられる。**答の判っている小さな木で
-# 算術そのものを検査するため**である (tests/stage017 第 5 部)。GCC の木が
+# STONE_GCC47_SRC で測るツリーを差し替えられる。**答の判っている小さなツリーで
+# 算術そのものを検査するため**である (tests/stage017 第 5 部)。GCC のツリーが
 # 手元に無い環境でも，式が合っているかはそれで確かめられる。
 set -eu
 
@@ -28,11 +28,11 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # 作業用の表の項目数。
 #
 # **最小 image は「読むだけ」の値である。** 表を実測ちょうど (81,356) で
-# 切ると，ゲストは file を 1 つも作れない。GCC を組む間に出る .o や .a は
+# 切ると，ゲストは file を 1 つも作れない。GCC をビルドする間に出る .o や .a は
 # 表に項目を要るので，詰める側は最初から余りを持たせる。
 #
 # 2^17 は実測の 81,356 を超える最小の 2 の冪で，49,716 項目の余りが残る。
-# 項目幅が 128 バイトなので表は 16 MiB 丁度になり，窓 512 MiB のうち
+# 項目幅が 128 バイトなので表は 16 MiB 丁度になり，ウィンドウ 512 MiB のうち
 # data 領域に 52,491,992 バイトの余りが残る (docs/stage017-gcc.md 7.4)。
 #
 # STONE_SFS4_WORKSPACE_ENTRIES で下げられる。**pack の経路そのものを
@@ -61,7 +61,7 @@ define() {
 }
 
 measure() {
-    [ -d "$src" ] || die "測る木が無い: $src (sh tools/fetch.sh gcc47)"
+    [ -d "$src" ] || die "測るツリーが無い: $src (sh tools/fetch.sh gcc47)"
 
     files=$(find "$src" -type f -printf '.\n' | wc -l | tr -d ' ')
     directories=$(find "$src" -type d -printf '.\n' | wc -l | tr -d ' ')
@@ -103,7 +103,7 @@ measure() {
             END { print count + 0 }
         ')
     # libstdc++ の header は**案 A で最初に要る**ので別に数える。
-    # STONE_GCC47_SRC で小さな木を測るときは無いので，そのときは 0 と出す
+    # STONE_GCC47_SRC で小さなツリーを測るときは無いので，そのときは 0 と出す
     cxx_inc="$src/libstdc++-v3/include"
     if [ -d "$cxx_inc" ]; then
         cxx_header_max_name_bytes=$(find "$cxx_inc" -mindepth 1 \
@@ -121,7 +121,7 @@ measure() {
         cxx_headers_over_limit=0
     fi
 
-    # sfs4 pack が表へ載せるのは regular file と directory だけである。
+    # sfs4 pack が表へ格納するのは regular file と directory だけである。
     # hard link は各 path の内容を regular file として materialize するが、
     # symbolic link その他の型は表現できない。後者があれば容量の下限を
     # 数字だけ出すと「全treeを収容できる」と誤読できるため unknown とする。
@@ -129,8 +129,8 @@ measure() {
     table_bytes=$((table_offset + table_entries * entry_size))
     minimum_image_bytes=$((table_bytes + padded_file_bytes))
 
-    # kernel24 では窓の上端が UBASE (ユーザ像のロード先) だった。
-    # kernel25 は像を退避領域より上へ移したので，上端は SFSTOP である
+    # kernel24 ではウィンドウの上端が UBASE (ユーザイメージのロード先) だった。
+    # kernel25 はイメージを退避領域より上へ移したので，上端は SFSTOP である
     sfsa=$(define "$repo_root/stage017/kernel25.c" SFSA)
     sfstop=$(define "$repo_root/stage017/kernel25.c" SFSTOP)
     [ -n "$sfsa" ] || die "kernel25 の SFSA を読めない"
@@ -138,7 +138,7 @@ measure() {
     sfs_window_bytes=$((sfstop - sfsa))
 
     # 作業用に表を広げた場合。**表は先に切ってしまうので，余りは data
-    # 領域だけに残る。** ここが GCC を組む間に出る生成物の置き場になる
+    # 領域だけに残る。** ここが GCC をビルドする間に出る生成物の置き場になる
     workspace_table_bytes=$((table_offset + WORKSPACE_ENTRIES * entry_size))
     workspace_used_bytes=$((workspace_table_bytes + padded_file_bytes))
     workspace_free_entries=$((WORKSPACE_ENTRIES - table_entries))
@@ -158,7 +158,7 @@ measure() {
         fits_workspace=unknown
     else
         [ "$minimum_image_bytes" -le "$sfs_window_bytes" ] || fits_window=no
-        # 余りが負なら，木そのものが予約した項目数に入っていない
+        # 余りが負なら，ツリーそのものが予約した項目数に入っていない
         [ "$workspace_free_entries" -ge 0 ] || fits_workspace=no
         [ "$workspace_headroom_bytes" -ge 0 ] || fits_workspace=no
     fi
@@ -195,26 +195,26 @@ fits-kernel25-workspace=$fits_workspace
 EOF
 }
 
-# 全配布木を，窓と同じ大きさの sfs4 に実際に詰めて，詰めた結果を検算する。
+# 全配布ツリーを，ウィンドウと同じ大きさの sfs4 に実際に詰めて，詰めた結果を検算する。
 #
 # **見積りと実物は別である。** measure は表の幅と詰めた大きさから下限を
 # 出すだけで，pack がその規模を通せるかは見ていない。深さ 12・81,355 経路
 # という規模では，並び順や親の索引付けなど計算に出ない所で落ちうる
 # (実際に深さ 10 以上で落ちる誤りが後から見つかっている)。
 #
-# **CI では回さない。** tools/sfs4.sh の pack は項目ごとに dd と od を呼ぶ
+# **CI では実行しない。** tools/sfs4.sh の pack は項目ごとに dd と od を呼ぶ
 # POSIX shell であり，81,356 項目では 1 時間半かかる (実測 1h27m)。手で
 # 測るための手順として置く。進行は SFS4_PROGRESS で stderr へ出る
 # (docs/stage017-gcc.md 7.5)。
 pack() {
-    [ -d "$src" ] || die "詰める木が無い: $src (sh tools/fetch.sh gcc47)"
+    [ -d "$src" ] || die "詰めるツリーが無い: $src (sh tools/fetch.sh gcc47)"
 
-    # sfs4 が表現できない entry があれば，詰めた結果は木と一致しない。
-    # 数だけ数えて先へ進むと「全部載った」と誤読するので，名指しで止める
+    # sfs4 が表現できない entry があれば，詰めた結果はツリーと一致しない。
+    # 数だけ数えて先へ進むと「全部収まった」と誤読するので，名指しで止める
     link=$(find "$src" -type l -print -quit)
     other=$(find "$src" ! -type f ! -type d ! -type l -print -quit)
-    [ -z "$link" ] || die "symbolic link は sfs4 に載らない: $link"
-    [ -z "$other" ] || die "未対応の entry は sfs4 に載らない: $other"
+    [ -z "$link" ] || die "symbolic link は sfs4 に格納できない: $link"
+    [ -z "$other" ] || die "未対応の entry は sfs4 に格納できない: $other"
 
     files=$(find "$src" -type f -printf '.\n' | wc -l | tr -d ' ')
     directories=$(find "$src" -type d -printf '.\n' | wc -l | tr -d ' ')
@@ -230,7 +230,7 @@ pack() {
     [ -n "$table_offset" ] || die "sfs4 の表位置を読めない"
     [ -n "$entry_size" ] || die "sfs4 の項目幅を読めない"
 
-    # ゲストが載せられる上限そのもので詰める。ここを超えた image は
+    # ゲストが格納できる上限そのもので詰める。ここを超えた image は
     # kernel25 が S を出して拒む (docs/stage017-gcc.md 7.2)
     sfsa=$(define "$repo_root/stage017/kernel25.c" SFSA)
     sfstop=$(define "$repo_root/stage017/kernel25.c" SFSTOP)
@@ -259,7 +259,7 @@ pack() {
     #
     # **数を数えるだけでは足りない。** 親の索引が 1 つずれても，項目は
     # 有効なまま残るので list は同じ行数を出す。数が合ったまま，guest から
-    # 見える木だけが別物になる。同じ理由で，重複した経路や種別の取り違えも
+    # 見えるツリーだけが別物になる。同じ理由で，重複した経路や種別の取り違えも
     # 数には出ない。ここは親の索引付けを通すための検査なので，集合で比べる。
     want="$out/want.txt"
     got="$out/got.txt"
@@ -306,11 +306,11 @@ work="$repo_root/tmp/g17u"
 #
 # **既定は libc21 である。** 実物 (zlib / bzip2) を読んで足した世代で，
 # 我々が実物に向けて持っている header はこれが全部である
-# (stage017/libc21.md)。GCC を組むときに使うのもこちらになる。
+# (stage017/libc21.md)。GCC をビルドするときに使うのもこちらになる。
 #
 # STONE_GCC17_LIBC で差し替えられる。stage015/libc はベアメタル実行側 ——
-# tools/diff17.sh の bare が測る器で，sys/ の下は time.h しか無い。
-# **どちらで測ったかで header の穴の数が変わる**ので明示する
+# tools/diff17.sh の bare が測る対象で，sys/ の下は time.h しか無い。
+# **どちらで測ったかで header の不足数が変わる**ので明示する
 ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc24/include}
 pp16=tmp/build/pp16.bin
 pp18=tmp/build/pp18
@@ -318,16 +318,16 @@ cc15=tmp/build/cc15ae.bin        # 最前線の世代で測る (tools/diff17.sh 
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
-# pp の段をどちらの系で回すか (docs/stage017-gcc.md 8.7 の 2)。
+# pp の段をどちらの系で実行するか (docs/stage017-gcc.md 8.7 の 2)。
 #
-#   bare  pp16 を裸で回す (既定)。ベアメタル実行側。stdin から束ねを読み，
+#   bare  pp16 を OS なし (bare metal) で実行する (既定)。stdin からバンドルを読み，
 #         stdout へ .i を出す。QEMU の起動は 1 単位につき 1 回
-#   os    **stone の OS の上の pp18 を回す。** pp16 では測れないものが
+#   os    **stone の OS の上の pp18 を実行する。** pp16 では測れないものが
 #         2 つある —— 展開の結果に現れた defined (pp17 以降だけが評価
-#         する) と，束ねの員 256 / アリーナ 64 KiB という広がった容量。
+#         する) と，バンドルのメンバ数 256 / アリーナ 64 KiB という広がった容量。
 #         13 単位が ppext に落ちているのはすべて前者である
 #
-# **OS 側は 1 単位あたり像を詰めて起動し直す。** pp16 を裸で回すのと
+# **OS 側は 1 単位あたりイメージを詰めて起動し直す。** pp16 を OS なしで実行するのと
 # 比べて 1 単位あたり数十秒増える。既定を替えないのはそのためで，
 # 測り直すときだけ明示して使う。
 PP_ENGINE=${STONE_GCC17_PP:-bare}
@@ -336,8 +336,8 @@ bare|os) ;;
 *) die "STONE_GCC17_PP は bare か os (与えられた値: $PP_ENGINE)" ;;
 esac
 
-# 束ねの員の上限。pp16 は mbname 4096 バイト / 64 バイトスロットで 64 員，
-# pp17 以降は 16384 バイトで 256 員である (stage017/pp17.sc 114 行)。
+# バンドルのメンバ数の上限。pp16 は mbname 4096 バイト / 64 バイトスロットで 64 メンバ，
+# pp17 以降は 16384 バイトで 256 メンバである (stage017/pp17.sc 114 行)。
 # 超えるものは走らせない —— 走らせても 6 で落ちるだけで，何も判らない
 pp_members_max() {
     case "$PP_ENGINE" in
@@ -346,7 +346,7 @@ pp_members_max() {
     esac
 }
 
-# 束ね ($1) を pp に通し，.i を $2 へ，pp の stderr を $3 へ出す。
+# バンドル ($1) を pp に通し，.i を $2 へ，pp の stderr を $3 へ出す。
 # 終了コードをそのまま返す
 pp_run() {
     case "$PP_ENGINE" in
@@ -357,17 +357,17 @@ pp_run() {
 
 # **stone の OS の上で pp18 に通す** (8.7 の 2)。
 #
-# tools/tcc17.sh が既に持つ形と同じである —— 作業用の根を sfs3 で詰め，
-# 記憶像の 64 MiB の位置へ置いて kernel24 を起動し，走った後の像を
+# tools/tcc17.sh が既に持つ形と同じである —— 作業用のルートを sfs3 で詰め，
+# メモリイメージの 64 MiB の位置へ置いて kernel24 を起動し，走った後のイメージを
 # 読み直して出来たものを取り出す。
 #
-# pp18 は OS 側の世代なので裸では走らない (ld16 の 'E' 前置きが付いて
-# いる)。素の名前は像の根からしか引けないので，pp18 も sh2 も根に置く。
+# pp18 は OS 側の世代なので OS なしでは実行できない (ld16 の 'E' 前置きが付いて
+# いる)。パスを付けない名前はイメージのルートからしか参照できないので，pp18 も sh2 もルートに置く。
 pp_root="$work/pproot"
 pp_run_os() {
     b=$1; i=$2; e=$3
     for f in pp18 sh2.bin kernel24.bin; do
-        [ -s "tmp/build/$f" ] || die "OS 側の像が無い: tmp/build/$f (sh tools/build.sh stage017)"
+        [ -s "tmp/build/$f" ] || die "OS 側のイメージが無い: tmp/build/$f (sh tools/build.sh stage017)"
     done
     rm -rf "$pp_root"
     mkdir -p "$pp_root"
@@ -409,19 +409,19 @@ lib_dirs() {
 
 # config.h を host で作る。
 #
-# **configure を stone の OS で回すのは 4.2 の別件である。** ここで要るのは
+# **configure を stone の OS で実行するのは 4.2 の別件である。** ここで要るのは
 # 単位を読むための config.h だけなので，host の autoconf に作らせる。
 # ただし host の header と語長で作ると，我々に無い header を「ある」と
-# 書いた config.h になる。2 つ手当てする。
+# 書いた config.h になる。2 つ対策する。
 #
-#   1. CPPFLAGS で header の探し道を我々の libc だけにする。autoconf の
+#   1. CPPFLAGS で header の探索経路を我々の libc だけにする。autoconf の
 #      AC_CHECK_HEADERS は「その header を含む試験を訳せるか」で決めるので，
-#      HAVE_*_H が我々の header の有無を映す
+#      HAVE_*_H が我々の header の有無を反映する
 #   2. 語長は autoconf の cache 変数で RV32 の値を与える。host は 64 bit
 #      なので，放っておくと SIZEOF_LONG が 8 になる
 #
 # **関数の有無 (HAVE_STRERROR など) は host の link 試験で決まる。** ここは
-# 手当てしていない。効くのは代替実装を選ぶ枝だけで，読ませる単位の一覧
+# 対策していない。影響するのは代替実装を選ぶ分岐だけで，読ませる単位の一覧
 # (REQUIRED_OFILES / libcpp_a_OBJS) には影響しない。
 configure() {
     [ -d "$src" ] || die "GCC 4.7.4 が無い: $src (sh tools/fetch.sh gcc47)"
@@ -438,7 +438,7 @@ configure() {
     done
     # libcpp/init.c が読む localedir.h は libc の header ではなく，make が
     # Makefile の localedir から作る (libcpp/Makefile.in 144 行)。make は
-    # 回さないので，同じ 1 行をここで作る。無いと「libc に無い header」に
+    # 実行しないので，同じ 1 行をここで作る。無いと「libc に無い header」に
     # 数えられてしまう
     echo '#define LOCALEDIR "/usr/local/share/locale"' > "$work/libcpp/localedir.h"
 }
@@ -466,11 +466,11 @@ unit_list() {
 # 失敗なら無い header の名前を標準エラーへ出して 1 を返す。
 #
 #   -M     -MM ではない。-MM は system 扱いの header を省くが，我々の
-#          libc の header も束ねに要る
+#          libc の header もバンドルに要る
 #   -undef host の既定 macro (__GNUC__ / __linux__ / __x86_64__ …) を消す。
 #          残すのは我々の pp が定義する __STONE__ だけである (__STDC__ は
-#          消せない)。これで #if の枝が我々の pp と揃い，host だけが辿る
-#          枝の header を拾わず，我々だけが辿る枝の header を落とさない
+#          消せない)。これで #if の分岐が我々の pp と揃い，host だけが辿る
+#          分岐の header を取り込まず，我々だけが辿る分岐の header を落とさない
 #   -std=c89
 #          __STDC_VERSION__ を消す。我々の pp は定義しない
 closure() {
@@ -503,7 +503,7 @@ closure() {
 # (この関数は $( ) の中で呼ばれるので，変数では返せない)。
 #
 # 閉じた閉包 (代役を含む) を標準出力に出す。代役を含めるのは，そのまま
-# 束ねて pp に通すためである —— 空の代役でも型が在れば先へ進めるし，
+# バンドルして pp に通すためである —— 空の代役でも型が在れば先へ進めるし，
 # 無ければ host 側の検査が decl として名指しする
 stub="$work/stub"
 closure_all() {
@@ -530,10 +530,10 @@ closure_all() {
 }
 
 # 単位ごとに閉包を取り，我々の libc に無い header を名指しで数える。
-# 鎖も QEMU も要らない。
+# ビルドチェーンも QEMU も要らない。
 #
 # **無い header の数ではなく単位の数で数える** —— 1 つの header が何単位を
-# 塞いでいるかが，埋める順番を決める
+# 妨げているかが，対応する順番を決める
 headers() {
     [ -s "$work/libiberty/config.h" ] || die "config.h が無い (sh tools/gcc17.sh configure)"
     t="$work/headers.txt"
@@ -553,11 +553,11 @@ headers() {
     done | tee "$t"
     echo
     echo "headers: $(grep -c "$(printf '\tok\t')" "$t") 単位は閉包が閉じる / $(grep -c "$(printf '\thdr\t')" "$t") 単位は header が無い"
-    echo "無い header (塞いでいる単位の数):"
+    echo "無い header (妨げている単位の数):"
     grep "$(printf '\thdr\t')" "$t" | cut -f3 | tr ' ' '\n' | sort | uniq -c | sort -rn | sed 's/^/  /'
 }
 
-# 我々の header そのものが host の C89 検査に引っかかる診断を，先に控えて
+# 我々の header そのものが host の C89 検査で出す診断を，先に控えて
 # おく。単位の診断からこれを引き，**単位の側の ISO C 違反だけ**を残す
 # (我々の inttypes.h の long long を GCC のせいにしない)
 baseline_iso() {
@@ -582,14 +582,14 @@ baseline_iso() {
 #         進め，その結果を "-> <状態> <詳細>" として後ろに足す。** 型が
 #         既に在れば通るし，無ければ decl として名指しされる。1 行で
 #         「何が無いか」と「それを埋めたら何が起きるか」の両方が読める
-#   cap   容量の上限 (pp16 の束ね 64 員 / cc の 6)
-#   pp    我々の pp が落ち，host の cpp は C89 として通す。**我々の pp の穴**
+#   cap   容量の上限 (pp16 のバンドル 64 メンバ / cc の 6)
+#   pp    我々の pp が落ち，host の cpp は C89 として通す。**我々の pp の不足**
 #   ppext 我々の pp が落ち，host の cpp も C89 として拒む。規格の外の形
 #         (詳細は host の診断と我々の終了コード)
 #   decl  我々の .i を host が GNU C としても通さない。宣言か型が我々の
 #         libc に無いことがほとんどである (詳細は host の最初の診断)
 #   ext   我々が拒み，host も C89 として拒む。GNU / C99 の拡張である
-#         (詳細は host の ISO C 診断)。Stage 18 の的
+#         (詳細は host の ISO C 診断)。Stage 18 の対象
 #
 #         **限界: 同じものを拒んでいるとは限らない。** 我々の cc は終了
 #         コードしか言わないので，host の ISO C 診断が我々の拒む理由だと
@@ -598,19 +598,19 @@ baseline_iso() {
 #         いた。9 を通したら ok になり，offsetof の方は**我々が元から
 #         受けていた**ことが判った (docs/stage017-gcc.md 8.6)。
 #         理由を名指しするには where で 1 単位ずつ絞るしかない
-#   gap   我々だけが拒む。**我々の C89 適合の穴** (詳細は cc の終了コード)
-#   run   OS 側の pp で，走行そのものが立ち上がらなかった。適合の話ではない
+#   gap   我々だけが拒む。**我々の C89 適合の不足** (詳細は cc の終了コード)
+#   run   OS 側の pp で，実行そのものが立ち上がらなかった。適合の話ではない
 #
 # 拒んだ理由を我々の cc は終了コードでしか言わないので，**同じ .i を host
-# に読ませて**分類する (tools/diff17.sh と同じ手)。.i は我々の pp が我々の
+# に読ませて**分類する (tools/diff17.sh と同じ方法)。.i は我々の pp が我々の
 # header で作ったものなので，host に含めさせる header は無い
 unit() {
     lib=${1%%/*}; u=${1#*/}
     case "$PP_ENGINE" in
-    os) [ -s "$pp18" ] || die "OS 側の像が無い: $pp18 (sh tools/build.sh stage017)" ;;
-    *)  [ -s "$pp16" ] || die "鎖の像が無い: $pp16 (sh tools/build.sh all)" ;;
+    os) [ -s "$pp18" ] || die "OS 側のイメージが無い: $pp18 (sh tools/build.sh stage017)" ;;
+    *)  [ -s "$pp16" ] || die "ビルドチェーンのイメージが無い: $pp16 (sh tools/build.sh all)" ;;
     esac
-    [ -s "$cc15" ] || die "鎖の像が無い: $cc15 (sh tools/build.sh all)"
+    [ -s "$cc15" ] || die "ビルドチェーンのイメージが無い: $cc15 (sh tools/build.sh all)"
     mkdir -p "$work/out"
     o="$work/out/$lib.$u"
     hdrs=$(closure_all "$1") || true
@@ -619,18 +619,18 @@ unit() {
         printf '%s\thdr\t?\n' "$1"
         return 0
     fi
-    # 無い header があれば，行の頭はそれで，先の結果を "->" で繋ぐ
+    # 無い header があれば，行の頭はそれで，先の結果を "->" で連結する
     lead=""
     [ -n "$missing" ] && lead="hdr	$missing -> "
     printf '%s\t%s' "$1" "$lead"
     unit_run "$1" "$hdrs" "$o"
 }
 
-# 閉包 (代役を含む) を束ねて pp16 -> cc15v に通し，状態と詳細を出す
+# 閉包 (代役を含む) をバンドルして pp16 -> cc15v に通し，状態と詳細を出す
 unit_run() {
     lib=${1%%/*}; u=${1#*/}
     hdrs=$2; o=$3
-    # 束ねの員。我々の libc の header は include からの相対経路を名前にする
+    # バンドルのメンバ。我々の libc の header は include からの相対経路を名前にする
     # (<sys/time.h> は "sys/time.h" で探される)。代役も同じ。それ以外は
     # basename —— libiberty / libcpp / include の間に同名の header は無い
     members=""; n=1
@@ -649,18 +649,18 @@ unit_run() {
     fi
 
     # **落ちるのが本題である。** この script は set -e で走るので，拒む
-    # ことを期待する呼び出しは if で受けて終了コードを取る。裸で置くと
+    # ことを期待する呼び出しは if で受けて終了コードを取る。if なしで置くと
     # rc=$? に届く前に script ごと終わり，units では tee の手前が消えて
     # 表が途中で切れる
     # **HAVE_CONFIG_H を与える。** libiberty の単位は #ifdef HAVE_CONFIG_H の
-    # 下で config.h を読む。GCC の build は -DHAVE_CONFIG_H で組むが，pp16 に
-    # -D は無い。同じ意味の駆動 file を本体にし，単位そのものは束ねの員と
+    # 下で config.h を読む。GCC の build は -DHAVE_CONFIG_H でビルドするが，pp16 に
+    # -D は無い。同じ意味の駆動 file を本体にし，単位そのものはバンドルのメンバと
     # して 1 文字も変えずに含める。config.h が読まれないと HAVE_STRING_H
-    # などが立たず，<string.h> が飛ばされて size_t が無い .i になる
+    # などが定義されず，<string.h> が読み飛ばされて size_t が無い .i になる
     printf '#define HAVE_CONFIG_H 1\n#include "%s.c"\n' "$u" > "$o.drv.c"
-    # **束ねは file に落としてから渡す。** OS 側の pp は像へ詰めるので
-    # 実体が要る。裸の pp16 も同じ file を読ませる —— 両方の系に同じ
-    # バイト列を食わせないと，違いが pp の世代のものだと言えない
+    # **バンドルは file に書き出してから渡す。** OS 側の pp はイメージへ詰めるので
+    # 実体が要る。ベアメタル実行の pp16 も同じ file を読ませる —— 両方の系に同じ
+    # バイト列を与えないと，違いが pp の世代のものだと言えない
     # shellcheck disable=SC2086
     sh tools/bundle.sh $members "$u.c=$src/$lib/$u.c" "$o.drv.c" > "$o.b"
     if pp_run "$o.b" "$o.i" "$o.pp.err"; then
@@ -669,7 +669,7 @@ unit_run() {
         rc=$?
     fi
     if [ "$rc" -eq 125 ]; then
-        # OS 側の走行そのものが立ち上がらなかった。pp の終了コードでは
+        # OS 側の実行そのものが立ち上がらなかった。pp の終了コードでは
         # ないので，通った・拒んだのどちらにも数えない
         printf 'run\tOS が rc を出さなかった (%s)\n' "$o.pp.err"
         return 0
@@ -680,11 +680,11 @@ unit_run() {
         return 0
     fi
     if [ "$rc" -ne 0 ]; then
-        # pp も終了コードしか言わない。cc と同じ手で，**同じ入力を host の
+        # pp も終了コードしか言わない。cc と同じ方法で，**同じ入力を host の
         # cpp に C89 として読ませて**分類する。host も拒めば規格の外の形
         # (ppext。たとえば macro 展開で defined が現れる形は 6.10.1 の
         # 未定義動作で，GCC は受けるが我々は 4 で拒む)，host が通せば
-        # 我々の pp の穴 (pp) である
+        # 我々の pp の不足 (pp) である
         # shellcheck disable=SC2046
         if "$HOSTCC" -E -std=c89 -pedantic-errors -undef -D__STONE__=1 -nostdinc \
                 -I"$ours" -I"$stub" $(lib_dirs "$lib") -DHAVE_CONFIG_H \
@@ -712,9 +712,9 @@ unit_run() {
     fi
 
     # ここから host に訊く。-x c で前処理から通す (.i のままだと -include
-    # が効かない)。我々の .i に指令は残っていないので，通し直しても変わらない。
+    # が有効にならない)。我々の .i に指令は残っていないので，通し直しても変わらない。
     #
-    # **末尾の EOT (0x04) を落とす。** pp16 は出力の終わりに束ねの終端印を
+    # **末尾の EOT (0x04) を落とす。** pp16 は出力の終わりにバンドルの終端記号を
     # 付け，cc15v はそれを終端として読む。host には "stray '\4'" になり，
     # それだけで gnu89 の検査が落ちて，本当は通る単位まで decl に見えた
     tr -d '\004' < "$o.i" > "$o.host.c"
@@ -743,7 +743,7 @@ unit_run() {
 }
 
 # gap の位置を絞る。cc は終了コードしか言わないので，.i を関数の境界
-# (行頭の "}") で頭から切り詰めながら食わせ，**最初に同じ終了コードで
+# (行頭の "}") で頭から切り詰めながら与え，**最初に同じ終了コードで
 # 落ちる塊**を出す。切り詰めた先で未解決の前方参照が残ると 2 になるが，
 # それは探している誤りではないので先へ進む。
 #
@@ -761,7 +761,7 @@ where() {
     total=$(wc -l < "$o.i" | tr -d ' ')
     prev=0
     for end in $(grep -n '^}' "$o.i" | cut -d: -f1) "$total"; do
-        # **終端印 (0x04) を付け直す。** 切り詰めると pp16 が末尾に置いた
+        # **終端記号 (0x04) を付け直す。** 切り詰めると pp16 が末尾に置いた
         # EOT が消え，cc15v は入力の終わりを待ったまま QEMU の打ち切り
         # (既定 900 秒) まで止まる
         { head -n "$end" "$o.i"; printf '\004'; } > "$o.cut.i"
@@ -786,14 +786,14 @@ units() {
     m="$work/units.meta"
     : > "$t"
     # **その表が何に対する表かを先に言う。** どの libc の header で閉包を
-    # 取ったか，pp をどちらの系で回したかで同じ単位の状態が変わる。
+    # 取ったか，pp をどちらの系で実行したかで同じ単位の状態が変わる。
     # 8 章は一度これを言わずに測って，ベアメタル実行側の libc の表を OS 側の
     # 表として読んだ (docs/stage017-gcc.md 8.1)。表とは別の file にも
     # 残すので，後から表だけを見ても基準を辿れる
     {
         printf 'source=%s\n' "$src_name"
         # **リポジトリからの相対で書く。** 絶対経路を書くと，測った
-        # 機械の名前が記録に混じる (誰の家の下にあったかは基準ではない)
+        # 機械の名前が記録に混じる (誰のホームディレクトリの下にあったかは基準ではない)
         printf 'libc=%s\n' "$(echo "$ours" | sed "s|^$repo_root/||")"
         printf 'pp-engine=%s\n' "$PP_ENGINE"
         printf 'pp=%s\n' "$(case "$PP_ENGINE" in os) echo "$pp18 (OS)" ;; *) echo "$pp16" ;; esac)"
@@ -814,9 +814,9 @@ units() {
     got=$(wc -l < "$t" | tr -d ' ')
     echo "units: $got 単位"
     cut -f2 "$t" | sort | uniq -c | sort -rn | sed 's/^/  /'
-    # **短い表を成功として返さない。** 左辺が die で死んでも pipeline の
+    # **短い表を成功として返さない。** 左辺が die で終了しても pipeline の
     # 終了コードは tee のものなので，途中で切れた表がそのまま残り，
-    # 呼んだ側は 0 を受け取る。実際に走行中の tmp/build/pp18 を消して
+    # 呼んだ側は 0 を受け取る。実際に実行中の tmp/build/pp18 を消して
     # しまい，17 行の表が rc 0 で出た。**表の長さは数えれば判る**
     [ "$got" -eq "$want" ] \
         || die "表が途中で切れている (単位 $want / 表 $got 行。$t を見る)"

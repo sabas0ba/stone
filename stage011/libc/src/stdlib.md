@@ -7,7 +7,7 @@ stdlib.o はフリースタンディング libc の一部で，記憶域の管�
 
 ソース [stdlib.c](stdlib.c) とヘッダ
 [../include/stdlib.h](../include/stdlib.h) /
-[../include/stddef.h](../include/stddef.h) が正本である。
+[../include/stddef.h](../include/stddef.h) が原本である。
 オブジェクトはビルドで再現される生成物であり，git 管理しない。
 
 ## ビルド

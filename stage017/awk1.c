@@ -24,7 +24,7 @@
  *
  * `%.6g` (CONVFMT / OFMT の既定) は libc22 の printf が持っていない ——
  * `%g` を `%f` と同じに扱っている。awk の出力はほとんどがこの変換を
- * 通るので，**ここだけは自前で書く**。libc の穴は libc の世代で直す
+ * 通るので，**ここだけは自前で書く**。libc の不足は libc の世代で直す
  * べきもので，awk の側で測るものではない (5.8 の註)。
  *
  * ## 持たないもの (要らないと確かめた)
@@ -84,7 +84,7 @@ static int die(char *msg, char *arg) {
 /* ================= 作業用の置き場 =================
  *
  * 式の途中で作る文字列は**式が終われば要らない**。1 文ごとに印を戻す
- * 置き場に取る (malloc し放しにすると gsub の繰返しで食い潰す)。
+ * 置き場に取る (malloc し放しにすると gsub の繰返しで使い尽くす)。
  * 変数や配列へ入れる値だけは malloc して控える */
 static char arena[ARENA];
 static int ap;
@@ -1928,7 +1928,7 @@ static double fa_n[NFARG];
 static int fa_i[NFARG];
 
 /* スタックに積んだ値を awkfmt1 が読める形にする。**awk の値の二面性は
- * ここで畳む** —— 書式の側は「字」と「数」しか知らない */
+ * ここで解消する** —— 書式の側は「字」と「数」しか知らない */
 static int fmtargs(int base, int argn) {
   int i;
   if (argn > NFARG) argn = NFARG;
@@ -2004,7 +2004,7 @@ static int assignto(int n, int vi) {
     } else {
       char *d;
       /* **先に複製する** —— 右辺がこの要素そのものを指していることが
-       * ある (`a[i] = a[i]`)。欄で同じ誤りを踏んだ (setfield) */
+       * ある (`a[i] = a[i]`)。欄で同じ誤りに遭遇した (setfield) */
       d = dupstr(tostr(vi));
       if (estr[e]) free(estr[e]);
       estr[e] = d;

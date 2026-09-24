@@ -1,4 +1,4 @@
-// プレイグラウンドとターミナルの実行係 (Web Worker)。
+// プレイグラウンドとターミナルの実行処理 (Web Worker)。
 // - パイプライン: メインスレッドから受け取った計画を rv32.js で順に実行
 // - ターミナル: kernel + sfs イメージで OS を起動し，UART を対話接続する
 // バイナリ資産は fetch してキャッシュする。
@@ -93,8 +93,8 @@ async function handlePipeline(msg) {
 }
 
 // ---- ターミナル (OS セッション) ----
-// boot: sfs を組んでカーネルを起動し，UART を対話接続する。
-// 実行は 3000 万命令ずつに刻み，合間に tin (キー入力) を受け付ける
+// boot: sfs を構築してカーネルを起動し，UART を対話接続する。
+// 実行は 3000 万命令ずつに分割し，合間に tin (キー入力) を受け付ける
 const sessions = new Map();
 const SLICE = 30_000_000;
 
@@ -121,7 +121,7 @@ async function handleBoot(msg) {
         const img = fs === 2
             ? packSfs2(imgFiles, size, maxEntries || 256)
             : packSfs(imgFiles, size, maxEntries || 128);
-        // 大きな RAM (kernel19 の 512 MB) は確保に失敗しうるので分けて掴む
+        // 大きな RAM (kernel19 の 512 MB) は確保に失敗しうるので分けて確保する
         let m;
         try {
             m = new Machine(await fetchBytes(kernel), { ramSize });
@@ -150,7 +150,7 @@ async function pump(id) {
                 postMessage({ id, kind: 'tout', data: r.output }, [r.output.buffer]);
             }
             if (r.status === 'budget') {
-                // 入力メッセージを取り込むために一度譲る
+                // 入力メッセージを取り込むために一度制御を返す
                 await new Promise((res) => setTimeout(res));
                 continue;
             }

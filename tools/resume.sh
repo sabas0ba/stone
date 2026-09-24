@@ -8,29 +8,29 @@
 #   resume.sh --check    直すべき点を並べるだけで，何も変更しない
 #
 # 作業環境が巻き戻る (コンテナが古い snapshot へ戻る) ことがある。
-# **失われるのは push していないものすべてである** —— 作業木の変更・
+# **失われるのは push していないものすべてである** —— 作業ツリーの変更・
 # `tmp/build` の生成物・`tools/env.sh` に当てた局所のパッチ。git の
-# 遠隔だけが唯一の永続する置き場である。
+# remote だけが唯一の永続する置き場である。
 #
-# 手で戻すと 4 手かかり，順序を間違えると壊れる。実際に間違えて
-# **0 バイトの生成物を全段に撒いた**ことがある (1.2.1)。手順を 1 つに
+# 手で戻すと 4 手順かかり，順序を間違えると壊れる。実際に間違えて
+# **0 バイトの生成物を全段で作ってしまった**ことがある (1.2.1)。手順を 1 つに
 # まとめる。
 #
 # ---- 何をするか ----
 #
-#   1. 追跡している遠隔の枝と突き合わせ，**遅れているときだけ**揃える
+#   1. 追跡している remote の branch と突き合わせ，**遅れているときだけ**揃える
 #   2. `tmp/build` の 0 バイトの生成物を消す (巻き戻りが残すことがある)
 #   3. STONE_ENGINE=host のときだけ，1.2 のホスト実行パッチを当て直し，
-#      qemu-system-riscv32 が居ることを確かめる (巻き戻りで消えることがある)
-#   4. --build / --test があれば続きから走らせる (スタンプが効く)
+#      qemu-system-riscv32 が存在することを確かめる (巻き戻りで消えることがある)
+#   4. --build / --test があれば続きから走らせる (スタンプが有効)
 #
 # ---- しないこと ----
 #
 # **push していない commit があるときは何もしない。** 巻き戻りなら
-# HEAD は遠隔より遅れているだけなので，進んでいるなら巻き戻りでは
+# HEAD は remote より遅れているだけなので，進んでいるなら巻き戻りでは
 # ない。取り違えて捨てると取り返しがつかない。
 #
-# `tools/env.sh` 以外に作業木の変更があるときも止まる。巻き戻り以外の
+# `tools/env.sh` 以外に作業ツリーの変更があるときも止まる。巻き戻り以外の
 # 状況で走らせてしまった可能性があるからである。
 set -eu
 
@@ -51,46 +51,46 @@ done
 
 say() { echo "resume: $*" >&2; }
 
-# ---- 1. 遠隔と突き合わせる ----
+# ---- 1. remote と突き合わせる ----
 
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$branch" = HEAD ]; then
-    say "detached HEAD なので枝の同期は飛ばす"
+    say "detached HEAD なので branch の同期は省略する"
 else
     upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2> /dev/null || true)
     if [ -z "$upstream" ]; then
-        say "$branch に追跡先が無いので枝の同期は飛ばす"
+        say "$branch に追跡先が無いので branch の同期は省略する"
     else
         git fetch --quiet "${upstream%%/*}" "${upstream#*/}" 2> /dev/null || \
-            say "fetch に失敗した (遠隔に届かない)。手元の状態のまま続ける"
+            say "fetch に失敗した (remote に接続できない)。手元の状態のまま続ける"
         local_sha=$(git rev-parse HEAD)
         remote_sha=$(git rev-parse "$upstream" 2> /dev/null || echo "$local_sha")
 
         if [ "$local_sha" = "$remote_sha" ]; then
-            say "枝は $upstream と一致している"
+            say "branch は $upstream と一致している"
         elif [ -n "$(git rev-list "$upstream..HEAD" 2> /dev/null)" ]; then
-            # 遠隔に無い commit を持っている = 巻き戻りではない
+            # remote に無い commit を持っている = 巻き戻りではない
             n=$(git rev-list --count "$upstream..HEAD")
             say "**push していない commit が $n 個ある。何も変更しない。**"
-            say "  巻き戻りなら HEAD は遠隔より遅れているだけである。"
+            say "  巻き戻りなら HEAD は remote より遅れているだけである。"
             say "  先に push するか，意図を確かめること"
             exit 1
         else
-            # 作業木の状態を見る。env.sh 以外に**追跡下の**変更があれば止まる。
-            # 追跡外のファイル (??) は checkout -B が保つので邪魔をしない
+            # 作業ツリーの状態を見る。env.sh 以外に**追跡下の**変更があれば止まる。
+            # 追跡外のファイル (??) は checkout -B が保持するので影響しない
             dirty=$(git status --porcelain | grep -v '^??' | awk '{print $2}' \
                 | grep -v '^tools/env\.sh$' || true)
             if [ -n "$dirty" ]; then
-                say "**tools/env.sh 以外に作業木の変更がある。何も変更しない。**"
+                say "**tools/env.sh 以外に作業ツリーの変更がある。何も変更しない。**"
                 echo "$dirty" | sed 's/^/  /' >&2
                 exit 1
             fi
             n=$(git rev-list --count "HEAD..$upstream")
             if [ "$check_only" -eq 1 ]; then
-                say "枝が $upstream より $n 個遅れている (--check なので揃えない)"
+                say "branch が $upstream より $n 個遅れている (--check なので揃えない)"
             else
-                say "枝が $upstream より $n 個遅れている。揃える"
-                # skip-worktree が立っていると checkout が拒む。外して戻す
+                say "branch が $upstream より $n 個遅れている。揃える"
+                # skip-worktree が設定されていると checkout が拒む。外して戻す
                 git update-index --no-skip-worktree tools/env.sh 2> /dev/null || true
                 git checkout -- tools/env.sh 2> /dev/null || true
                 git checkout -B "$branch" "$upstream" > /dev/null 2>&1
@@ -102,14 +102,14 @@ fi
 
 # ---- 2. 0 バイトの生成物を消す ----
 #
-# 巻き戻りが 0 バイトの生成物を残すことがある。印は 0 バイトの
+# 巻き戻りが 0 バイトの生成物を残すことがある。スタンプは 0 バイトの
 # SHA-256 とも一致するので，放っておくとキャッシュの照合を通って
-# しまう (1.2.1)。tools/build.sh の nonempty が印を拒むようになって
-# いるが，消しておけば作り直しが素直に走る
+# しまう (1.2.1)。tools/build.sh の nonempty がスタンプを書かないようになって
+# いるが，消しておけば作り直しがそのまま実行される
 # **ビルドが走っている間は消さない。** 生成物は `> tmp/build/x` で
 # 0 バイトの出力ファイルを先に作り，QEMU が書き終えて初めて中身が入る。その隙に
 # 消すと出力は消えた inode へ行き，段は「生成物が空」で落ちる。
-# 停止検知の定期実行が走行中のビルドを壊した (2026-09-02)
+# 停止検知の定期実行が実行中のビルドを壊した (2026-09-02)
 if [ -d tmp/build ] && pgrep -f 'tools/build\.sh' > /dev/null 2>&1; then
     say "tools/build.sh が走っているので 0 バイトの生成物は消さない"
 elif [ -d tmp/build ]; then
@@ -131,8 +131,8 @@ fi
 # 名前を変えて破ることになる。文書に載っているものを当てるだけなら，
 # 手でやっていた作業をそのまま自動にしただけである。
 #
-# 当てた後は skip-worktree を立てる。**commit されないことが要点**で，
-# tools/test.sh が HEAD 側を見て見張っている
+# 当てた後は skip-worktree を設定する。**commit されないことが要点**で，
+# tools/test.sh が HEAD 側を検査している
 patch_env() {
     if grep -q 'STONE_ENGINE:-}" = host' tools/env.sh; then
         say "ホスト実行のパッチは既に当たっている"
@@ -184,8 +184,8 @@ if [ "${STONE_ENGINE:-}" = host ]; then
     fi
 else
     if grep -q 'STONE_ENGINE:-}" = host' tools/env.sh 2> /dev/null; then
-        say "作業木の tools/env.sh にホスト実行のパッチが当たっている"
-        say "  (STONE_ENGINE=host でないので触らない。commit しないこと)"
+        say "作業ツリーの tools/env.sh にホスト実行のパッチが当たっている"
+        say "  (STONE_ENGINE=host でないので変更しない。commit しないこと)"
     fi
 fi
 
@@ -197,7 +197,7 @@ if [ "$check_only" -eq 1 ]; then
 fi
 
 if [ "$do_test" -eq 1 ]; then
-    say "検査を走らせる (スタンプの効くところは飛ばす)"
+    say "検査を走らせる (スタンプが有効なところは省略する)"
     exec bash tools/test.sh
 elif [ "$do_build" -eq 1 ]; then
     say "ビルドを続きから走らせる"
