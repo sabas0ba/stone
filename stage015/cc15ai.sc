@@ -1,5 +1,5 @@
 /// @file cc15ai.sc
-/// @brief C コンパイラ 第 15 世代 その 35。cc15ah との差は 3 か所 (関数ポインタを通した構造体の返却・括弧で囲んだメンバの宣言子・大域記号表の容量)。
+/// @brief C コンパイラ 第 15 世代 その 35。cc15ah との差は 4 か所 (関数ポインタを通した構造体の返却・括弧で囲んだメンバの宣言子・大域記号表の容量・構造体の語数)。
 ///
 /// ## 構造体を返す関数を関数へのポインタで呼ぶ
 ///
@@ -22,6 +22,18 @@
 /// 「( declarator )」で，括弧は意味を変えない。memb は名前の位置に `(` を
 /// 見て 1 で止まっていた (reload.h を読む gcc/ の 31 単位)。括弧の中で
 /// 名前と配列の次元を読む。
+///
+/// ## 構造体の語数 (値渡しと返却)
+///
+/// 構造体の値はデータスタックに語単位で積む。nwords は語数を切り捨てて
+/// いたので，大きさが 4 の倍数でない構造体 (struct { char c; } は 1，
+/// char[5] を持つものは 5) の末尾が失われた。返却側は大きさそのものから
+/// 4 ずつ引いて読むので実体の手前から読み，呼んだ側は大きさそのままの
+/// 引取り先へ 1 語ずつ書いて隣の局所変数を壊していた。さらに pusharg は
+/// 1 語の値を値番号のまま積むので，**大きさ 4 の構造体の値渡しでは実体の
+/// アドレスが渡っていた**。語数を切り上げ (nwords / swsize)，構造体は
+/// 1 語でも語を読んで積む。いずれも cc15ah 以前からの不具合で，関数
+/// ポインタを通した返却を足したときに差分試験 (oddstru) で見つけた。
 ///
 /// ## 大域記号表の容量
 ///
@@ -836,7 +848,7 @@ int vreg[131072];           ///< 割付け結果: >= 0 レジスタ番号 / -1 �
 int live[131072];           ///< dce の結果: 1 = 生存 (出力する)
 int iret[131072];           ///< CALL の側情報: 構造体を返す呼出しの引取り先
                           ///< (フレームオフセット。0 = 構造体を返さない)
-int irsz[131072];           ///< CALLI の側情報: 返却される構造体の大きさ (バイト)。
+int irsz[131072];           ///< CALLI の側情報: 返却される構造体の大きさ (バイト。語の倍数へ切り上げ)。
                           ///< 0 = 構造体を返さない。CALL は記号の型から求める (cc15ai)
 
 int labpos[16384];         ///< ラベル番号 -> 出力オフセット。-1 = 未確定 (まだ現れていない)
@@ -2355,11 +2367,22 @@ int isstru(int t) {
 /// @param t 型
 /// @return 構造体なら ceil(大きさ/4)，それ以外は 1
 /// @note 引数の受渡しと，仮引数のフレーム配置の両方でこの数を使う。
+///       **構造体は切り上げる** (cc15ai)。cc15o で構造体の大きさを
+///       自身の整列の倍数へ丸めるようにしてから，大きさは 4 の倍数とは
+///       限らない (struct { char c; } は 1)。cc15ah までは切り捨てていた
+///       ので，大きさ 1 の構造体は 0 語，5 の構造体は 1 語で運ばれ，
+///       値の末尾が失われていた。
 int nwords(int t) {
-  if (isstru(t)) return tsize(t) >> 2;
+  if (isstru(t)) return (tsize(t) + 3) >> 2;
   if (is2w(t)) return 2;       // 下位語・上位語の 2 語 (double も同じ運び方)
   return 1;
 }
+
+/// @brief 構造体がデータスタック上で占めるバイト数 (語の倍数へ切り上げ)。
+/// @note 返却値の積み方・引取り・引取り先の確保はこの大きさで揃える
+///       (cc15ai)。大きさそのままで確保すると，1 語ずつ引き取る複写が
+///       確保した領域の外 (隣の局所変数) へ書く。
+int swsize(int t) { return nwords(t) * 4; }
 
 /// @brief その型が関数型か (ポインタを除去した後の基底で見る)。
 int isfn(int t) {
@@ -3062,9 +3085,12 @@ int argofs(int *aw, int i) {
 /// @return 常に 0
 /// @note 呼ばれた側は後ろから取り出すので，語 0 から積めばフレーム上の
 ///       並びが元の記憶域の並びと一致する (@section strarg)。
-int pusharg(int v, int w, int hi) {
+int pusharg(int v, int w, int hi, int st) {
   int k; int a;
-  if (w == 1) { emit(c_arg, v, 0); return 0; }
+  // st = 1 は構造体。値番号は値ではなく実体のアドレスなので (@section
+  // struval)，1 語の構造体も語を読んで積む。cc15ah までは 1 語なら
+  // アドレスそのものを積んでいた (cc15ai)
+  if (w == 1 && !st) { emit(c_arg, v, 0); return 0; }
   if (hi) {
     // 64 bit。下位語・上位語の順に積むと，呼ばれた側のフレーム上で
     // 記憶域と同じ並び (下位語が低い方) になる
@@ -3204,19 +3230,19 @@ int ecallseq(int e) {
       emit(c_arg, av[i], 0);
     }
     i = 0;
-    while (argofs(aw, i) < k) { pusharg(av[i], aw[i], ah[i]); i = i + 1; }
+    while (argofs(aw, i) < k) { pusharg(av[i], aw[i], ah[i], isstru(at[i])); i = i + 1; }
   } else {
     if (k >= 0 && k != n) exit(5);
     if (k < 0) gused[e] = 1;
     i = 0;
-    while (i < np) { pusharg(av[i], aw[i], ah[i]); i = i + 1; }
+    while (i < np) { pusharg(av[i], aw[i], ah[i], isstru(at[i])); i = i + 1; }
   }
   i = emit(c_call, e, n);
   if (isstru(gty[e])) {
     // 返却された構造体はデータスタックに積まれて来る。フレーム上に
     // 引取り先を取り，呼出し命令の側情報として渡す。実際の複写は
     // 出力段が呼出しの直後に埋め込む (@section strret)
-    iret[i] = frame1(tsize(gty[e]));
+    iret[i] = frame1(swsize(gty[e]));
     ety = gty[e];
     elv = 0;
     earr = 0;
@@ -3377,7 +3403,7 @@ int ecalli(int f, int rt) {
     while (1) {
       a = rvany(assign());
       w = nwords(ety);
-      pusharg(a, w, ehi);
+      pusharg(a, w, ehi, isstru(ety));
       n = n + w;
       if (tok != o_comma) break;
       next();
@@ -3390,8 +3416,8 @@ int ecalli(int f, int rt) {
     // 返却された構造体はデータスタックに積まれて来る。名前つきの呼出しと
     // 同じくフレーム上に引取り先を取る。出力段には記号が無いので，
     // 大きさも側情報として渡す (cc15ai。@section strret)
-    iret[n] = frame1(tsize(rt));
-    irsz[n] = tsize(rt);
+    iret[n] = frame1(swsize(rt));
+    irsz[n] = swsize(rt);
     ehi = 0;
     ety = rt;
     elv = 0;
@@ -5102,7 +5128,9 @@ int stmt() {
         // 語を逆順に積む。最後に積んだ語 0 が x9 の指す位置の 1 つ上に来る
         // (@section strret)。返却型と同じ構造体でなければならない
         if (ety != cretty) exit(5);
-        w = tsize(cretty);
+        // 語の倍数へ切り上げた大きさから積む。大きさそのままから 4 ずつ
+        // 引くと，4 の倍数でない構造体では実体の手前から読む (cc15ai)
+        w = swsize(cretty);
         while (w > 0) {
           w = w - 4;
           emit(c_arg, emit(c_loadw, emit(c_bin + b_add, c, emit(c_const, w, 0)), 0), 0);
@@ -5576,7 +5604,7 @@ int emitins(int i) {
       // 構造体の返却。1 語目の上に語 0 から順に積まれている。
       // x9 を戻す前にフレームの一時領域へ引き取る (@section strret)。
       // 呼出しの値そのものは使われないので x10 を壊してよい
-      k = tsize(gty[b]);
+      k = swsize(gty[b]);
       j = 0;
       while (j < k) {
         outw(iw3(0x2003, 10, 9, 4 + j));
