@@ -41,7 +41,7 @@ cd "$repo_root"
 out=tmp/d17
 mkdir -p "$out"
 
-cc=${STONE_DIFF_CC:-tmp/build/cc15ag.bin}  # 最前線の世代で測る
+cc=${STONE_DIFF_CC:-tmp/build/cc15ai.bin}  # 最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -110,6 +110,8 @@ skip_reason() {
         echo "sizeof p == 4 を主張する。ホストは 64 bit なので語長で必ず違う" ;;
     layout)
         echo "構造体の配置を RV32 の規則で主張する。ホストは x86-64 の規則" ;;
+    manyglob)
+        echo "記号が 8300 個ある。bare のリンカ (stage008 の ld) は 1 オブジェクト 8192 記号まで (翻訳は tests/stage015 が見る)" ;;
     *)  echo "" ;;
     esac
 }
