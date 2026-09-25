@@ -136,6 +136,17 @@ build_stage015b() {
     # 止まっていた (docs/stage017-gcc.md 8.11)。
     # **ビルドチェーンの成果物は変わらない**
     ccgen cc15ag cc15af stage015/cc15ag.sc
+    # 第 34 世代。型の基底番号の範囲 (構造体・void と算術型・配列・関数) が
+    # 重なっていたのを離した。構造体が 298 個を超える単位で unsigned int が
+    # 構造体と判定されていた (docs/stage017-gcc.md 8.12)。
+    # **ビルドチェーンの成果物は変わらない**
+    ccgen cc15ah cc15ag stage015/cc15ah.sc
+    # 第 35 世代。構造体を返す関数を関数へのポインタで呼ぶ形
+    # (targetm などのフックの表が double_int を返す) と，括弧で囲んだ
+    # メンバの宣言子 (enum machine_mode (x [N][M]);。GCC の reload.h) を
+    # 拒んでいた (docs/stage017-gcc.md 8.12)。
+    # **ビルドチェーンの成果物は変わらない**
+    ccgen cc15ai cc15ah stage015/cc15ai.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -161,7 +172,8 @@ do_stage015b() {
         cc15z0.bin cc15z.bin cc15aa0.bin cc15aa.bin \
         cc15ab0.bin cc15ab.bin cc15ac0.bin cc15ac.bin \
         cc15ad0.bin cc15ad.bin cc15ae0.bin cc15ae.bin cc15af0.bin cc15af.bin \
-        cc15ag0.bin cc15ag.bin \
+        cc15ag0.bin cc15ag.bin cc15ah0.bin cc15ah.bin \
+        cc15ai0.bin cc15ai.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
@@ -170,7 +182,7 @@ do_stage015b() {
            stage015/cc15x.sc stage015/cc15y.sc stage015/cc15z.sc \
            stage015/cc15aa.sc stage015/cc15ab.sc stage015/cc15ac.sc \
            stage015/cc15ad.sc stage015/cc15ae.sc stage015/cc15af.sc \
-           stage015/cc15ag.sc \
+           stage015/cc15ag.sc stage015/cc15ah.sc stage015/cc15ai.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
