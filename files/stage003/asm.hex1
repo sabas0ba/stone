@@ -1,0 +1,1033 @@
+# stage003/asm のソース (hex1 言語，docs/stage003-asm.md)。
+# hex1 でビルドする: sh tools/build.sh stage003
+#
+# `#:` で始まるコメントは asm 言語への転記である。全コード行・データ行に付し，
+# 機械抽出したものを asm 自身で処理して自己アセンブル固定点を検証する
+# (tests/stage003/test.sh)。プレーンな `#` コメントは転記対象外の注記である。
+#
+# レジスタ割当は docs/stage003-asm.md 3.6 節を参照。
+
+# ---- init: 定数レジスタの設定とニーモニック表アドレスの取得 ----
+:init                     #: init:
+b7 02 00 10               #: lui x5 0x10000
+37 03 10 00               #: lui x6 0x100
+37 09 0f 80               #: lui x18 0x800f0
+b7 09 10 80               #: lui x19 0x80100
+33 88 09 00               #: add x16 x19 x0
+37 0a 20 80               #: lui x20 0x80200
+:getmt                    #: getmt:
+17 0f 00 00               #: auipc x30 0
+03 2f cf 00               #: lw x30 12(x30)
+$p0_start 6f 00 00 00     #: jal x0 p0_start
+&mtable                   #: word mtable
+
+# ---- pass0: UART から入力バッファへ (コメント内の '.' は終端としない) ----
+:p0_start                 #: p0_start:
+b3 06 0a 00               #: add x13 x20 x0
+13 06 00 00               #: addi x12 x0 0
+:p0_loop                  #: p0_loop:
+03 c5 52 00               #: lbu x10 5(x5)
+13 75 15 00               #: andi x10 x10 1
+!p0_loop 63 00 05 00      #: beq x10 x0 p0_loop
+83 c3 02 00               #: lbu x7 0(x5)
+23 80 76 00               #: sb x7 0(x13)
+93 86 16 00               #: addi x13 x13 1
+!p0_incom 63 10 06 00     #: bne x12 x0 p0_incom
+13 05 30 02               #: addi x10 x0 0x23
+!p0_setcom 63 80 a3 00    #: beq x7 x10 p0_setcom
+13 05 e0 02               #: addi x10 x0 0x2e
+!p0_done 63 80 a3 00      #: beq x7 x10 p0_done
+$p0_loop 6f 00 00 00      #: jal x0 p0_loop
+:p0_incom                 #: p0_incom:
+13 05 a0 00               #: addi x10 x0 0x0a
+!p0_clrcom 63 80 a3 00    #: beq x7 x10 p0_clrcom
+$p0_loop 6f 00 00 00      #: jal x0 p0_loop
+:p0_clrcom                #: p0_clrcom:
+13 06 00 00               #: addi x12 x0 0
+$p0_loop 6f 00 00 00      #: jal x0 p0_loop
+:p0_setcom                #: p0_setcom:
+13 06 10 00               #: addi x12 x0 1
+$p0_loop 6f 00 00 00      #: jal x0 p0_loop
+:p0_done                  #: p0_done:
+93 07 10 00               #: addi x15 x0 1
+
+# ---- scanner: pass1/pass2 共用の走査本体 ----
+:scan_init                #: scan_init:
+b3 06 0a 00               #: add x13 x20 x0
+37 07 00 80               #: lui x14 0x80000
+:scan_loop                #: scan_loop:
+$skipws 6f 0e 00 00       #: jal x28 skipws
+13 05 e0 02               #: addi x10 x0 0x2e
+!s_end 63 80 a3 00        #: beq x7 x10 s_end
+13 05 10 06               #: addi x10 x0 0x61
+!s_chkus 63 c0 a3 00      #: blt x7 x10 s_chkus
+13 05 b0 07               #: addi x10 x0 0x7b
+!s_word 63 c0 a3 00       #: blt x7 x10 s_word
+$err1 6f 00 00 00         #: jal x0 err1
+:s_chkus                  #: s_chkus:
+13 05 f0 05               #: addi x10 x0 0x5f
+!s_word 63 80 a3 00       #: beq x7 x10 s_word
+$err1 6f 00 00 00         #: jal x0 err1
+:s_word                   #: s_word:
+93 86 f6 ff               #: addi x13 x13 -1
+$parse_word ef 00 00 00   #: jal x1 parse_word
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 a0 03               #: addi x10 x0 0x3a
+!s_mn 63 90 a3 00         #: bne x7 x10 s_mn
+# ラベル定義 (':' を消費。pass1 のみ登録)
+93 86 16 00               #: addi x13 x13 1
+13 05 20 00               #: addi x10 x0 2
+!scan_loop 63 80 a7 00    #: beq x15 x10 scan_loop
+$sym_lookup ef 00 00 00   #: jal x1 sym_lookup
+!err4 63 90 08 00         #: bne x17 x0 err4
+03 25 09 00               #: lw x10 0(x18)
+23 20 a8 00               #: sw x10 0(x16)
+03 25 49 00               #: lw x10 4(x18)
+23 22 a8 00               #: sw x10 4(x16)
+03 25 89 00               #: lw x10 8(x18)
+23 24 a8 00               #: sw x10 8(x16)
+03 25 c9 00               #: lw x10 12(x18)
+23 26 a8 00               #: sw x10 12(x16)
+23 28 e8 00               #: sw x14 16(x16)
+13 08 48 01               #: addi x16 x16 20
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+# ニーモニック表の線形探索 (x11: カーソル)
+:s_mn                     #: s_mn:
+b3 05 0f 00               #: add x11 x30 x0
+:mn_loop                  #: mn_loop:
+03 c5 05 00               #: lbu x10 0(x11)
+!err2 63 00 05 00         #: beq x10 x0 err2
+03 a5 05 00               #: lw x10 0(x11)
+83 2b 09 00               #: lw x23 0(x18)
+!mn_next 63 10 75 01      #: bne x10 x23 mn_next
+03 a5 45 00               #: lw x10 4(x11)
+83 2b 49 00               #: lw x23 4(x18)
+!mn_next 63 10 75 01      #: bne x10 x23 mn_next
+03 a5 85 00               #: lw x10 8(x11)
+83 2b 89 00               #: lw x23 8(x18)
+!mn_next 63 10 75 01      #: bne x10 x23 mn_next
+03 a5 c5 00               #: lw x10 12(x11)
+83 2b c9 00               #: lw x23 12(x18)
+!mn_next 63 10 75 01      #: bne x10 x23 mn_next
+83 aa 05 01               #: lw x21 16(x11)
+03 a5 45 01               #: lw x10 20(x11)
+67 00 05 00               #: jalr x0 0(x10)
+:mn_next                  #: mn_next:
+93 85 85 01               #: addi x11 x11 24
+$mn_loop 6f 00 00 00      #: jal x0 mn_loop
+# '.' 終端: pass1 -> pass2 切替え / pass2 -> 正常終了
+:s_end                    #: s_end:
+13 05 20 00               #: addi x10 x0 2
+!exit_ok 63 80 a7 00      #: beq x15 x10 exit_ok
+93 07 20 00               #: addi x15 x0 2
+$scan_init 6f 00 00 00    #: jal x0 scan_init
+
+# ---- skipws: 空白 (SP TAB CR LF ',') とコメントの読み飛ばし。x7 = 次の有意文字 (消費済み) ----
+:skipws                   #: skipws:
+83 c3 06 00               #: lbu x7 0(x13)
+93 86 16 00               #: addi x13 x13 1
+13 05 00 02               #: addi x10 x0 0x20
+!skipws 63 80 a3 00       #: beq x7 x10 skipws
+13 05 90 00               #: addi x10 x0 0x09
+!skipws 63 80 a3 00       #: beq x7 x10 skipws
+13 05 d0 00               #: addi x10 x0 0x0d
+!skipws 63 80 a3 00       #: beq x7 x10 skipws
+13 05 a0 00               #: addi x10 x0 0x0a
+!skipws 63 80 a3 00       #: beq x7 x10 skipws
+13 05 c0 02               #: addi x10 x0 0x2c
+!skipws 63 80 a3 00       #: beq x7 x10 skipws
+13 05 30 02               #: addi x10 x0 0x23
+!sw_com 63 80 a3 00       #: beq x7 x10 sw_com
+67 00 0e 00               #: jalr x0 0(x28)
+:sw_com                   #: sw_com:
+83 c3 06 00               #: lbu x7 0(x13)
+93 86 16 00               #: addi x13 x13 1
+13 05 a0 00               #: addi x10 x0 0x0a
+!skipws 63 80 a3 00       #: beq x7 x10 skipws
+$sw_com 6f 00 00 00       #: jal x0 sw_com
+
+# ---- parse_word: 名前を scratch へ (長さ 1 + 名前 15, 0 詰め)。終端文字は未消費 ----
+:parse_word               #: parse_word:
+23 20 09 00               #: sw x0 0(x18)
+23 22 09 00               #: sw x0 4(x18)
+23 24 09 00               #: sw x0 8(x18)
+23 26 09 00               #: sw x0 12(x18)
+93 05 00 00               #: addi x11 x0 0
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 10 06               #: addi x10 x0 0x61
+!pw_h_us 63 c0 a3 00      #: blt x7 x10 pw_h_us
+13 05 b0 07               #: addi x10 x0 0x7b
+!pw_store 63 c0 a3 00     #: blt x7 x10 pw_store
+$err1 6f 00 00 00         #: jal x0 err1
+:pw_h_us                  #: pw_h_us:
+13 05 f0 05               #: addi x10 x0 0x5f
+!pw_store 63 80 a3 00     #: beq x7 x10 pw_store
+$err1 6f 00 00 00         #: jal x0 err1
+:pw_loop                  #: pw_loop:
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 00 03               #: addi x10 x0 0x30
+!pw_fin 63 c0 a3 00       #: blt x7 x10 pw_fin
+13 05 a0 03               #: addi x10 x0 0x3a
+!pw_store 63 c0 a3 00     #: blt x7 x10 pw_store
+13 05 f0 05               #: addi x10 x0 0x5f
+!pw_store 63 80 a3 00     #: beq x7 x10 pw_store
+13 05 10 06               #: addi x10 x0 0x61
+!pw_fin 63 c0 a3 00       #: blt x7 x10 pw_fin
+13 05 b0 07               #: addi x10 x0 0x7b
+!pw_store 63 c0 a3 00     #: blt x7 x10 pw_store
+:pw_fin                   #: pw_fin:
+23 00 b9 00               #: sb x11 0(x18)
+67 80 00 00               #: jalr x0 0(x1)
+:pw_store                 #: pw_store:
+13 05 f0 00               #: addi x10 x0 15
+!err1 63 80 a5 00         #: beq x11 x10 err1
+33 05 b9 00               #: add x10 x18 x11
+a3 00 75 00               #: sb x7 1(x10)
+93 85 15 00               #: addi x11 x11 1
+93 86 16 00               #: addi x13 x13 1
+$pw_loop 6f 00 00 00      #: jal x0 pw_loop
+
+# ---- sym_lookup: scratch の名前をシンボル表から線形探索。x17 = エントリ or 0 ----
+:sym_lookup               #: sym_lookup:
+b3 88 09 00               #: add x17 x19 x0
+:sl_loop                  #: sl_loop:
+!sl_nf 63 f0 08 01        #: bgeu x17 x16 sl_nf
+03 a5 08 00               #: lw x10 0(x17)
+83 25 09 00               #: lw x11 0(x18)
+!sl_next 63 10 b5 00      #: bne x10 x11 sl_next
+03 a5 48 00               #: lw x10 4(x17)
+83 25 49 00               #: lw x11 4(x18)
+!sl_next 63 10 b5 00      #: bne x10 x11 sl_next
+03 a5 88 00               #: lw x10 8(x17)
+83 25 89 00               #: lw x11 8(x18)
+!sl_next 63 10 b5 00      #: bne x10 x11 sl_next
+03 a5 c8 00               #: lw x10 12(x17)
+83 25 c9 00               #: lw x11 12(x18)
+!sl_next 63 10 b5 00      #: bne x10 x11 sl_next
+67 80 00 00               #: jalr x0 0(x1)
+:sl_nf                    #: sl_nf:
+93 08 00 00               #: addi x17 x0 0
+67 80 00 00               #: jalr x0 0(x1)
+:sl_next                  #: sl_next:
+93 88 48 01               #: addi x17 x17 20
+$sl_loop 6f 00 00 00      #: jal x0 sl_loop
+
+# ---- parse_reg: 'x' + 10 進数 -> x11 (0..31 以外は err7) ----
+:parse_reg                #: parse_reg:
+$skipws 6f 0e 00 00       #: jal x28 skipws
+13 05 80 07               #: addi x10 x0 0x78
+!err7 63 90 a3 00         #: bne x7 x10 err7
+93 05 00 00               #: addi x11 x0 0
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 00 03               #: addi x10 x0 0x30
+!err7 63 c0 a3 00         #: blt x7 x10 err7
+13 05 a0 03               #: addi x10 x0 0x3a
+!err7 63 d0 a3 00         #: bge x7 x10 err7
+:pr_loop                  #: pr_loop:
+93 86 16 00               #: addi x13 x13 1
+13 95 35 00               #: slli x10 x11 3
+93 9b 15 00               #: slli x23 x11 1
+b3 05 75 01               #: add x11 x10 x23
+13 85 03 fd               #: addi x10 x7 -0x30
+b3 85 a5 00               #: add x11 x11 x10
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 00 03               #: addi x10 x0 0x30
+!pr_fin 63 c0 a3 00       #: blt x7 x10 pr_fin
+13 05 a0 03               #: addi x10 x0 0x3a
+!pr_loop 63 c0 a3 00      #: blt x7 x10 pr_loop
+:pr_fin                   #: pr_fin:
+13 05 00 02               #: addi x10 x0 32
+!err7 63 d0 a5 00         #: bge x11 x10 err7
+67 80 00 00               #: jalr x0 0(x1)
+
+# ---- parse_imm: 即値 ('-'? 10 進 | '-'? '0x' 16 進) -> x27 ----
+:parse_imm                #: parse_imm:
+$skipws 6f 0e 00 00       #: jal x28 skipws
+13 06 00 00               #: addi x12 x0 0
+13 05 d0 02               #: addi x10 x0 0x2d
+!pi_start 63 90 a3 00     #: bne x7 x10 pi_start
+13 06 10 00               #: addi x12 x0 1
+$pi_start2 6f 00 00 00    #: jal x0 pi_start2
+:pi_start                 #: pi_start:
+93 86 f6 ff               #: addi x13 x13 -1
+:pi_start2                #: pi_start2:
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 00 03               #: addi x10 x0 0x30
+!pi_dec_init 63 90 a3 00  #: bne x7 x10 pi_dec_init
+83 c3 16 00               #: lbu x7 1(x13)
+13 05 80 07               #: addi x10 x0 0x78
+!pi_dec_init 63 90 a3 00  #: bne x7 x10 pi_dec_init
+93 86 26 00               #: addi x13 x13 2
+93 0d 00 00               #: addi x27 x0 0
+93 05 00 00               #: addi x11 x0 0
+:pi_hex_loop              #: pi_hex_loop:
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 00 03               #: addi x10 x0 0x30
+!pi_hex_end 63 c0 a3 00   #: blt x7 x10 pi_hex_end
+13 05 a0 03               #: addi x10 x0 0x3a
+!pi_hx09 63 c0 a3 00      #: blt x7 x10 pi_hx09
+13 05 10 06               #: addi x10 x0 0x61
+!pi_hex_end 63 c0 a3 00   #: blt x7 x10 pi_hex_end
+13 05 70 06               #: addi x10 x0 0x67
+!pi_hex_end 63 d0 a3 00   #: bge x7 x10 pi_hex_end
+13 85 93 fa               #: addi x10 x7 -0x57
+$pi_hx_acc 6f 00 00 00    #: jal x0 pi_hx_acc
+:pi_hx09                  #: pi_hx09:
+13 85 03 fd               #: addi x10 x7 -0x30
+:pi_hx_acc                #: pi_hx_acc:
+93 9d 4d 00               #: slli x27 x27 4
+b3 8d ad 00               #: add x27 x27 x10
+93 86 16 00               #: addi x13 x13 1
+93 85 15 00               #: addi x11 x11 1
+$pi_hex_loop 6f 00 00 00  #: jal x0 pi_hex_loop
+:pi_hex_end               #: pi_hex_end:
+!err1 63 80 05 00         #: beq x11 x0 err1
+$pi_fin 6f 00 00 00       #: jal x0 pi_fin
+:pi_dec_init              #: pi_dec_init:
+93 0d 00 00               #: addi x27 x0 0
+93 05 00 00               #: addi x11 x0 0
+:pi_dec_loop              #: pi_dec_loop:
+83 c3 06 00               #: lbu x7 0(x13)
+13 05 00 03               #: addi x10 x0 0x30
+!pi_dec_end 63 c0 a3 00   #: blt x7 x10 pi_dec_end
+13 05 a0 03               #: addi x10 x0 0x3a
+!pi_dec_end 63 d0 a3 00   #: bge x7 x10 pi_dec_end
+13 95 3d 00               #: slli x10 x27 3
+93 9b 1d 00               #: slli x23 x27 1
+b3 0d 75 01               #: add x27 x10 x23
+13 85 03 fd               #: addi x10 x7 -0x30
+b3 8d ad 00               #: add x27 x27 x10
+93 86 16 00               #: addi x13 x13 1
+93 85 15 00               #: addi x11 x11 1
+$pi_dec_loop 6f 00 00 00  #: jal x0 pi_dec_loop
+:pi_dec_end               #: pi_dec_end:
+!err1 63 80 05 00         #: beq x11 x0 err1
+:pi_fin                   #: pi_fin:
+!pi_ret 63 00 06 00       #: beq x12 x0 pi_ret
+b3 0d b0 41               #: sub x27 x0 x27
+:pi_ret                   #: pi_ret:
+67 80 00 00               #: jalr x0 0(x1)
+
+# ---- parse_mem: '(' reg ')' -> x11 (x29 link) ----
+:parse_mem                #: parse_mem:
+$skipws 6f 0e 00 00       #: jal x28 skipws
+13 05 80 02               #: addi x10 x0 0x28
+!err1 63 90 a3 00         #: bne x7 x10 err1
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+$skipws 6f 0e 00 00       #: jal x28 skipws
+13 05 90 02               #: addi x10 x0 0x29
+!err1 63 90 a3 00         #: bne x7 x10 err1
+67 80 0e 00               #: jalr x0 0(x29)
+
+# ---- lab_addr: ラベルオペランド。pass2 では解決して x22 = 絶対アドレス (x29 link) ----
+:lab_addr                 #: lab_addr:
+$skipws 6f 0e 00 00       #: jal x28 skipws
+93 86 f6 ff               #: addi x13 x13 -1
+$parse_word ef 00 00 00   #: jal x1 parse_word
+13 05 10 00               #: addi x10 x0 1
+!la_ret 63 80 a7 00       #: beq x15 x10 la_ret
+$sym_lookup ef 00 00 00   #: jal x1 sym_lookup
+!err3 63 80 08 00         #: beq x17 x0 err3
+03 ab 08 01               #: lw x22 16(x17)
+:la_ret                   #: la_ret:
+67 80 0e 00               #: jalr x0 0(x29)
+
+# ---- 即値範囲検査 (x29 link, 範囲外は err6) ----
+:ck_imm12                 #: ck_imm12:
+13 05 10 00               #: addi x10 x0 1
+13 15 b5 00               #: slli x10 x10 11
+33 85 ad 00               #: add x10 x27 x10
+b7 1b 00 00               #: lui x23 0x1
+!err6 63 70 75 01         #: bgeu x10 x23 err6
+67 80 0e 00               #: jalr x0 0(x29)
+:ck_sh                    #: ck_sh:
+13 05 00 02               #: addi x10 x0 32
+!err6 63 f0 ad 00         #: bgeu x27 x10 err6
+67 80 0e 00               #: jalr x0 0(x29)
+:ck_imm20                 #: ck_imm20:
+37 05 10 00               #: lui x10 0x100
+!err6 63 f0 ad 00         #: bgeu x27 x10 err6
+67 80 0e 00               #: jalr x0 0(x29)
+:ck_byte                  #: ck_byte:
+13 85 0d 08               #: addi x10 x27 128
+93 0b 00 18               #: addi x23 x0 384
+!err6 63 70 75 01         #: bgeu x10 x23 err6
+67 80 0e 00               #: jalr x0 0(x29)
+
+# ---- 形式ハンドラ (ニーモニック表から x21 = base word で dispatch される) ----
+:h_r                      #: h_r:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+b3 8c 05 00               #: add x25 x11 x0
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+13 15 7c 00               #: slli x10 x24 7
+b3 ea aa 00               #: or x21 x21 x10
+13 95 fc 00               #: slli x10 x25 15
+b3 ea aa 00               #: or x21 x21 x10
+13 95 45 01               #: slli x10 x11 20
+b3 ea aa 00               #: or x21 x21 x10
+$emit_word ef 00 00 00    #: jal x1 emit_word
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+:h_i                      #: h_i:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+b3 8c 05 00               #: add x25 x11 x0
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+$ck_imm12 ef 0e 00 00     #: jal x29 ck_imm12
+$h_i_pack 6f 00 00 00     #: jal x0 h_i_pack
+:h_sh                     #: h_sh:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+b3 8c 05 00               #: add x25 x11 x0
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+$ck_sh ef 0e 00 00        #: jal x29 ck_sh
+:h_i_pack                 #: h_i_pack:
+13 15 7c 00               #: slli x10 x24 7
+b3 ea aa 00               #: or x21 x21 x10
+13 95 fc 00               #: slli x10 x25 15
+b3 ea aa 00               #: or x21 x21 x10
+13 95 4d 01               #: slli x10 x27 20
+b3 ea aa 00               #: or x21 x21 x10
+$emit_word ef 00 00 00    #: jal x1 emit_word
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+:h_ld                     #: h_ld:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+$ck_imm12 ef 0e 00 00     #: jal x29 ck_imm12
+$parse_mem ef 0e 00 00    #: jal x29 parse_mem
+b3 8c 05 00               #: add x25 x11 x0
+$h_i_pack 6f 00 00 00     #: jal x0 h_i_pack
+:h_s                      #: h_s:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8d 05 00               #: add x26 x11 x0
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+$ck_imm12 ef 0e 00 00     #: jal x29 ck_imm12
+$parse_mem ef 0e 00 00    #: jal x29 parse_mem
+b3 8c 05 00               #: add x25 x11 x0
+13 d5 5d 00               #: srli x10 x27 5
+13 75 f5 07               #: andi x10 x10 0x7f
+13 15 95 01               #: slli x10 x10 25
+b3 ea aa 00               #: or x21 x21 x10
+13 f5 fd 01               #: andi x10 x27 0x1f
+13 15 75 00               #: slli x10 x10 7
+b3 ea aa 00               #: or x21 x21 x10
+13 95 fc 00               #: slli x10 x25 15
+b3 ea aa 00               #: or x21 x21 x10
+13 15 4d 01               #: slli x10 x26 20
+b3 ea aa 00               #: or x21 x21 x10
+$emit_word ef 00 00 00    #: jal x1 emit_word
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+:h_b                      #: h_b:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+13 95 f5 00               #: slli x10 x11 15
+b3 ea aa 00               #: or x21 x21 x10
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+13 95 45 01               #: slli x10 x11 20
+b3 ea aa 00               #: or x21 x21 x10
+:h_b_lab                  #: h_b_lab:
+$lab_addr ef 0e 00 00     #: jal x29 lab_addr
+13 05 10 00               #: addi x10 x0 1
+!h_emit 63 80 a7 00       #: beq x15 x10 h_emit
+33 0b eb 40               #: sub x22 x22 x14
+$b_merge ef 0e 00 00      #: jal x29 b_merge
+$h_emit 6f 00 00 00       #: jal x0 h_emit
+:h_bz                     #: h_bz:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+13 95 f5 00               #: slli x10 x11 15
+b3 ea aa 00               #: or x21 x21 x10
+$h_b_lab 6f 00 00 00      #: jal x0 h_b_lab
+:h_u                      #: h_u:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+$ck_imm20 ef 0e 00 00     #: jal x29 ck_imm20
+13 15 7c 00               #: slli x10 x24 7
+b3 ea aa 00               #: or x21 x21 x10
+13 95 cd 00               #: slli x10 x27 12
+b3 ea aa 00               #: or x21 x21 x10
+$emit_word ef 00 00 00    #: jal x1 emit_word
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+:h_j                      #: h_j:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+13 95 75 00               #: slli x10 x11 7
+b3 ea aa 00               #: or x21 x21 x10
+:h_j_lab                  #: h_j_lab:
+$lab_addr ef 0e 00 00     #: jal x29 lab_addr
+13 05 10 00               #: addi x10 x0 1
+!h_emit 63 80 a7 00       #: beq x15 x10 h_emit
+33 0b eb 40               #: sub x22 x22 x14
+$j_merge ef 0e 00 00      #: jal x29 j_merge
+$h_emit 6f 00 00 00       #: jal x0 h_emit
+:h_jr                     #: h_jr:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+13 95 f5 00               #: slli x10 x11 15
+b3 ea aa 00               #: or x21 x21 x10
+$h_emit 6f 00 00 00       #: jal x0 h_emit
+:h_mv                     #: h_mv:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+b3 8c 05 00               #: add x25 x11 x0
+93 0d 00 00               #: addi x27 x0 0
+$h_i_pack 6f 00 00 00     #: jal x0 h_i_pack
+:h_li                     #: h_li:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+$pair_emit ef 0e 00 00    #: jal x29 pair_emit
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+:h_la                     #: h_la:
+$parse_reg ef 00 00 00    #: jal x1 parse_reg
+33 8c 05 00               #: add x24 x11 x0
+$lab_addr ef 0e 00 00     #: jal x29 lab_addr
+b3 0d 0b 00               #: add x27 x22 x0
+$pair_emit ef 0e 00 00    #: jal x29 pair_emit
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+:h_wd                     #: h_wd:
+$skipws 6f 0e 00 00       #: jal x28 skipws
+93 86 f6 ff               #: addi x13 x13 -1
+13 05 d0 02               #: addi x10 x0 0x2d
+!wd_imm 63 80 a3 00       #: beq x7 x10 wd_imm
+13 05 00 03               #: addi x10 x0 0x30
+!wd_lab 63 c0 a3 00       #: blt x7 x10 wd_lab
+13 05 a0 03               #: addi x10 x0 0x3a
+!wd_imm 63 c0 a3 00       #: blt x7 x10 wd_imm
+:wd_lab                   #: wd_lab:
+$lab_addr ef 0e 00 00     #: jal x29 lab_addr
+13 05 10 00               #: addi x10 x0 1
+!h_emit 63 80 a7 00       #: beq x15 x10 h_emit
+b3 0a 0b 00               #: add x21 x22 x0
+$h_emit 6f 00 00 00       #: jal x0 h_emit
+:wd_imm                   #: wd_imm:
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+b3 8a 0d 00               #: add x21 x27 x0
+:h_emit                   #: h_emit:
+$emit_word ef 00 00 00    #: jal x1 emit_word
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+:h_by                     #: h_by:
+$parse_imm ef 00 00 00    #: jal x1 parse_imm
+$ck_byte ef 0e 00 00      #: jal x29 ck_byte
+13 f4 fd 0f               #: andi x8 x27 0xff
+$emit_byte 6f 0e 00 00    #: jal x28 emit_byte
+$scan_loop 6f 00 00 00    #: jal x0 scan_loop
+
+# ---- pair_emit: lui rd,hi20 + addi rd,rd,lo12 の 2 語出力 (x24=rd, x27=値, x29 link) ----
+:pair_emit                #: pair_emit:
+13 05 10 00               #: addi x10 x0 1
+13 15 b5 00               #: slli x10 x10 11
+33 85 ad 00               #: add x10 x27 x10
+b7 fb ff ff               #: lui x23 0xfffff
+33 75 75 01               #: and x10 x10 x23
+93 0a 70 03               #: addi x21 x0 0x37
+b3 ea aa 00               #: or x21 x21 x10
+13 15 7c 00               #: slli x10 x24 7
+b3 ea aa 00               #: or x21 x21 x10
+$emit_word ef 00 00 00    #: jal x1 emit_word
+93 0a 30 01               #: addi x21 x0 0x13
+13 95 4d 01               #: slli x10 x27 20
+b3 ea aa 00               #: or x21 x21 x10
+13 15 7c 00               #: slli x10 x24 7
+b3 ea aa 00               #: or x21 x21 x10
+13 15 fc 00               #: slli x10 x24 15
+b3 ea aa 00               #: or x21 x21 x10
+$emit_word ef 00 00 00    #: jal x1 emit_word
+67 80 0e 00               #: jalr x0 0(x29)
+
+# ---- b_merge: x22 = rel を B-type 即値として x21 へ合成 (x29 link) ----
+:b_merge                  #: b_merge:
+13 75 1b 00               #: andi x10 x22 1
+!err5 63 10 05 00         #: bne x10 x0 err5
+b7 15 00 00               #: lui x11 0x1
+33 05 bb 00               #: add x10 x22 x11
+b7 2b 00 00               #: lui x23 0x2
+!err5 63 70 75 01         #: bgeu x10 x23 err5
+13 55 cb 00               #: srli x10 x22 12
+13 75 15 00               #: andi x10 x10 1
+13 15 f5 01               #: slli x10 x10 31
+b3 ea aa 00               #: or x21 x21 x10
+13 55 5b 00               #: srli x10 x22 5
+13 75 f5 03               #: andi x10 x10 0x3f
+13 15 95 01               #: slli x10 x10 25
+b3 ea aa 00               #: or x21 x21 x10
+13 55 1b 00               #: srli x10 x22 1
+13 75 f5 00               #: andi x10 x10 0xf
+13 15 85 00               #: slli x10 x10 8
+b3 ea aa 00               #: or x21 x21 x10
+13 55 bb 00               #: srli x10 x22 11
+13 75 15 00               #: andi x10 x10 1
+13 15 75 00               #: slli x10 x10 7
+b3 ea aa 00               #: or x21 x21 x10
+67 80 0e 00               #: jalr x0 0(x29)
+
+# ---- j_merge: x22 = rel を J-type 即値として x21 へ合成 (x29 link) ----
+:j_merge                  #: j_merge:
+13 75 1b 00               #: andi x10 x22 1
+!err5 63 10 05 00         #: bne x10 x0 err5
+b7 05 10 00               #: lui x11 0x100
+33 05 bb 00               #: add x10 x22 x11
+b7 0b 20 00               #: lui x23 0x200
+!err5 63 70 75 01         #: bgeu x10 x23 err5
+13 55 4b 01               #: srli x10 x22 20
+13 75 15 00               #: andi x10 x10 1
+13 15 f5 01               #: slli x10 x10 31
+b3 ea aa 00               #: or x21 x21 x10
+13 55 1b 00               #: srli x10 x22 1
+13 75 f5 3f               #: andi x10 x10 0x3ff
+13 15 55 01               #: slli x10 x10 21
+b3 ea aa 00               #: or x21 x21 x10
+13 55 bb 00               #: srli x10 x22 11
+13 75 15 00               #: andi x10 x10 1
+13 15 45 01               #: slli x10 x10 20
+b3 ea aa 00               #: or x21 x21 x10
+13 55 cb 00               #: srli x10 x22 12
+13 75 f5 0f               #: andi x10 x10 0xff
+13 15 c5 00               #: slli x10 x10 12
+b3 ea aa 00               #: or x21 x21 x10
+67 80 0e 00               #: jalr x0 0(x29)
+
+# ---- emit_word / emit_byte (出力は pass2 のみ。出力アドレスは常に前進) ----
+:emit_word                #: emit_word:
+13 f4 fa 0f               #: andi x8 x21 0xff
+$emit_byte 6f 0e 00 00    #: jal x28 emit_byte
+93 da 8a 00               #: srli x21 x21 8
+13 f4 fa 0f               #: andi x8 x21 0xff
+$emit_byte 6f 0e 00 00    #: jal x28 emit_byte
+93 da 8a 00               #: srli x21 x21 8
+13 f4 fa 0f               #: andi x8 x21 0xff
+$emit_byte 6f 0e 00 00    #: jal x28 emit_byte
+93 da 8a 00               #: srli x21 x21 8
+13 f4 fa 0f               #: andi x8 x21 0xff
+$emit_byte 6f 0e 00 00    #: jal x28 emit_byte
+67 80 00 00               #: jalr x0 0(x1)
+:emit_byte                #: emit_byte:
+13 07 17 00               #: addi x14 x14 1
+13 05 20 00               #: addi x10 x0 2
+!eb_ret 63 90 a7 00       #: bne x15 x10 eb_ret
+:eb_wait                  #: eb_wait:
+03 c5 52 00               #: lbu x10 5(x5)
+13 75 05 02               #: andi x10 x10 0x20
+!eb_wait 63 00 05 00      #: beq x10 x0 eb_wait
+23 80 82 00               #: sb x8 0(x5)
+:eb_ret                   #: eb_ret:
+67 00 0e 00               #: jalr x0 0(x28)
+
+# ---- exit / err: 終了コードの設定と test finisher 書込み ----
+:err1                     #: err1:
+37 36 01 00               #: lui x12 0x13
+13 06 36 33               #: addi x12 x12 0x333
+$do_exit 6f 00 00 00      #: jal x0 do_exit
+:err2                     #: err2:
+37 36 02 00               #: lui x12 0x23
+13 06 36 33               #: addi x12 x12 0x333
+$do_exit 6f 00 00 00      #: jal x0 do_exit
+:err3                     #: err3:
+37 36 03 00               #: lui x12 0x33
+13 06 36 33               #: addi x12 x12 0x333
+$do_exit 6f 00 00 00      #: jal x0 do_exit
+:err4                     #: err4:
+37 36 04 00               #: lui x12 0x43
+13 06 36 33               #: addi x12 x12 0x333
+$do_exit 6f 00 00 00      #: jal x0 do_exit
+:err5                     #: err5:
+37 36 05 00               #: lui x12 0x53
+13 06 36 33               #: addi x12 x12 0x333
+$do_exit 6f 00 00 00      #: jal x0 do_exit
+:err6                     #: err6:
+37 36 06 00               #: lui x12 0x63
+13 06 36 33               #: addi x12 x12 0x333
+$do_exit 6f 00 00 00      #: jal x0 do_exit
+:err7                     #: err7:
+37 36 07 00               #: lui x12 0x73
+13 06 36 33               #: addi x12 x12 0x333
+$do_exit 6f 00 00 00      #: jal x0 do_exit
+:exit_ok                  #: exit_ok:
+37 56 00 00               #: lui x12 0x5
+13 06 56 55               #: addi x12 x12 0x555
+:do_exit                  #: do_exit:
+23 20 c3 00               #: sw x12 0(x6)
+:spin                     #: spin:
+$spin 6f 00 00 00         #: jal x0 spin
+
+# ---- ニーモニック表: 24 バイト/エントリ = 名前 (長さ 1 + 15) + base word + ハンドラ ----
+# R 形式
+:mtable                   #: mtable:
+03 61 64 64               #: word 0x64646103
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 00 00 00               #: word 0x33
+&h_r                      #: word h_r
+03 73 75 62               #: word 0x62757303
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 00 00 40               #: word 0x40000033
+&h_r                      #: word h_r
+03 73 6c 6c               #: word 0x6c6c7303
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 10 00 00               #: word 0x1033
+&h_r                      #: word h_r
+03 73 6c 74               #: word 0x746c7303
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 20 00 00               #: word 0x2033
+&h_r                      #: word h_r
+04 73 6c 74               #: word 0x746c7304
+75 00 00 00               #: word 0x75
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 30 00 00               #: word 0x3033
+&h_r                      #: word h_r
+03 78 6f 72               #: word 0x726f7803
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 40 00 00               #: word 0x4033
+&h_r                      #: word h_r
+03 73 72 6c               #: word 0x6c727303
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 50 00 00               #: word 0x5033
+&h_r                      #: word h_r
+03 73 72 61               #: word 0x61727303
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 50 00 40               #: word 0x40005033
+&h_r                      #: word h_r
+02 6f 72 00               #: word 0x726f02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 60 00 00               #: word 0x6033
+&h_r                      #: word h_r
+03 61 6e 64               #: word 0x646e6103
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 70 00 00               #: word 0x7033
+&h_r                      #: word h_r
+# M 拡張 (R 形式)
+03 6d 75 6c               #: word 0x6c756d03
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 00 00 02               #: word 0x2000033
+&h_r                      #: word h_r
+04 6d 75 6c               #: word 0x6c756d04
+68 00 00 00               #: word 0x68
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 10 00 02               #: word 0x2001033
+&h_r                      #: word h_r
+06 6d 75 6c               #: word 0x6c756d06
+68 73 75 00               #: word 0x757368
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 20 00 02               #: word 0x2002033
+&h_r                      #: word h_r
+05 6d 75 6c               #: word 0x6c756d05
+68 75 00 00               #: word 0x7568
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 30 00 02               #: word 0x2003033
+&h_r                      #: word h_r
+03 64 69 76               #: word 0x76696403
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 40 00 02               #: word 0x2004033
+&h_r                      #: word h_r
+04 64 69 76               #: word 0x76696404
+75 00 00 00               #: word 0x75
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 50 00 02               #: word 0x2005033
+&h_r                      #: word h_r
+03 72 65 6d               #: word 0x6d657203
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 60 00 02               #: word 0x2006033
+&h_r                      #: word h_r
+04 72 65 6d               #: word 0x6d657204
+75 00 00 00               #: word 0x75
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+33 70 00 02               #: word 0x2007033
+&h_r                      #: word h_r
+# I 形式
+04 61 64 64               #: word 0x64646104
+69 00 00 00               #: word 0x69
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 00 00 00               #: word 0x13
+&h_i                      #: word h_i
+04 73 6c 74               #: word 0x746c7304
+69 00 00 00               #: word 0x69
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 20 00 00               #: word 0x2013
+&h_i                      #: word h_i
+05 73 6c 74               #: word 0x746c7305
+69 75 00 00               #: word 0x7569
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 30 00 00               #: word 0x3013
+&h_i                      #: word h_i
+04 78 6f 72               #: word 0x726f7804
+69 00 00 00               #: word 0x69
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 40 00 00               #: word 0x4013
+&h_i                      #: word h_i
+03 6f 72 69               #: word 0x69726f03
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 60 00 00               #: word 0x6013
+&h_i                      #: word h_i
+04 61 6e 64               #: word 0x646e6104
+69 00 00 00               #: word 0x69
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 70 00 00               #: word 0x7013
+&h_i                      #: word h_i
+# シフト (SH 形式)
+04 73 6c 6c               #: word 0x6c6c7304
+69 00 00 00               #: word 0x69
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 10 00 00               #: word 0x1013
+&h_sh                     #: word h_sh
+04 73 72 6c               #: word 0x6c727304
+69 00 00 00               #: word 0x69
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 50 00 00               #: word 0x5013
+&h_sh                     #: word h_sh
+04 73 72 61               #: word 0x61727304
+69 00 00 00               #: word 0x69
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 50 00 40               #: word 0x40005013
+&h_sh                     #: word h_sh
+# ロード + jalr (LD 形式)
+02 6c 62 00               #: word 0x626c02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+03 00 00 00               #: word 0x3
+&h_ld                     #: word h_ld
+02 6c 68 00               #: word 0x686c02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+03 10 00 00               #: word 0x1003
+&h_ld                     #: word h_ld
+02 6c 77 00               #: word 0x776c02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+03 20 00 00               #: word 0x2003
+&h_ld                     #: word h_ld
+03 6c 62 75               #: word 0x75626c03
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+03 40 00 00               #: word 0x4003
+&h_ld                     #: word h_ld
+03 6c 68 75               #: word 0x75686c03
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+03 50 00 00               #: word 0x5003
+&h_ld                     #: word h_ld
+04 6a 61 6c               #: word 0x6c616a04
+72 00 00 00               #: word 0x72
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+67 00 00 00               #: word 0x67
+&h_ld                     #: word h_ld
+# ストア (S 形式)
+02 73 62 00               #: word 0x627302
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+23 00 00 00               #: word 0x23
+&h_s                      #: word h_s
+02 73 68 00               #: word 0x687302
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+23 10 00 00               #: word 0x1023
+&h_s                      #: word h_s
+02 73 77 00               #: word 0x777302
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+23 20 00 00               #: word 0x2023
+&h_s                      #: word h_s
+# 分岐 (B 形式)
+03 62 65 71               #: word 0x71656203
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 00 00 00               #: word 0x63
+&h_b                      #: word h_b
+03 62 6e 65               #: word 0x656e6203
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 10 00 00               #: word 0x1063
+&h_b                      #: word h_b
+03 62 6c 74               #: word 0x746c6203
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 40 00 00               #: word 0x4063
+&h_b                      #: word h_b
+03 62 67 65               #: word 0x65676203
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 50 00 00               #: word 0x5063
+&h_b                      #: word h_b
+04 62 6c 74               #: word 0x746c6204
+75 00 00 00               #: word 0x75
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 60 00 00               #: word 0x6063
+&h_b                      #: word h_b
+04 62 67 65               #: word 0x65676204
+75 00 00 00               #: word 0x75
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 70 00 00               #: word 0x7063
+&h_b                      #: word h_b
+# U / J 形式
+03 6c 75 69               #: word 0x69756c03
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+37 00 00 00               #: word 0x37
+&h_u                      #: word h_u
+05 61 75 69               #: word 0x69756105
+70 63 00 00               #: word 0x6370
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+17 00 00 00               #: word 0x17
+&h_u                      #: word h_u
+03 6a 61 6c               #: word 0x6c616a03
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+6f 00 00 00               #: word 0x6f
+&h_j                      #: word h_j
+# 固定語 (FX)
+05 66 65 6e               #: word 0x6e656605
+63 65 00 00               #: word 0x6563
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+0f 00 f0 0f               #: word 0xff0000f
+&h_emit                   #: word h_emit
+05 65 63 61               #: word 0x61636505
+6c 6c 00 00               #: word 0x6c6c
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+73 00 00 00               #: word 0x73
+&h_emit                   #: word h_emit
+06 65 62 72               #: word 0x72626506
+65 61 6b 00               #: word 0x6b6165
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+73 00 10 00               #: word 0x100073
+&h_emit                   #: word h_emit
+# 疑似命令
+03 6e 6f 70               #: word 0x706f6e03
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 00 00 00               #: word 0x13
+&h_emit                   #: word h_emit
+02 6d 76 00               #: word 0x766d02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+13 00 00 00               #: word 0x13
+&h_mv                     #: word h_mv
+02 6c 69 00               #: word 0x696c02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+&h_li                     #: word h_li
+02 6c 61 00               #: word 0x616c02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+&h_la                     #: word h_la
+01 6a 00 00               #: word 0x6a01
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+6f 00 00 00               #: word 0x6f
+&h_j_lab                  #: word h_j_lab
+04 63 61 6c               #: word 0x6c616304
+6c 00 00 00               #: word 0x6c
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+ef 00 00 00               #: word 0xef
+&h_j_lab                  #: word h_j_lab
+02 6a 72 00               #: word 0x726a02
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+67 00 00 00               #: word 0x67
+&h_jr                     #: word h_jr
+03 72 65 74               #: word 0x74657203
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+67 80 00 00               #: word 0x8067
+&h_emit                   #: word h_emit
+04 62 65 71               #: word 0x71656204
+7a 00 00 00               #: word 0x7a
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 00 00 00               #: word 0x63
+&h_bz                     #: word h_bz
+04 62 6e 65               #: word 0x656e6204
+7a 00 00 00               #: word 0x7a
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+63 10 00 00               #: word 0x1063
+&h_bz                     #: word h_bz
+# ディレクティブ
+04 77 6f 72               #: word 0x726f7704
+64 00 00 00               #: word 0x64
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+&h_wd                     #: word h_wd
+04 62 79 74               #: word 0x74796204
+65 00 00 00               #: word 0x65
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+00 00 00 00               #: word 0
+&h_by                     #: word h_by
+# 表の終端 (長さ 0)
+00 00 00 00               #: word 0
+
+# 転記の終端 (自己アセンブル用)
+#: .
+.
