@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15ae.bin  # 台帳は最前線の世代で測る
+cc=tmp/build/cc15ag.bin  # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -65,7 +65,8 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15y.bin:stage015/cc15y.md cc15z.bin:stage015/cc15z.md \
         cc15aa.bin:stage015/cc15aa.md cc15ab.bin:stage015/cc15ab.md \
         cc15ac.bin:stage015/cc15ac.md cc15ad.bin:stage015/cc15ad.md \
-        cc15ae.bin:stage015/cc15ae.md \
+        cc15ae.bin:stage015/cc15ae.md cc15af.bin:stage015/cc15af.md \
+        cc15ag.bin:stage015/cc15ag.md \
         pp15.bin:stage015/pp15.md \
         pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md \
         ld17.bin:stage015/ld17.md; do
@@ -74,7 +75,7 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15ae と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15ag と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
@@ -218,6 +219,24 @@ fp15aegen() {
 stable_cmp "fixpoint(cc15ae)" fp15aegen tmp/build/cc15ae.bin
 report $? "fixpoint: cc15ae が自分自身を再生成する (B2 == B3)"
 
+fp15afgen() {
+    { cat stage015/cc15af.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15af.bin > tmp/s15/b3af.o \
+        && { cat tmp/s15/b3af.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15af)" fp15afgen tmp/build/cc15af.bin
+report $? "fixpoint: cc15af が自分自身を再生成する (B2 == B3)"
+
+fp15aggen() {
+    { cat stage015/cc15ag.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15ag.bin > tmp/s15/b3ag.o \
+        && { cat tmp/s15/b3ag.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15ag)" fp15aggen tmp/build/cc15ag.bin
+report $? "fixpoint: cc15ag が自分自身を再生成する (B2 == B3)"
+
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
 for n in sh ed mk; do
@@ -227,7 +246,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15ae が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15ag が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 # **ld17 は診断だけを足したもの。** 正常系の経路が 1 ビットも変わっていない
 # ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる

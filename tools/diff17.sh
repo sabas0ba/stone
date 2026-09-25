@@ -41,7 +41,7 @@ cd "$repo_root"
 out=tmp/d17
 mkdir -p "$out"
 
-cc=${STONE_DIFF_CC:-tmp/build/cc15ae.bin}  # 最前線の世代で測る
+cc=${STONE_DIFF_CC:-tmp/build/cc15ag.bin}  # 最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -59,16 +59,18 @@ osld=tmp/build/ld17.bin           # 落ちたら名前を言うリンカ (5.1)
 # 測る libc の世代。**前の世代を測り直せるようにしてある** ——
 # 「直す前は何が違っていたか」を後から再現できないと，直した記録が
 # 我々の主張だけになる (STONE_DIFF_LIBCGEN=21 で第 21 世代)
-osgen=${STONE_DIFF_LIBCGEN:-24}
+osgen=${STONE_DIFF_LIBCGEN:-25}
 # **カーネルは libc の世代が決める。** 第 24 世代の stat は statat2
 # (502) を呼ぶので，それを持たないカーネルでは動かない
-# (docs/stage017-gcc.md 8.5)。
+# (docs/stage017-gcc.md 8.5)。第 25 世代の times は times (153) を
+# 呼ぶので kernel27 が要る (8.9)。
 #
-# kernel26 は kernel25 の複製なので **sfs4 を読み，イメージを 0xa000_0000 に
-# 置く** —— 詰めるツールもメモリの大きさも kernel24 とは違う
+# kernel26 / kernel27 は kernel25 の複製なので **sfs4 を読み，イメージを
+# 0xa000_0000 に置く** —— 詰めるツールもメモリの大きさも kernel24 とは違う
 # (tests/stage017/test.sh の runroot4 と同じ値である)
 if [ "$osgen" -ge 24 ]; then
     oskern=tmp/build/kernel26.bin
+    [ "$osgen" -ge 25 ] && oskern=tmp/build/kernel27.bin
     ospack=sfs4
     ossfsa=536870912              # 0xa000_0000 - 0x8000_0000
     osram=1073741824              # 1 GiB
@@ -265,10 +267,16 @@ os_missing() {
 os_build() {
     _n=$1
     _src=$(os_src "$_n")
+    # sys/times.h は第 25 世代から。前の世代を測り直すときは無い
+    _times=""
+    [ -f "$LIBC/include/sys/times.h" ] \
+        && _times="sys/times.h=$LIBC/include/sys/times.h"
+    # shellcheck disable=SC2086
     sh tools/bundle.sh "$LIBC"/include/*.h \
         "sys/time.h=$LIBC/include/sys/time.h" \
         "sys/stat.h=$LIBC/include/sys/stat.h" \
         "sys/types.h=$LIBC/include/sys/types.h" \
+        $_times \
         "$_src" 2> /dev/null \
         | sh tools/env.sh qemu "$ospp" > "$osout/$_n.i" 2> /dev/null || return 4
     sh tools/env.sh qemu "$cc" < "$osout/$_n.i" > "$osout/$_n.o" 2> /dev/null \
