@@ -321,7 +321,7 @@ pp16=tmp/build/pp16.bin
 # 8.10 / 8.11)。STONE_GCC17_PPOS で
 # 前の世代を測り直せる
 ppos=${STONE_GCC17_PPOS:-tmp/build/pp20}
-cc15=tmp/build/cc15aj.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+cc15=tmp/build/cc15ak.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 

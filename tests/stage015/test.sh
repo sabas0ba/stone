@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15aj.bin  # 台帳は最前線の世代で測る
+cc=tmp/build/cc15ak.bin  # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -68,6 +68,7 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15ae.bin:stage015/cc15ae.md cc15af.bin:stage015/cc15af.md \
         cc15ag.bin:stage015/cc15ag.md cc15ah.bin:stage015/cc15ah.md \
         cc15ai.bin:stage015/cc15ai.md cc15aj.bin:stage015/cc15aj.md \
+        cc15ak.bin:stage015/cc15ak.md \
         pp15.bin:stage015/pp15.md \
         pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md \
         ld17.bin:stage015/ld17.md; do
@@ -76,7 +77,7 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15aj と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15ak と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
@@ -265,6 +266,15 @@ fp15ajgen() {
 stable_cmp "fixpoint(cc15aj)" fp15ajgen tmp/build/cc15aj.bin
 report $? "fixpoint: cc15aj が自分自身を再生成する (B2 == B3)"
 
+fp15akgen() {
+    { cat stage015/cc15ak.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15ak.bin > tmp/s15/b3ak.o \
+        && { cat tmp/s15/b3ak.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15ak)" fp15akgen tmp/build/cc15ak.bin
+report $? "fixpoint: cc15ak が自分自身を再生成する (B2 == B3)"
+
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
 for n in sh ed mk; do
@@ -274,7 +284,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15aj が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15ak が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 # 大域記号を 8300 個持つ単位 (cc15ai で表を 8192 個から広げた。
 # docs/stage017-gcc.md 8.12)。bare のリンカ (stage008 の ld) は 1 オブジェクト
@@ -284,7 +294,7 @@ sh tools/bundle.sh tests/stage015/probe/manyglob.c 2> /dev/null \
     | sh tools/env.sh qemu "$pp" > tmp/s15/manyglob.i 2> /dev/null \
     && sh tools/env.sh qemu "$cc" < tmp/s15/manyglob.i > tmp/s15/manyglob.o 2> /dev/null \
     && [ -s tmp/s15/manyglob.o ]
-report $? "build: 大域記号を 8300 個持つ単位を cc15aj が訳せる (manyglob)"
+report $? "build: 大域記号を 8300 個持つ単位を cc15ak が訳せる (manyglob)"
 
 # **ld17 は診断だけを足したもの。** 正常系の経路が 1 ビットも変わっていない
 # ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる
