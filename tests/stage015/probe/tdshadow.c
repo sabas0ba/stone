@@ -30,6 +30,7 @@ typedef struct partition_def { int n; } *partition;
 typedef struct edge_def { int w; } *edge;
 typedef int count;
 typedef int (add_f) (int, int);
+typedef double real;
 
 static int add2(int a, int b) { return a + b; }
 
@@ -69,6 +70,14 @@ static int scope(void) {
   return r;
 }
 
+/* 名前の有効範囲は宣言子を読み終えた直後から始まる (C89 6.1.2.1)。
+ * 配列の大きさの sizeof (real) はまだ typedef 名 real (double) を指す */
+static int declscope(void) {
+  int real[sizeof(real)];
+  real[7] = 3;
+  return (int)sizeof(real) + real[7];
+}
+
 /* 内側の typedef が外側の同じ名前の typedef を隠す */
 static int inner(void) {
   typedef char count;
@@ -94,6 +103,7 @@ int main(void) {
   pn(pp->n);
   pn(fp(40, 2));
   pn((int)sizeof(count));
+  pn(declscope());
   nl();
   return 0;
 }

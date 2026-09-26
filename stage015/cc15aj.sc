@@ -712,6 +712,11 @@ int tdfn;
 /// 局所表 (lcnt) は関数を抜けても次の関数まで残るので，file scope で
 /// 局所名を引かないための印である (cc15aj)
 int infn;
+/// 宣言子を読んでいる途中の局所名の添字 + 1 (0 = 無し)。名前の有効範囲は
+/// 宣言子を読み終えた直後から始まる (C89 6.1.2.1) ので，`int T[sizeof (T)];`
+/// の大きさの中ではまだ typedef 名 T が見えていなければならない。plocal は
+/// pdims より先に lnew するので，その間はこの局所名を遮蔽に数えない (cc15aj)
+int ldcur;
 
 // enum 定数も「名前 -> 値」の対応にすぎない。型は int である。
 // タグ (enum e { ... } の e) は型の区別を生まないので表に持たない。
@@ -2227,7 +2232,7 @@ int ecfind() {
 /// @note 識別子が typedef 名かどうかで宣言か式かが決まる。C の構文が
 ///       文脈自由でない有名な箇所で，字句だけでは判断できない。
 int istype() {
-  int k;
+  int k; int i;
   if (tok == k_int || tok == k_char || tok == k_void) return 1;
   if (tok == k_unsigned || tok == k_signed || tok == k_short || tok == k_long) return 1;
   if (tok == k_float || tok == k_double) return 1;
@@ -2241,7 +2246,14 @@ int istype() {
     // GCC は typedef 名 partition / edge と同じ名前の仮引数・局所変数を
     // 使う。関数の中の typedef (k >= tdfn) と局所名の前後関係は持って
     // いないので，そちらは従来どおり型名と見る
-    if (infn && k < tdfn && lfind() >= 0) return 0;
+    if (infn && k < tdfn) {
+      // 宣言子を読んでいる途中の局所名 (ldcur) は数えない
+      i = lcnt - 1;
+      while (i >= 0) {
+        if (i != ldcur - 1 && streq(lname + i * 64, tname)) return 0;
+        i = i - 1;
+      }
+    }
     return 1;
   }
   return 0;
@@ -6465,7 +6477,9 @@ int plocal() {
     if (!fp) {
       next();
       if (pn) unparen2();
+      ldcur = i + 1;              // 宣言子が終わるまで遮蔽に数えない
       b = pdims(b);
+      ldcur = 0;
     }
     if (isstru(b) && ssize[b - 2] == 0) exit(5);
     lty[i] = b;
