@@ -1072,16 +1072,25 @@ units() {
     baseline_iso
     # **再開** (STONE_GCC17_RESUME=1)。gcc/ の全単位は数時間かかり，途中で
     # 止まると最初からやり直しになる。測る基準 (表の頭と cc の SHA-256) が
-    # 前回と同じときだけ，書き終えた .row (タブを含む 1 行) を残して欠けた
-    # 単位だけを通す。基準が違えば別の cc の結果が混ざるので，すべて消す
+    # 前回と同じときだけ，書き終えた .row を残して欠けた単位だけを通す。
+    # 書き終えた .row は「単位名 タブ 状態」の 1 行だけである。unit は名前を
+    # 先に書くので，途中で止まった .row は名前だけで終わっている。
+    # 基準が違えば別の cc の結果が混ざるので，すべて消す
     stamp="$work/out/units.stamp"
     cur=$( { cat "$m"; sha256sum < "$cc15"; } )
     todo="$work/units.todo"
     if [ "${STONE_GCC17_RESUME:-0}" = 1 ] && [ -f "$stamp" ] \
         && [ "$(cat "$stamp")" = "$cur" ]; then
         while IFS= read -r lu; do
-            grep -q "$(printf '\t')" "$work/out/${lu%%/*}.${lu#*/}.row" 2> /dev/null \
-                || echo "$lu"
+            r="$work/out/${lu%%/*}.${lu#*/}.row"
+            # 1 行だけで，1 列目がこの単位名，2 列目が状態 (ok / gap …)。
+            # 打ち切られた単位は「単位名 タブ」だけで終わっている
+            if [ -f "$r" ] && awk -F '\t' -v u="$lu" \
+                'NR == 1 && $1 == u && $2 ~ /^[a-z]+$/ { ok = 1 }
+                 END { exit !(ok && NR == 1) }' "$r"; then
+                continue
+            fi
+            echo "$lu"
         done < "$work/units.list" > "$todo"
         echo "再開: 残り $(wc -l < "$todo" | tr -d ' ') 単位"
     else
