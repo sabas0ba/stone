@@ -60,7 +60,10 @@ static long long ctab[] = {
   (unsigned long long)0xffffffffU,      /* 符号なしの 32 bit は零拡張 */
   0xffffffffU + 1LL,
   0x80000000 + 0LL,
-  (long long)-1 + 0x80000000U
+  (long long)-1 + 0x80000000U,
+  (70 >= 64) ? ~(unsigned long long)0 : ((unsigned long long)1 << 70) - 1,
+  (40 >= 64) ? ~(unsigned long long)0 : ((unsigned long long)1 << 40) - 1,
+  1 ? -1 : 0LL                           /* insn-modes.c の形と 32 bit 側の拡張 */
 };
 static unsigned long long uwide = 0xfffffff0U;
 static int cmp[] = {
@@ -110,7 +113,7 @@ int main(void) {
   pn(b.lo = 35);
   pn(b.hi = -1);
   nl();
-  for (i = 0; i < 14; i++) pl(ctab[i]);
+  for (i = 0; i < 17; i++) pl(ctab[i]);
   pl((long long)uwide);
   nl();
   for (i = 0; i < 8; i++) pn(cmp[i]);

@@ -33,6 +33,8 @@ static int apply2 (int f (int), int v) { return (*f) (v) + 2; }
 
 static int rows[3][4] = { { 1, 2, 3, 4 }, { 5, 6, 7, 8 }, { 9, 10, 11, 12 } };
 static int sumrow (int (*r)[4], int i) { return r[i][0] + r[i][3]; }
+typedef int row4[4];
+static int sumrow2 (row4 (*r), int i) { return (*r)[i] * 10; }   /* caller-save.c の形 */
 
 struct pt { int x; int y; };
 struct box { int tag; struct pt lo; struct pt hi; int k[2]; };
@@ -62,6 +64,7 @@ int main(void) {
   p = p + 2;
   pn((*p)[3]);
   pn(sumrow(rows, 1));
+  pn(sumrow2(&rows[2], 3));
   nl();
   pn(enums());
   pn(GREEN);

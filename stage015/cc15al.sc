@@ -8,7 +8,8 @@
 ///   初期化子つきの extern       `extern int x = 1;` (C89 6.7.2 で定義になる)
 ///   関数型の typedef による宣言 `typedef int fn_t (int); fn_t f;` を関数の宣言とする
 ///   関数型の仮引数              `int f (int g (int))` を関数へのポインタとする
-///   配列へのポインタ            `int (*p)[4]` (局所・仮引数・メンバ)
+///   配列へのポインタ            `int (*p)[4]`。括弧だけの `T (*p)` も受ける
+///   64 bit の ?:                片方の分岐が 64 bit なら結果も 64 bit
 ///   関数の中の enum             ブロックを出ると列挙定数を捨て，外側を隠す
 ///   大きさを省いた局所配列      `int a[] = { 1, 2, 3 };` / `char s[] = "ab";`
 ///   局所の構造体の入れ子初期化  `struct s x = { 1, { 2, 3 }, { 4, 5 } };`
@@ -30,7 +31,7 @@
 ///
 /// ## 容量
 ///
-///   ソース 16 MiB / 局所記号 65536 / goto ラベル 4096 / 引数 256 /
+///   ソース 16 MiB / 出力 16 MiB (上限の検査を足した) / 局所記号 65536 / goto ラベル 4096 / 引数 256 /
 ///   構造体の複写 1 MiB (1024 バイトを超えれば語の複写を IR のループにする) /
 ///   文字列リテラルの器 1 MiB / 文字列の後埋め 16384 / 大域初期化子の文字列 32768
 ///
@@ -703,7 +704,7 @@
 // 記号表はいずれも並行配列で，同じ添字 e が 1 エントリを指す。
 
 char src[16777216];        ///< 入力ソース全体 (EOT 0x04 まで読み込む。cc15al で 4 MiB から広げた)
-char ob[4194304];          ///< 生成バイナリ。後埋め (backpatch) するため一旦ここに溜める
+char ob[16777216];         ///< 生成バイナリ。後埋め (backpatch) するため一旦ここに溜める (cc15al で 4 MiB から広げた)
 
 char gname[2097152];       ///< 大域記号の名前 (64 バイト固定スロット x 32768。cc15ai で 8192 から広げた)
 int gkind[32768];          ///< 種別: 0 = 変数, 1 = 関数
@@ -1985,6 +1986,10 @@ int outw(int w) {
 /// @param b 書き込むバイト
 /// @return 常に 0
 int outbyte(int b) {
+  // **上限の検査が無かった。** GCC の insn-attrtab は 4 MiB を超える
+  // コードを生み，溢れた分が後ろに置いた大域記号の名前 (gname) を壊して
+  // 「宣言済みの名前が見つからない」(2) に化けていた (cc15al)
+  if (outp > 16777215) exit(6);
   ob[outp] = b;
   outp = outp + 1;
   return 0;
@@ -2789,6 +2794,11 @@ int fnpdec1(int b, int anon) {
     t = pdims(b);
     return t + (np + 1) * 65536;
   }
+  if (tok != o_lp && nd == 0) {
+    // 括弧で囲んだだけのポインタの宣言子 (`HARD_REG_SET (*to_save)`。
+    // GCC の caller-save.c)。括弧は意味を変えない (C89 6.5.4。cc15al)
+    return b + (np + 1) * 65536;
+  }
   if (tok != o_lp) exit(1);
   next();
   n = 1;
@@ -3012,8 +3022,10 @@ int cbin64(int t, int a, int al, int ah, int au, int b, int bl, int bh, int bu) 
   else if (t == o_sub) r = x - y;
   else if (t == o_mul) r = x * y;
   else if (t == o_shl || t == o_shr) {
-    if (y < 0 || y > 63) exit(5);
-    if (t == o_shl) r = x << (int)y;
+    // 桁数が 0..63 の外は C の未定義動作である。GCC の insn-modes.c は
+    // 選ばれない ?: の分岐に `1ULL << 128` を書くので，拒まずに 0 を置く
+    if (y < 0 || y > 63) r = 0;
+    else if (t == o_shl) r = x << (int)y;
     else r = x >> (int)y;
   } else if (t == o_div || t == o_mod) {
     if (ah != 0 || bh != 0) exit(5);
@@ -3087,17 +3099,34 @@ int cbin(int minp) {
 
 /// @brief 定数式: 条件 (?:) まで。宣言子の大きさを読む入口。
 int ccond() {
-  int v; int a; int b; int ua;
+  int v; int a; int b; int ua; int al; int ah;
   v = cbin(1);
   if (tok == o_que) {
+    if (ccll) v = v | cchi;
     next();
     a = ccond();
-    if (ccll) exit(5);      // ?: の分岐の 64 bit リテラルは選ばれなかった側の
     ua = ccu;
+    al = ccll;
+    ah = cchi;
     if (tok != o_col) exit(1);
     next();
     b = ccond();
-    if (ccll) exit(5);      // 上位語が残ってしまうので，どちらの分岐でも拒む
+    // 片方が 64 bit なら結果も 64 bit である。選ばれた側の上位語を置き，
+    // 32 bit の側は符号の有無に従って広げる (GCC の insn-modes.c の
+    // `x >= 64 ? ~(unsigned long long)0 : ((unsigned long long)1 << x) - 1`。
+    // cc15ak までは 5 で拒んでいた。cc15al)
+    if (al || ccll) {
+      if (v) {
+        if (!al) { if (a < 0 && !ua) ah = 0 - 1; else ah = 0; }
+        cchi = ah;
+        b = a;
+      } else if (!ccll) {
+        if (b < 0 && !ccu) cchi = 0 - 1; else cchi = 0;
+      }
+      ccll = 1;
+      ccu = 0;
+      return b;
+    }
     ccu = ua || ccu;        // 両方の分岐に通常の算術変換がかかる (cc15al)
     if (v) return a;
     return b;
