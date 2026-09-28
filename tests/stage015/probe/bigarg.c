@@ -56,13 +56,22 @@ static long long ctab[] = {
   (0x7fffffffLL + 1) * 2,
   (1LL << 36) >> 4,
   1000000LL * 1000000LL,
-  -1LL * 3
+  -1LL * 3,
+  (unsigned long long)0xffffffffU,      /* 符号なしの 32 bit は零拡張 */
+  0xffffffffU + 1LL,
+  0x80000000 + 0LL,
+  (long long)-1 + 0x80000000U
 };
+static unsigned long long uwide = 0xfffffff0U;
 static int cmp[] = {
   (1LL << 40) > (1LL << 39),
   (1LL << 32) == 0x100000000LL,
   !(1LL << 40),
-  (1LL << 40) != 0
+  (1LL << 40) != 0,
+  0x80000000U > 1,                       /* 32 bit の符号なしの比較 */
+  0xffffffffU / 2 == 0x7fffffffU,
+  (0x80000000U >> 4) == 0x08000000,
+  -1 < 0U
 };
 
 int main(void) {
@@ -97,10 +106,14 @@ int main(void) {
   pn(++b.hi);
   pn(b.hi--);
   pn(b.hi);
+  pn(b.hi = 70000);                      /* 代入式の値は幅で切った値 */
+  pn(b.lo = 35);
+  pn(b.hi = -1);
   nl();
-  for (i = 0; i < 10; i++) pl(ctab[i]);
+  for (i = 0; i < 14; i++) pl(ctab[i]);
+  pl((long long)uwide);
   nl();
-  for (i = 0; i < 4; i++) pn(cmp[i]);
+  for (i = 0; i < 8; i++) pn(cmp[i]);
   nl();
   return 0;
 }

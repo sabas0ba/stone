@@ -20,6 +20,13 @@
 ///
 /// C89 6.5.2.1 では処理系定義である。GCC に合わせて符号つきで読む
 /// (bfget)。enum の型は符号なしのまま。cc15ak までは一律に符号なしだった。
+/// 代入式の値も幅で切った値にする (C89 6.3.16)。
+///
+/// ## 定数式の符号なしの値
+///
+/// 評価器は直前の 32 bit の値が符号なしかを ccu に持ち，64 bit へ広げる
+/// ときに零拡張する (0xffffffffU + 1LL)。32 bit どうしの比較・/・%・>> も
+/// 片方が符号なしなら符号なしで計算する (C89 6.2.1.5)。
 ///
 /// ## 容量
 ///
@@ -812,6 +819,7 @@ int tvalfp;               ///< 数値リテラルの種類 (0 = 整数, 1 = doub
                           ///  1 のとき tvalhi:tval が binary64，2 のとき tval が binary32
 int cchi;                 ///< 定数式評価器: 直前の値の上位語 (ccll のときだけ有効)
 int ccll;                 ///< 定数式評価器: 1 = 直前の値は 64 bit リテラル由来
+int ccu;                  ///< 定数式評価器: 1 = 直前の 32 bit の値は符号なし (cc15al)
 int tvalll;               ///< 1 = そのリテラルは 64 bit (LL 接尾辞または 32 bit に収まらない)
 int tvalu;                ///< 1 = そのリテラルの型は符号なし
                           ///< (U 接尾辞，または符号つきに収まらない値)
@@ -2888,6 +2896,7 @@ int cuna() {
     if (ccll) v = v | cchi;
     ccll = 0;
     cchi = 0;
+    ccu = 0;
     return !v;
   }
   if (tok == o_tilde) {
@@ -2901,6 +2910,7 @@ int cuna() {
     v = sizeofn();
     cchi = 0;
     ccll = 0;
+    ccu = 0;
     return v;
   }
   if (tok == o_amp) {
@@ -2910,12 +2920,14 @@ int cuna() {
     v = cofs();
     cchi = 0;
     ccll = 0;
+    ccu = 0;
     return v;
   }
   if (tok == t_num) {
     v = tval;
     cchi = tvalhi;
     ccll = tvalll;
+    ccu = tvalu && !tvalll;
     next();
     return v;
   }
@@ -2924,6 +2936,7 @@ int cuna() {
     if (v < 0) exit(2);
     next();
     ccll = 0;
+    ccu = 0;
     return ecval[v];
   }
   if (tok == o_lp) {
@@ -2935,12 +2948,15 @@ int cuna() {
       next();
       v = cuna();
       if (isll(t)) {
-        // 64 bit への変換は 32 bit の値を符号拡張する
-        if (!ccll) { if (v < 0) cchi = 0 - 1; else cchi = 0; }
+        // 64 bit への変換は 32 bit の符号つきの値を符号拡張し，符号なしの
+        // 値を零拡張する
+        if (!ccll) { if (v < 0 && !ccu) cchi = 0 - 1; else cchi = 0; }
         ccll = 1;
+        ccu = 0;
         return v;
       }
       if (ccll) { ccll = 0; cchi = 0; }
+      ccu = t == t_uint || (t >> 16) != 0;
       if ((t >> 16) == 0) {
         if (t == 0) v = v & 255;
         else if (t == t_schar) { v = v & 255; if (v & 128) v = v - 256; }
@@ -2962,14 +2978,17 @@ int cuna() {
 /// @param t 演算子
 /// @param a 左の下位語 @param al 左が 64 bit か @param ah 左の上位語
 /// @param b 右の下位語 @param bl 右が 64 bit か @param bh 右の上位語
+/// @param au 左が 32 bit の符号なしか @param bu 右が 32 bit の符号なしか
 /// @return 結果の下位語。上位語は cchi，64 bit かどうかは ccll に置く
-/// @note 32 bit の側は符号拡張する。符号の有無を追っていないので，
+/// @note 32 bit の側は符号つきなら符号拡張，符号なしなら零拡張する。
+///       64 bit の側は符号の有無を追っていないので，
 ///       >> と大小比較と / % は両方が負でないときだけ畳み込み，他は 5 で拒む。
 ///       / % は評価器自身が 64 bit の除算を使えないので 32 bit に収まる値に限る。
-int cbin64(int t, int a, int al, int ah, int b, int bl, int bh) {
+int cbin64(int t, int a, int al, int ah, int au, int b, int bl, int bh, int bu) {
   long long x; long long y; long long r;
-  if (!al) { if (a < 0) ah = 0 - 1; else ah = 0; }
-  if (!bl) { if (b < 0) bh = 0 - 1; else bh = 0; }
+  if (!al) { if (a < 0 && !au) ah = 0 - 1; else ah = 0; }
+  if (!bl) { if (b < 0 && !bu) bh = 0 - 1; else bh = 0; }
+  ccu = 0;
   x = ((long long)ah << 32) | (long long)(unsigned)a;
   y = ((long long)bh << 32) | (long long)(unsigned)b;
   ccll = 0;
@@ -3010,7 +3029,7 @@ int cbin64(int t, int a, int al, int ah, int b, int bl, int bh) {
 /// @brief 定数式: 二項演算。優先順位のぼり方式で 1 関数に収める。
 /// @param minp この呼出しで結合してよい最小の優先順位
 int cbin(int minp) {
-  int v; int w; int t; int p; int lft; int lhi;
+  int v; int w; int t; int p; int lft; int lhi; int lu; int u;
   v = cuna();
   while (cprec(tok) >= minp && cprec(tok) > 0) {
     t = tok;
@@ -3018,11 +3037,15 @@ int cbin(int minp) {
     next();
     lft = ccll;
     lhi = cchi;
+    lu = ccu;
     w = cbin(p + 1);
     if (lft || ccll) {
-      v = cbin64(t, v, lft, lhi, w, ccll, cchi);
+      v = cbin64(t, v, lft, lhi, lu, w, ccll, cchi, ccu);
       continue;
     }
+    // 片方が符号なしなら両方を符号なしとして比べ・割る (C89 6.2.1.5)。
+    // シフトの結果の型は左の型である (cc15al)
+    u = lu || ccu;
     if (t == o_oo) { if (v || w) v = 1; else v = 0; }
     if (t == o_aa) { if (v && w) v = 1; else v = 0; }
     if (t == o_or) v = v | w;
@@ -3030,33 +3053,52 @@ int cbin(int minp) {
     if (t == o_amp) v = v & w;
     if (t == o_eq) v = v == w;
     if (t == o_ne) v = v != w;
-    if (t == o_lt) v = v < w;
-    if (t == o_gt) v = v > w;
-    if (t == o_le) v = v <= w;
-    if (t == o_ge) v = v >= w;
+    if (u) {
+      if (t == o_lt) v = (unsigned)v < (unsigned)w;
+      if (t == o_gt) v = (unsigned)v > (unsigned)w;
+      if (t == o_le) v = (unsigned)v <= (unsigned)w;
+      if (t == o_ge) v = (unsigned)v >= (unsigned)w;
+    } else {
+      if (t == o_lt) v = v < w;
+      if (t == o_gt) v = v > w;
+      if (t == o_le) v = v <= w;
+      if (t == o_ge) v = v >= w;
+    }
     if (t == o_shl) v = v << w;
-    if (t == o_shr) v = v >> w;
+    if (t == o_shr) { if (lu) v = (int)((unsigned)v >> w); else v = v >> w; }
     if (t == o_add) v = v + w;
     if (t == o_sub) v = v - w;
     if (t == o_mul) v = v * w;
-    if (t == o_div) { if (w == 0) exit(1); v = v / w; }
-    if (t == o_mod) { if (w == 0) exit(1); v = v % w; }
+    if (t == o_div) {
+      if (w == 0) exit(1);
+      if (u) v = (int)((unsigned)v / (unsigned)w); else v = v / w;
+    }
+    if (t == o_mod) {
+      if (w == 0) exit(1);
+      if (u) v = (int)((unsigned)v % (unsigned)w); else v = v % w;
+    }
+    if (t == o_shl || t == o_shr) ccu = lu;
+    else if (t == o_oo || t == o_aa || t == o_eq || t == o_ne || t == o_lt
+             || t == o_gt || t == o_le || t == o_ge) ccu = 0;
+    else ccu = u;
   }
   return v;
 }
 
 /// @brief 定数式: 条件 (?:) まで。宣言子の大きさを読む入口。
 int ccond() {
-  int v; int a; int b;
+  int v; int a; int b; int ua;
   v = cbin(1);
   if (tok == o_que) {
     next();
     a = ccond();
     if (ccll) exit(5);      // ?: の分岐の 64 bit リテラルは選ばれなかった側の
+    ua = ccu;
     if (tok != o_col) exit(1);
     next();
     b = ccond();
     if (ccll) exit(5);      // 上位語が残ってしまうので，どちらの分岐でも拒む
+    ccu = ua || ccu;        // 両方の分岐に通常の算術変換がかかる (cc15al)
     if (v) return a;
     return b;
   }
@@ -4919,7 +4961,7 @@ int assign() {
     // 代入を許すと捨てられる領域へ書くだけになるので拒否する
     if (elv == 0 || erv) exit(5);
     t = ety;
-    bw = ebfw; bo = ebfo;
+    bw = ebfw; bo = ebfo; bs = ebfs;
     ebfw = 0;
     elv = 0;
     next();
@@ -4937,6 +4979,10 @@ int assign() {
       cur = emit(c_bin + b_and, cur,
                  emit(c_const, (msk << bo) ^ 0xffffffff, 0));
       res = emit(c_bin + b_and, r, emit(c_const, msk, 0));
+      // 代入式の値は書いた後の左辺の値である (C89 6.3.16)。幅で切った値を
+      // 返し，符号つきのフィールドは符号を広げる。cc15ak までは右辺を
+      // そのまま返していた (cc15al)
+      r = bfget(res, 0, bw, bs);
       if (bo) res = emit(c_bin + b_sll, res, emit(c_const, bo, 0));
       res = emit(c_bin + b_or, cur, res);
       emit(c_stw, v, res);
@@ -7386,7 +7432,7 @@ int ginit1(int t) {
       else if (w == 8) {
         outw4(v);
         if (ccll) outw4(cchi);
-        else if (v < 0) outw4(0 - 1);
+        else if (v < 0 && !ccu) outw4(0 - 1);
         else outw4(0);
       }
       else outw4(v);
@@ -7431,11 +7477,12 @@ int ginit1(int t) {
   else if (w == 2) { outbyte(v & 255); outbyte((v >> 8) & 255); }
   else if (w == 8) {
     // 64 bit は下位語・上位語の順で 2 語 (little endian)。64 bit の
-    // リテラルは評価器が cchi に上位語を残す。32 bit の値は符号拡張する
-    // (unsigned long long x = -1 が全 bit 1 になる C の変換規則)
+    // リテラルは評価器が cchi に上位語を残す。32 bit の符号つきの値は
+    // 符号拡張する (unsigned long long x = -1 が全 bit 1 になる C の変換
+    // 規則)。符号なしの値 (0xffffffffU) は零拡張する (cc15al)
     outw4(v);
     if (ccll) outw4(cchi);
-    else if (v < 0) outw4(0 - 1);
+    else if (v < 0 && !ccu) outw4(0 - 1);
     else outw4(0);
   }
   else outw4(v);
