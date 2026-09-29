@@ -1346,17 +1346,7 @@ ppcase() {
     sh tools/bundle.sh "$r/s/c.c" > "$r/$1.b"
 }
 
-ppcase a <<'CEOF'
-#define GCC_VERSION (__GNUC__ * 1000 + __GNUC_MINOR__)
-#define HAVE_DESIGNATED_INITIALIZERS \
-  (!defined(__cplusplus) \
-   && ((GCC_VERSION >= 2007) || (__STDC_VERSION__ >= 199901L)))
-#if HAVE_DESIGNATED_INITIALIZERS
-a_yes
-#else
-a_no
-#endif
-CEOF
+ppcase a < tests/stage017/fixtures/gcc47-defined.c
 
 ppcase b <<'CEOF'
 #define M (defined(NOT_DEFINED_ANYWHERE))

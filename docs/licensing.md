@@ -87,12 +87,24 @@ Stage 14 でビルド対象とした bzip2 / zlib の原本は
 このパッチでは同じ条件にする。TinyCC の原本は `docs/external/` に
 取得され、リポジトリ内に丸ごと複製されない。
 
-## 継続調査
+## 共通コード・テスト・Web
 
-- 検証用ファイル、共通スクリプト、Web 表示用ファイル、ルートのデータは
-  個別の出自確認を続ける。未確認のファイルに SPDX を一括適用しない。
-- Stage 12 以降の Linux 互換 syscall 番号と errno の定数は、参照した
-  インターフェースとソース表現の流用を分けて確認する。
-- `docs/external/` の zlib、bzip2、TinyCC、GCC などは取得する入力であり、
-  リポジトリには格納しない。各上流のライセンスを stone のソースへ
-  自動的に引き継がせない。
+| 対象 | 出自と判定 | SPDX |
+|---|---|---|
+| `.gitattributes`, `.gitignore`, `.github/`, `env/`, `tools/`, `verify/`, `web/` | stone の設定、構築・検証用実装、デモ。`verify/audit/` は仕様から独立に書き起こした実装 | `Apache-2.0` |
+| `docs/SOURCES.md`, `docs/artifacts.md`, `docs/dev-notes.md`, `docs/roadmap.md` | stone の記録・設計文書 | `Apache-2.0` |
+| `tests/hostshim/`, `tests/lib.sh`, `tests/stage003/`–`tests/stage017/`（下記の例外を除く） | stone の検証入力、期待値、測定結果、テストハーネス。外部ライブラリをリンク・実行する検証用 C ファイルも stone 側で記述 | `Apache-2.0` |
+| `tests/stage017/fixtures/gcc47-defined.c` | GCC 4.7.4 の `gcc/system.h` のマクロを基にした検証入力。元の引用を `test.sh` から分離 | `GPL-3.0-or-later` |
+| `tests/stage016/refbin/`, `td/`, `a.o`, `b.o`, `c.o` | stone の比較用スクリプトとテスト用データ。`.o` は名前に反して短い文字データ | `Apache-2.0` |
+
+テスト入力や期待値は、コメントを加えると検証結果が変わる場合がある。
+これらには `.license` sidecar を使い、元の内容を維持する。
+`tests/stage017/fixtures/gcc47-defined.c` は GCC の `gcc/system.h` に
+由来するため、上流の著作権表示を sidecar に保存し、上流の
+`COPYING3` を `LICENSES/GPL-3.0-or-later.txt` に収める。
+ほかのテスト入力にある外部プログラムの関数名・定数・出力統計は、
+外部ソース本文の転載と区別している。
+
+CI の `license` ジョブは追跡ファイルの SPDX 表記または sidecar を検査する。
+外部資料の実体は `docs/external/` (git ignore) へ取得し、リポジトリには
+格納しない。外部資料のライセンスを stone のソースへ自動的に引き継がせない。
