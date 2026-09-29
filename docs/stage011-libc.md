@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Stage 11: フリースタンディング libc 設計文書
 
 ## 1. 目的と位置づけ
