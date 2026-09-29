@@ -15,6 +15,9 @@ while IFS= read -r -d '' path; do
     case "$path" in
         stage015/tcc/riscv32.patch) expected=LGPL-2.1-only ;;
         tests/stage017/fixtures/gcc47-defined.c) expected=GPL-3.0-or-later ;;
+        docs/stage015-riscv32.md|docs/stage015-tcc.md|docs/stage017-cc.md|stage015/cc15n.md|stage015/cc15o.md)
+            expected='Apache-2.0 AND LGPL-2.1-only' ;;
+        docs/stage017-gcc.md|stage017/pp18.md) expected='Apache-2.0 AND GPL-3.0-or-later' ;;
         *) expected=Apache-2.0 ;;
     esac
 
