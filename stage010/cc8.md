@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc8 説明文書
 
 cc8 は C コンパイラである。第 3 部の 1 の [cc7.sc](cc7.sc) を出発点に，

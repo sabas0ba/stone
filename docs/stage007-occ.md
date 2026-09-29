@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Stage 7: occ (現代化) 設計文書
 
 ## 1. 目的と位置づけ

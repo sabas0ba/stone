@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /// @file cc.sc
 /// @brief ELF リロケータブルオブジェクトを出力する C サブセットコンパイラ。
 ///

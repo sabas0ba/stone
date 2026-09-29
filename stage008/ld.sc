@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /// @file ld.sc
 /// @brief ELF リロケータブルオブジェクトを結合して実行イメージを作るリンカ。
 ///

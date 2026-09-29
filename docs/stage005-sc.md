@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Stage 5: sc 設計文書 (言語仕様書を兼ねる)
 
 ## 1. 目的と位置づけ

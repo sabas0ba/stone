@@ -30,9 +30,28 @@ Stage 2 は `stage002/hex1.md` と導入コミット
 `6f4b35e`。現行内容と導入時の差分を照合した。これらのファイルに
 Linux や glibc のソースを取り込んだ記録は見つからなかった。
 
+## 確認済み: Stage 3–10 の実装と文書
+
+| 世代 | 対象ファイル | 出自 | SPDX |
+|---|---|---|---|
+| 3 | `stage003/asm.hex1`, `stage003/asm.md`, `docs/stage003-asm.md` | stone のアセンブラと設計 | `Apache-2.0` |
+| 4 | `stage004/sol.s`, `stage004/sol.md`, `docs/stage004-sol.md` | stone の小言語処理系と設計 | `Apache-2.0` |
+| 5 | `stage005/sc.sol`, `stage005/sc.md`, `docs/stage005-sc.md` | stone の C サブセット処理系と設計 | `Apache-2.0` |
+| 6 | `stage006/scc.sc`, `stage006/scc.md`, `docs/stage006-scc.md` | Stage 5 を stone の言語で再記述 | `Apache-2.0` |
+| 7 | `stage007/occ.sc`, `stage007/occ.md`, `docs/stage007-occ.md` | Stage 6 を発展させた stone の処理系 | `Apache-2.0` |
+| 8 | `stage008/cc.sc`, `stage008/cc.md`, `stage008/ld.sc`, `stage008/ld.md`, `docs/stage008-elf-ld.md` | stone の ELF オブジェクト生成器とリンカ | `Apache-2.0` |
+| 9 | `stage009/pp.sc`, `stage009/pp.md`, `docs/stage009-pp.md` | stone のプリプロセッサ | `Apache-2.0` |
+| 10 | `stage010/cc.sc`, `stage010/cc.md`, `stage010/cc2.sc`–`cc12.sc`, 対応する `cc2.md`–`cc12.md`, `stage010/include/stdarg.h`, `docs/stage010-c89.md` | stone の C89 処理系の改訂系列、ABI 用ヘッダと設計 | `Apache-2.0` |
+
+根拠: Stage 3–9 の導入コミットは順に `d001ee5`, `5a383ff`,
+`0a62ae7`, `879f4dd`, `8438424`, `bee801a`, `753bf69`。
+Stage 10 は `9f3b5bc` を起点とする改訂系列である。各世代の文書、
+ソース冒頭の説明、導入履歴を確認した。ELF 形式や C89 の仕様への準拠は、
+その実装コードを既存処理系から引用したことを意味しない。
+
 ## 継続調査
 
-- Stage 3 以降の実装、検証用ファイル、共通スクリプト、Web 表示用ファイルは
+- Stage 11 以降の実装、検証用ファイル、共通スクリプト、Web 表示用ファイルは
   個別の出自確認を続ける。未確認のファイルに SPDX を一括適用しない。
 - Stage 12 以降の Linux 互換 syscall 番号と errno の定数は、参照した
   インターフェースとソース表現の流用を分けて確認する。

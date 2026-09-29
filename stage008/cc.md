@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc 説明文書
 
 cc は C サブセット言語 sc のソースを **ELF リロケータブルオブジェクト** へ

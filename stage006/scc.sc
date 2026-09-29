@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /// @file scc.sc
 /// @brief sc コンパイラの sc 言語による再記述 (セルフホスト)。
 ///
