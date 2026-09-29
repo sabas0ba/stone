@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # tests/stage000/hello.bin のソース表現 (hex0 言語)。
 # hex0 の交差検証入力: hex0(本ファイル) の出力が hello.bin とビット一致すること。
 # listing の詳細は tests/stage000/hello.md を参照。

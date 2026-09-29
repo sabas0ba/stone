@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # hex1 ラベル機能のテストケース (hex1 言語)。
 # 後方参照 (!loop)，前方参照 ($end, &msg) を含む。
 # 実行すると UART へ 'A'..'E' を出力し，終了コード 0 で停止する。
