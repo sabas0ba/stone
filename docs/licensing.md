@@ -71,16 +71,28 @@ Stage 14 でビルド対象とした bzip2 / zlib の原本は
 `docs/external/` に取得する。ここで対象とした `stage014/` のファイルは
 それらの未改変原本ではなく、自作処理系とその周辺である。
 
+## 確認済み: Stage 15–17
+
+| 世代 | 対象ファイル | 出自と判定 | SPDX |
+|---|---|---|---|
+| 15 | `stage015/` 以下の 115 ファイルのうち `tcc/riscv32.patch` を除く 114 ファイル、`docs/stage015-riscv32.md`, `docs/stage015-tcc.md` | stone の C 処理系、OS、実行環境と文書 | `Apache-2.0` |
+| 15 | `stage015/tcc/riscv32.patch` | TinyCC の固定 commit `2ba12e83b3599ca8f5d50c179fe5138fe956f0c9` への差分。上流コードの文脈行を含む | `LGPL-2.1-only` |
+| 16 | `stage016/` 以下の全 91 ファイル、`docs/stage016-os.md` | Stage 15 の stone 実装を継承した OS と libc の改訂 | `Apache-2.0` |
+| 17 | `stage017/` 以下の全 251 ファイル、`docs/stage017-cc.md`, `docs/stage017-gcc.md` | stone の処理系、libc、シェル、sed・awk 等の自作実装と測定記録 | `Apache-2.0` |
+
+各ファイルには `.license` sidecar を付け、入力の内容は変更しない。
+`riscv32.patch` はパッチ前の TinyCC のコードも含むため、上流の
+`COPYING` (LGPL 2.1) を保守的に `LGPL-2.1-only` と記録し、
+全文を `LICENSES/LGPL-2.1-only.txt` に置く。追加した RV32 実装も
+このパッチでは同じ条件にする。TinyCC の原本は `docs/external/` に
+取得され、リポジトリ内に丸ごと複製されない。
+
 ## 継続調査
 
-- Stage 15 以降の実装、検証用ファイル、共通スクリプト、Web 表示用ファイルは
+- 検証用ファイル、共通スクリプト、Web 表示用ファイル、ルートのデータは
   個別の出自確認を続ける。未確認のファイルに SPDX を一括適用しない。
 - Stage 12 以降の Linux 互換 syscall 番号と errno の定数は、参照した
   インターフェースとソース表現の流用を分けて確認する。
-- `stage015/tcc/riscv32.patch` は固定された TinyCC 上流ソースへの
-  差分であり、上流の文脈行も含む。TinyCC の `README` と `COPYING` は
-  LGPL 2.1 を示す。パッチ全体の識別子と上流の著作権表示は、
-  対象ファイルの条項を確認してから付ける。
 - `docs/external/` の zlib、bzip2、TinyCC、GCC などは取得する入力であり、
   リポジトリには格納しない。各上流のライセンスを stone のソースへ
   自動的に引き継がせない。
