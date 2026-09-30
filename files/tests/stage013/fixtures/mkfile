@@ -1,0 +1,48 @@
+# ゲスト内で処理系を作り直す記述 (docs/stage013-tools.md 9.4)
+#
+#   mk -f mkfile all
+#
+# pp / cc / ld はどれも指令を含まない .sc なので，束ねを通さず eot で
+# EOT を足して cc へ渡す。各段で 2 通りにリンクする。
+#   'F' … 記録済みの成果物と同じ形 (ベアメタル用。SHA-256 を照合できる)
+#   'E' … OS の上で動く形 (次の段が使う)
+#
+# **どの世代の cc で作るかは鎖が決めている** (docs/plan.md 2.1)。
+# pp は前段である Stage 8 の cc で作る。ここを取り違えると，動く物は
+# 出来ても記録どおりの成果物にはならない。
+
+all: pp cc ld fix
+	echo rebuilt
+
+# 鎖の境目 (docs/stage013-tools.md 9.1)。cc8.o はゲスト内では作れないので
+# 持ち込む (作るには occ が要り，occ はベアメタルでしか動かない)。
+# 'E' でリンクすれば Stage 8 の cc が OS の上で動く
+cc8:
+	ldin E cc8.o > cc8.eld
+	ld < cc8.eld > cc8
+
+pp: cc8
+	eot < pp.sc > pp.in
+	cc8 < pp.in > pp.o
+	ldin F pp.o > pp.fld
+	ld < pp.fld > pp.bin
+
+cc:
+	eot < cc12.sc > cc12.in
+	cc < cc12.in > cc12.o
+	ldin F cc12.o > cc12.fld
+	ld < cc12.fld > cc10l.bin
+	ldin E cc12.o > cc12.eld
+	ld < cc12.eld > ccA
+
+ld:
+	eot < ld13.sc > ld13.in
+	cc < ld13.in > ld13.o
+	ldin F ld13.o > ld13.fld
+	ld < ld13.fld > ld13.bin
+
+# 固定点: 作り直した cc (ccA) で，もう一度 cc を作り直す。
+# ccB.o が cc12.o と一致すれば，ゲスト内の作り直しが不動点に達している
+# (docs/stage006-scc.md 1.2 の作法を OS の上で行う)
+fix: cc
+	ccA < cc12.in > ccB.o

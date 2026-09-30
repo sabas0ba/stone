@@ -1,0 +1,13 @@
+# tests/stage000/hello.bin のソース表現 (hex0 言語)。
+# hex0 の交差検証入力: hex0(本ファイル) の出力が hello.bin とビット一致すること。
+# listing の詳細は tests/stage000/hello.md を参照。
+
+b7 03 00 10   # 80000000: lui  x7, 0x10000   ; x7 = UART base
+13 04 10 04   # 80000004: addi x8, x0, 0x41  ; x8 = 'A'
+23 80 83 00   # 80000008: sb   x8, 0(x7)     ; UART THR へ書込み
+b7 02 10 00   # 8000000c: lui  x5, 0x100     ; x5 = test finisher
+37 53 00 00   # 80000010: lui  x6, 0x5
+13 03 53 55   # 80000014: addi x6, x6, 0x555 ; x6 = 0x5555 (FINISHER_PASS)
+23 a0 62 00   # 80000018: sw   x6, 0(x5)     ; 書込み時点で QEMU が終了する
+
+.

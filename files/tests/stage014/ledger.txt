@@ -1,0 +1,60 @@
+# 適合台帳 (docs/stage014-external.md 4 章)
+#
+# 現実の C が使う書き方に対して，本処理系が今どう振る舞うかを記録する。
+# 1 行 1 検査で，欄は「名前 状態 期待 説明」。
+#
+#   ok    <出力>   コンパイル・実行が通り，標準出力がその文字列になる
+#   gap   <cc の終了コード>  cc がその終了コードで拒む (未対応。拒むこと自体は正しい)
+#   bad   <出力>   通ってしまうが結果が誤っている (**いちばん悪い状態**)
+#
+# 状態が変わったらこの表を直す。表と実測が食い違えば検査は失敗する。
+# 「直したのに表がそのまま」も「壊したのに気づかない」も等しく捕まえる。
+
+# ---- 通るもの (現実の C でよく使われ，本処理系が既に扱えるもの) ----
+escapes      ok   AB\t\\\n
+gotoout      ok   4\n
+ppcond       ok   7ok\n
+ppelif       ok   c\n
+ptrdiff      ok   abc\n
+sizeofx      ok   784\n
+strtab       ok   hiyo\n
+switchfall   ok   139\n
+unionuse     ok   10\n
+vaforward    ok   6\n
+unsignedops  ok   abcd\n
+multidim     ok   6\n
+cvquals      ok   3\n
+multidecl    ok   7\n
+strcat_lit   ok   abcd\n
+usuffix      ok   1y\n
+registerkw   ok   3\n
+nestinit     ok   23\n
+staticloc    ok   3\n
+fptab        ok   3\n
+selfref      ok   5\n
+kr_func      ok   7\n
+bitfield     ok   59\n
+hexcase      ok   abc\n
+bitnot       ok   abc\n
+dimexpr      ok   abc0\n
+bigframe     ok   0\n
+ptrconst     ok   a0\n
+castinit     ok   ad7\n
+staticinit   ok   5\n
+caseconst    ok   123\n
+opaqueptr    ok   52\n
+
+# ---- 未対応 (cc が拒む) ----
+floatv       gap  2    浮動小数点 (float / double)
+emptyproto   gap  5    引数リストが空の宣言へ実引数を渡す
+llwidth      gap  2    long long (64 bit の型は無い。通さず拒む)
+
+# ---- 通るが誤り (**いちばん悪い状態**) ----
+#
+# Stage 14 から今まで 0 件だった。**1 件入った。**
+#
+# llwidth は第 2 部で「通るが 32 bit」から「拒む」へ移してここから
+# 消した (docs/stage014-external.md 5.2)。今度のものは移せない ——
+# 正しい C であり，拒むのが正しい振舞いではないからである。
+# 直すには cc の世代が要る (docs/stage017-cc.md 24.4)。
+staticstr    bad  n\n  関数内 static の初期化子が文字列へのポインタ (docs/stage017-cc.md 24 章)

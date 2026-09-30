@@ -1,0 +1,24 @@
+# hex1 ラベル機能のテストケース (hex1 言語)。
+# 後方参照 (!loop)，前方参照 ($end, &msg) を含む。
+# 実行すると UART へ 'A'..'E' を出力し，終了コード 0 で停止する。
+# 期待バイナリはオフセット手計算版 labels-expected.hex (hex0 言語) から生成する。
+
+:start
+b7 02 00 10   # 00: lui  x5, 0x10000     ; UART base
+13 04 10 04   # 04: addi x8, x0, 0x41    ; 'A'
+93 04 60 04   # 08: addi x9, x0, 0x46    ; 'F'
+:loop
+23 80 82 00   # 0c: sb   x8, 0(x5)       ; 1 文字出力
+13 04 14 00   # 10: addi x8, x8, 1
+!loop 63 40 94 00   # 14: blt x8, x9, loop  (template: imm=0 の blt x8,x9)
+$end  6f 00 00 00   # 18: jal x0, end       (template: imm=0 の jal x0)
+&msg                # 1c: msg の絶対アドレス (LE 4 バイト)
+:msg
+de ad be ef         # 20: データ 4 バイト
+:end
+37 56 00 00   # 24: lui  x12, 0x5
+13 06 56 55   # 28: addi x12, x12, 0x555 ; FINISHER_PASS
+37 03 10 00   # 2c: lui  x6, 0x100
+23 20 c3 00   # 30: sw   x12, 0(x6)      ; 終了
+6f 00 00 00   # 34: jal  x0, 0 (自己ループ，到達しない)
+.
