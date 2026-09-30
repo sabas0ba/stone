@@ -156,6 +156,10 @@ build_stage015b() {
     # 右辺・switch の制御式・?: の片方に使う形 (docs/stage017-gcc.md 8.13)。
     # **ビルドチェーンの成果物は変わらない**
     ccgen cc15ak cc15aj stage015/cc15ak.sc
+    # 第 38 世代。gcc/ に残った書き方 (静的初期化子のアドレス定数・関数型の
+    # 仮引数・64 bit の定数式など) と容量をまとめて受ける
+    # (docs/stage017-gcc.md 8.14)。**ビルドチェーンの成果物は変わらない**
+    ccgen cc15al cc15ak stage015/cc15al.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -183,7 +187,7 @@ do_stage015b() {
         cc15ad0.bin cc15ad.bin cc15ae0.bin cc15ae.bin cc15af0.bin cc15af.bin \
         cc15ag0.bin cc15ag.bin cc15ah0.bin cc15ah.bin \
         cc15ai0.bin cc15ai.bin cc15aj0.bin cc15aj.bin \
-        cc15ak0.bin cc15ak.bin \
+        cc15ak0.bin cc15ak.bin cc15al0.bin cc15al.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
@@ -193,7 +197,7 @@ do_stage015b() {
            stage015/cc15aa.sc stage015/cc15ab.sc stage015/cc15ac.sc \
            stage015/cc15ad.sc stage015/cc15ae.sc stage015/cc15af.sc \
            stage015/cc15ag.sc stage015/cc15ah.sc stage015/cc15ai.sc \
-           stage015/cc15aj.sc stage015/cc15ak.sc \
+           stage015/cc15aj.sc stage015/cc15ak.sc stage015/cc15al.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh

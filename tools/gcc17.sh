@@ -324,7 +324,7 @@ pp16=tmp/build/pp16.bin
 # 8.10 / 8.11)。STONE_GCC17_PPOS で
 # 前の世代を測り直せる
 ppos=${STONE_GCC17_PPOS:-tmp/build/pp20}
-cc15=tmp/build/cc15ak.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+cc15=tmp/build/cc15al.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
@@ -596,8 +596,13 @@ configure_gcc() {
     echo "generated ($g/gcc)"
 
     # 2-a. 我々の libc と RV32 の語長で configure し直した auto-host.h
+    # **関数の有無も我々の libc に合わせる。** configure の関数の検査は host の
+    # libc へリンクして決まるので，我々の libc に無い getrlimit / setrlimit /
+    # mmap も「有る」になり，ggc-common が struct rlimit を使う形になっていた
+    # (docs/stage017-gcc.md 8.11 の decl)。無いものは cache 変数で無いと言う
     rv32='ac_cv_sizeof_short=2 ac_cv_sizeof_int=4 ac_cv_sizeof_long=4
-          ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4 ac_cv_c_bigendian=no'
+          ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4 ac_cv_c_bigendian=no
+          ac_cv_func_getrlimit=no ac_cv_func_setrlimit=no ac_cv_func_mmap=no'
     # shellcheck disable=SC2086
     (cd "$work/gcc-cfg" && env CPPFLAGS="-nostdinc -isystem $ours" $rv32 \
         CFLAGS='-O0 -w' sh "$src/gcc/configure" --srcdir="$src/gcc" \
@@ -675,7 +680,13 @@ unit_list() {
                     "print-$v" 2> /dev/null
             done
             echo main.o
-        } | tr -s ' ' '\n' | grep -E '\.o$' | sed 's|\.o$||' | awk '!seen[$0]++'
+        } | tr -s ' ' '\n' | grep -E '\.o$' | sed 's|\.o$||' \
+            | sed 's|^host-linux$|host-default|' | awk '!seen[$0]++'
+        # **host hook は host-default にする。** config.host は host の 3 つ組が
+        # *-linux* のとき host-linux.o を選ぶ。configure は build と同じ
+        # host (x86_64-linux) で走らせているのでそちらになるが，cc1 が走るのは
+        # stone の OS で，Linux ではない。host-linux は PCH のために mmap を
+        # 呼ぶ。知らない host に config.host が選ぶ既定は host-default.o である
         ;;
     esac
 }
