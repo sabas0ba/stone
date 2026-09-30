@@ -31,7 +31,8 @@
 ///
 /// ## 容量
 ///
-///   ソース 16 MiB / 出力 16 MiB (上限の検査を足した) / 局所記号 65536 / goto ラベル 4096 / 引数 256 /
+///   ソース 16 MiB / 出力 16 MiB (上限の検査を足した) / 列挙定数 32768 (ハッシュで引く) /
+///   局所記号 65536 / goto ラベル 4096 / 引数 256 /
 ///   構造体の複写 1 MiB (1024 バイトを超えれば語の複写を IR のループにする) /
 ///   文字列リテラルの器 1 MiB / 文字列の後埋め 16384 / 大域初期化子の文字列 32768
 ///
@@ -771,8 +772,10 @@ int ldcur;
 
 // enum 定数も「名前 -> 値」の対応にすぎない。型は int である。
 // タグ (enum e { ... } の e) は型の区別を生まないので表に持たない。
-char ecname[524288];        ///< 列挙定数の名前 (64 バイト x 8192)
-int ecval[8192];           ///< その値
+char ecname[2097152];       ///< 列挙定数の名前 (64 バイト x 32768。cc15al で 8192 から広げた)
+int ecval[32768];          ///< その値
+int echtab[65536];         ///< 名前のハッシュ -> 最も新しい列挙定数の番号 + 1 (0 = 無し)
+int ecnext[32768];         ///< 同じハッシュの 1 つ古い列挙定数の番号 + 1
 int eccnt;                ///< 登録数
 /// 現在の複文で登録し始めた位置 (typedef の tdblk と同じ役どころ)。
 /// file scope では 0 である (cc15al)
@@ -2288,13 +2291,32 @@ int tdfind() {
 int ecfind() {
   int i;
   // 内側 (後から登録した方) を先に見つける。列挙定数も複文ごとに有効範囲を
-  // 持ち，内側の宣言が外側の同じ名前を隠す (C89 6.1.2.1。cc15al)
-  i = eccnt - 1;
-  while (i >= 0) {
-    if (streq(ecname + i * 64, tname)) return i;
-    i = i - 1;
+  // 持ち，内側の宣言が外側の同じ名前を隠す (C89 6.1.2.1。cc15al)。
+  // 鎖は新しい順につないであるので，最初に一致したものが最も内側である。
+  // GCC の i386.c は列挙定数を 8192 個以上持つので，線形探索をやめた
+  i = echtab[ghash()];
+  while (i) {
+    if (streq(ecname + (i - 1) * 64, tname)) return i - 1;
+    i = ecnext[i - 1];
   }
   return -1;
+}
+
+/// @brief 列挙定数の表を n 個まで戻す (複文と関数本体を出るとき)。
+/// @note 新しい方から外す。鎖は新しい順なので，外す定数は必ず鎖の頭にある
+int ectrunc(int n) {
+  int h; int k;
+  while (eccnt > n) {
+    eccnt = eccnt - 1;
+    h = 0;
+    k = 0;
+    while (ecname[eccnt * 64 + k]) {
+      h = (h * 31 + ecname[eccnt * 64 + k]) & 65535;
+      k = k + 1;
+    }
+    echtab[h] = ecnext[eccnt];
+  }
+  return 0;
 }
 
 /// @brief 型指定子の始まりか。
@@ -2341,10 +2363,12 @@ int enumbody() {
     // 重複は同じ複文の中だけ (ecblk)。関数の中の `enum { bad, push, pop }`
     // は外側の push を隠してよい (GCC の c-pragma.c。cc15al)
     if (ecfind() >= ecblk) exit(4);
-    if (eccnt > 8191) exit(6);
+    if (eccnt > 32767) exit(6);
     i = eccnt;
     eccnt++;
     copyn(ecname + i * 64, tname);
+    ecnext[i] = echtab[ghash()];
+    echtab[ghash()] = i + 1;
     next();
     if (tok == o_asn) {
       // 右辺は整数定数式 (TOK_LAST = 256 - 1 など)。既に登録した列挙
@@ -5271,7 +5295,7 @@ int stmt() {
     lblk = d;
     tdcnt = s;
     tdblk = w;
-    eccnt = es;
+    ectrunc(es);
     ecblk = ew;
     return 0;
   }
@@ -7192,7 +7216,7 @@ int funcdef() {
   // tdblk も 0 に戻す (8.3 の 5)
   tdcnt = tdfn;
   tdblk = 0;
-  eccnt = ecfn;
+  ectrunc(ecfn);
   ecblk = 0;
   infn = 0;
   return emitfn(e);
@@ -8207,6 +8231,8 @@ int main() {
   outp = 0; gcnt = 0; scnt = 0; mcnt = 0; lcnt = 0;
   c = 0;
   while (c < 65536) { ghtab[c] = 0; c = c + 1; }
+  c = 0;
+  while (c < 65536) { echtab[c] = 0; c = c + 1; }
   bssp = 0; rcnt = 0; nlsym = 0; gspn = 0; spcnt = 0;
   bireg();
   next();
