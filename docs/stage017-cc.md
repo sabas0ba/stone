@@ -216,10 +216,17 @@ Stage 16 の `configure` の節と同じ扱いである。スキップしたこ�
 
 tcc の `Makefile` が `ar` を呼ぶのは**1 箇所だけ**である。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```make
 libtcc.a: $(LIBTCC_OBJ)
 	$S$(AR) rcs $@ $^
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 `lib/Makefile` の `XAR` も同じ `$(AR)` を指す。`configure` は
 `AR=ar` と書く (我々の `cc` は `tcc` と名乗らないので `$cc -ar` の分岐には
@@ -483,17 +490,31 @@ tcc の `Makefile` (537 行) が実際に使っている機能を数えた。**�
 数だけ見ると関数が多いが，作りの上でいちばん重いのは表に出ない 1 行で
 ある。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```make
 LIBTCC_SRC = $(filter-out tcc.c tcctools.c,$(filter %.c,$($T_FILES)))
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 `$($T_FILES)` は**変数名を変数から作っている**。`T` が `x86_64` なら
 `$(x86_64_FILES)` を引く。展開器が「名前を先に展開してから引く」形で
 書かれていないと通らない。同じ理由で
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```make
 TCCDEFS_H$(subst yes,,$(CONFIG_predefs)) = tccdefs_.h
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 は**代入の左辺にも展開が要る**ことを示す。
 
@@ -944,10 +965,17 @@ return の経路が多いので，深さの上げ下げはラッパー関数を 
 
 ### 14.1 いちばん影響が大きいのは「命令の無い追加の依存行」
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```make
 $(X)tcc.o : tcctools.c
 $(X)tccpp.o : $(TCCDEFS_H)
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 本物の `make` はこれを**既にある規則への依存の追加**と読む。`tcc.o` を
 どう作るかはパターン規則 `$(X)%.o : %.c` が持ったままである。
@@ -1739,6 +1767,11 @@ stone の OS に `git` は無い。`mk20` は落ちた `$(shell)` を空とし�
 
 `lib/Makefile` は上位と作りが違う。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```make
 TOP = ..
 include $(TOP)/Makefile
@@ -1746,6 +1779,8 @@ VPATH = $(TOPSRC)/lib $(TOPSRC)/win32/lib
 T = $(or $(CROSS_TARGET),$(NATIVE_TARGET),unknown)
 XCFG = $(or $(findstring -win,$T),-unx)
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 **`VPATH` がある。** 14 章で「上位の `Makefile` には要らない」と数えた
 ものが，ここでは出てくる。`mk21` が要るかと思ったが，**要らなかった**。
@@ -1894,6 +1929,11 @@ static void a1(void) { static char *p = "hello"; printf("[%s]\n", p); }
 
 tcc の `tccgen.c` の `parse_atomic()` はこう書かれている。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 static const char *const templates[] = {
     /* __atomic_store */            "alm.?",
@@ -1904,6 +1944,8 @@ static const char *const templates[] = {
 };
 const char *template = templates[(atok - TOK___atomic_store)];
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 **まさに a3 の形である。** `template` が `"L"` になるので，引数の
 個数を駆動する文字が読めない。`for (arg = 0;;)` が終わらず，閉じ括弧
@@ -2146,10 +2188,17 @@ ar: malformed archive
 
 原因は `tcctools.c` の
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 ST_FUNC int tcc_tool_ar(int argc, char **argv) {
     static const ArHdr arhdr_init = { "/               ", "0           ", ... };
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 —— **関数内 `static` の構造体で，メンバの char 配列を文字列で初期化
 する形**である。24 章で見つけたものと同じ原因だが，**私が直したのは
@@ -2450,9 +2499,16 @@ bt-exe.c:30: error: ',' expected (got '*')
 
 30 行目は
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 void __bt_init(rt_context *p, int is_exe)
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 で，`rt_context` が型として通っていない (通っていれば `*` は宣言子の
 一部として読める)。
@@ -2460,18 +2516,32 @@ void __bt_init(rt_context *p, int is_exe)
 **これは我々の cc の誤りではなく，我々の設定の抜けである。**
 `rt_context` は `tccrun.c` の中で
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 #ifdef TCC_IS_NATIVE
 #ifdef CONFIG_TCC_BACKTRACE
 typedef struct rt_context { ... } rt_context;
 ```
 
+<!-- SPDX-SnippetEnd -->
+
 と二重の条件で囲まれている。そして `tcc.h` の `TCC_IS_NATIVE` の条件は
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 # elif defined __riscv && defined __LP64__ && defined TCC_TARGET_RISCV64
 #  define TCC_IS_NATIVE
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 —— **riscv は 64 bit しか見ていない。** 我々は RV32 なので `__LP64__` が
 定義されず，`TCC_IS_NATIVE` が定義されない。上流の tcc から見て，我々の
@@ -2479,11 +2549,18 @@ typedef struct rt_context { ... } rt_context;
 
 ところが `lib/Makefile` の側は
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```make
 Nat = $(if $X,no,)
 Cbt = $(Nat)$(subst yes,,$(CONFIG_backtrace))
 $(Cbt)COMMON_O += bt-exe.o bt-log.o
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 で，クロスコンパイルの接頭辞 `X` を置いていない我々を「native」とみなして
 `bt-exe.o` を作らせる。**Makefile 側は native と判定し，ソース側は
@@ -2629,6 +2706,11 @@ auipc -> jalr -> main -> ret -> auipc -> ...
 
 出どころは上流の `riscv64-asm.c` である。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
     case TOK_ASM_call:
         /* auipc ra, 0 */
@@ -2641,6 +2723,8 @@ auipc -> jalr -> main -> ret -> auipc -> ...
         ...
         /* jalr zero, 0(x6) */
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 **`call` と `tail` が，使う中継レジスタ以外は同じものを出している。**
 `call` の側は `jalr ra, 0(ra)` でなければならない。
@@ -2825,10 +2909,17 @@ szstr 4        sizeof "!<arch>\n"   ← 9 でなければならない
 
 `tccelf.c` はアーカイブの最初のヘッダの位置をこう求める。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 #define ARMAG "!<arch>\n"            /* tcc.h 1544 行 */
 file_offset = sizeof ARMAG - 1;      /* tccelf.c 3681 行 */
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 C では `ARMAG` の型は `char[9]` なので 8 になる。**stone の処理系は 4 を返す。**
 だから `file_offset` が 3 になり，ヘッダでない場所を読んで「ヘッダでは
@@ -3408,12 +3499,19 @@ char +名前\[..\]\[..\] *=
 
 実物はこうだった。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 static char const ab_month_name[12][4] = {       /* tccpp.c 3384 行 */
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 **`const` が間に入るだけで検索から漏れた。** 33.3 で「同類を測ってから言う」と
 書いておきながら，**探すほうは形で絞っていた**。31.4 の「同類とみなす範囲を言語の規則では
@@ -3427,9 +3525,16 @@ static char const ab_month_name[12][4] = {       /* tccpp.c 3384 行 */
 読んでいた**。我々のビルドが `__DATE__` を使わないので表に出ていなかった
 だけである。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 ab_month_name[tm->tm_mon]        /* tccpp.c 3389 行 */
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 `cc15s` はこれを直した。**台帳の bad を消したら，実物の潜在的な誤りも
 1 つ消えた** —— 台帳に載せる価値はここにある。

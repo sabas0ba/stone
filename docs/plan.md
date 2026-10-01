@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # stone: コンパイラ実装 Bootstrap 計画
 
 ## 1. 目的

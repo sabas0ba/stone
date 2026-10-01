@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # stage001/hex0.bin のソース表現 (hex0 言語，docs/stage001-hex0.md 2 章)。
 # 本ファイルはビルドには使用しない検証入力である (同 5 章)。
 # hex0(本ファイル) の出力が hex0.bin とビット一致することをテストで検証する。

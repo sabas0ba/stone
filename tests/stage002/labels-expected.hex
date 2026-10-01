@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # labels.hex1 の期待バイナリ (hex0 言語，オフセット手計算版)。
 # hex0(本ファイル) と hex1(labels.hex1) の出力が一致することを検証する。
 

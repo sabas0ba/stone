@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # hex1 説明文書
 
 hex1 は，ラベルの定義・参照によって分岐オフセットの手計算を不要にする

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /* stdarg.h --- 可変長引数 (C89 7.8)
  *
  * このコンパイラの ABI では，可変部の実引数はデータスタック上に

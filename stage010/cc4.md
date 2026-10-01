@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc4 説明文書
 
 cc4 は C コンパイラである。第 2 部の 2 の [cc3.sc](cc3.sc) を出発点に，

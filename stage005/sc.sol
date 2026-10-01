@@ -1,3 +1,4 @@
+#/ SPDX-License-Identifier: Apache-2.0
 #/ @file sc.sol
 #/ @brief C サブセット言語 sc のコンパイラ (sol 言語で記述)。
 #/

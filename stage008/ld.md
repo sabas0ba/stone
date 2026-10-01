@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # ld 説明文書
 
 ld は cc が出力した ELF リロケータブルオブジェクトを結合し，ロードアドレス

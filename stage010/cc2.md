@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc2 説明文書
 
 cc2 は C コンパイラである。Stage 10 第 1 部の [cc.sc](cc.sc) を出発点に，

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # asm 説明文書
 
 asm は，RV32IM のニーモニック・疑似命令・ラベルで書かれたソーステキストを

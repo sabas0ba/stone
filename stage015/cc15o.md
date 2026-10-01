@@ -50,17 +50,31 @@ SHA-256: 50f8eb98eaf56cfb42981a335d0ab2e9c0b01d770e928b63ade138b20cfd0c04
 tcc は宣言の後に定義が来たとき，属性をこう退避する
 (tccgen.c の `patch_type`)。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 struct FuncAttr f = sym->type.ref->f;
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 ここがスタックのゴミになると `func_noreturn` が偶然立ち，tcc は
 「noreturn の関数を呼んだ後」としてコード生成を止める。その結果，
 T1 が翻訳した tcc では
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 ST_FUNC void gen_le16(int i) { gen_le8(i); gen_le8(i >> 8); }
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 の 2 つめの呼出しが消え，`tok_str_alloc` は `return str;` の読み直しを
 落として直前の呼出しの返り値を返した。`func_ctor` / `func_dtor` が

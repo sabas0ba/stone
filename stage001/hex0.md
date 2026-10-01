@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # hex0.bin 説明文書
 
 `stage001/hex0.bin` は人手で命令エンコードした生のバイナリであり，
