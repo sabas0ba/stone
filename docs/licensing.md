@@ -75,7 +75,7 @@ Stage 14 でビルド対象とした bzip2 / zlib の原本は
 
 | 世代 | 対象ファイル | 出自と判定 | SPDX |
 |---|---|---|---|
-| 15 | `stage015/` 以下の 115 ファイルのうち下記 3 ファイルを除く 112 ファイル | stone の C 処理系、OS、実行環境 | `Apache-2.0` |
+| 15 | `stage015/` 以下の 117 ファイルのうち下記 3 ファイルを除く 114 ファイル | stone の C 処理系、OS、実行環境 | `Apache-2.0` |
 | 15 | `stage015/tcc/riscv32.patch` | TinyCC の固定 commit `2ba12e83b3599ca8f5d50c179fe5138fe956f0c9` への差分。上流コードの文脈行を含む | `LGPL-2.1-only` |
 | 15 | `stage015/cc15n.md`, `stage015/cc15o.md` | stone の説明文書。TinyCC `tccgen.c` 等のコード抜粋には個別の snippet 注記 | 本文 `Apache-2.0`、引用部分 `LGPL-2.1-only` |
 | 15 | `docs/stage015-riscv32.md`, `docs/stage015-tcc.md` | stone の分析文書。TinyCC 上流コードの抜粋には個別の snippet 注記 | 本文 `Apache-2.0`、引用部分 `LGPL-2.1-only` |
