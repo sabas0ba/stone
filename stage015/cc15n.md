@@ -37,9 +37,16 @@ l & 0x80000000        /* 正しくは 0x0000000080000000 */
 
 これは tcc が「32 bit の定数を 64 bit の欄へ符号拡張する」定石
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 return (uint32_t)l1 | -(l1 & 0x80000000);      /* tccgen.c の value64 */
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 を壊す。第 6 部で stone のビルドチェーンが作った tcc (T1) は，この式が誤るために
 **定数 -1 を 0x00000000FFFFFFFF として持ち**，即値を使う判定

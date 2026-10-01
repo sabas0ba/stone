@@ -77,15 +77,18 @@ Stage 14 でビルド対象とした bzip2 / zlib の原本は
 |---|---|---|---|
 | 15 | `stage015/` 以下の 115 ファイルのうち下記 3 ファイルを除く 112 ファイル | stone の C 処理系、OS、実行環境 | `Apache-2.0` |
 | 15 | `stage015/tcc/riscv32.patch` | TinyCC の固定 commit `2ba12e83b3599ca8f5d50c179fe5138fe956f0c9` への差分。上流コードの文脈行を含む | `LGPL-2.1-only` |
-| 15 | `stage015/cc15n.md`, `stage015/cc15o.md` | stone の説明文書に TinyCC `tccgen.c` 等のコード抜粋を含む | `Apache-2.0 AND LGPL-2.1-only` |
-| 15 | `docs/stage015-riscv32.md`, `docs/stage015-tcc.md` | stone の分析文書に TinyCC 上流コードの抜粋を含む | `Apache-2.0 AND LGPL-2.1-only` |
+| 15 | `stage015/cc15n.md`, `stage015/cc15o.md` | stone の説明文書。TinyCC `tccgen.c` 等のコード抜粋には個別の snippet 注記 | 本文 `Apache-2.0`、引用部分 `LGPL-2.1-only` |
+| 15 | `docs/stage015-riscv32.md`, `docs/stage015-tcc.md` | stone の分析文書。TinyCC 上流コードの抜粋には個別の snippet 注記 | 本文 `Apache-2.0`、引用部分 `LGPL-2.1-only` |
 | 16 | `stage016/` 以下の全 91 ファイル、`docs/stage016-os.md` | Stage 15 の stone 実装を継承した OS と libc の改訂 | `Apache-2.0` |
 | 17 | `stage017/` 以下の 251 ファイルのうち `pp18.md` を除く 250 ファイル | stone の処理系、libc、シェル、sed・awk 等の自作実装と測定記録 | `Apache-2.0` |
-| 17 | `stage017/pp18.md` | stone の説明文書に GCC `libcpp/system.h` のマクロの抜粋を含む | `Apache-2.0 AND GPL-3.0-or-later` |
-| 17 | `docs/stage017-cc.md` | stone の分析文書に TinyCC 上流コードの抜粋を含む | `Apache-2.0 AND LGPL-2.1-only` |
-| 17 | `docs/stage017-gcc.md` | stone の分析文書に GCC `system.h` のマクロの抜粋を含む | `Apache-2.0 AND GPL-3.0-or-later` |
+| 17 | `stage017/pp18.md` | stone の説明文書。GCC `libcpp/system.h` のマクロには個別の snippet 注記 | 本文 `Apache-2.0`、引用部分 `GPL-3.0-or-later` |
+| 17 | `docs/stage017-cc.md` | stone の分析文書。TinyCC 上流コードの抜粋には個別の snippet 注記 | 本文 `Apache-2.0`、引用部分 `LGPL-2.1-only` |
+| 17 | `docs/stage017-gcc.md` | stone の分析文書。GCC 上流コードの抜粋には個別の snippet 注記 | 本文 `Apache-2.0`、引用部分 `GPL-3.0-or-later` |
 
 各ファイルには `.license` sidecar を付け、入力の内容は変更しない。
+上記 7 文書では sidecar の `Apache-2.0` は自作の本文に適用し、
+上流コードの抜粋には `SPDX-SnippetBegin` / `SPDX-SnippetEnd` で
+個別に上流ライセンスを示す。引用部分へ Apache-2.0 を付与したものではない。
 `riscv32.patch` はパッチ前の TinyCC のコードも含むため、上流の
 `COPYING` (LGPL 2.1) を保守的に `LGPL-2.1-only` と記録し、
 全文を `LICENSES/LGPL-2.1-only.txt` に置く。追加した RV32 実装も

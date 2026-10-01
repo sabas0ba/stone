@@ -542,9 +542,16 @@ cc15l は cc15k の複製に容量だけ足した世代である (前例: cc14f�
 
 3 つめの bad は pp にあった。tcc.h の
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 #define eh_frame_section  s1->eh_frame_section
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 を関数形式マクロの実引数に渡すと `s1->s1->eh_frame_section` に展開
 されていた (gcc は `s1->eh_frame_section`)。実引数の事前展開で抑止して
@@ -709,9 +716,16 @@ int としていた。32 bit に閉じている限り bit の並びは同じな�
 
 tcc は 32 bit の定数を 64 bit の欄へ符号拡張するのにこの形を使う。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 return (uint32_t)l1 | -(l1 & 0x80000000);      /* tccgen.c の value64 */
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 [cc15n](../stage015/cc15n.md) で直した。検査は
 [litu](../tests/stage015/probe/litu.c)。既存の回帰 (sh / ed / mk・
@@ -730,11 +744,18 @@ tccpp.c 全体では 93 関数中 **31** がまだ食い違う (cc15n の前は 
 
 いまの最初の食い違いは `cstr_printf` である。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 len = cstr_vprintf(cstr, fmt, ap);
 va_end(ap);
 return len;
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 ホストは呼出しの結果を局所 `len` へ格納して読み直すが，T1 は格納も
 読直しも出さず，返却レジスタのまま返す。**意味は同じだが同じ tcc から
@@ -870,9 +891,16 @@ T1 が OS の上で 17 コマンドを完走し，T2 (394,172 バイト) がで�
 **2. いちばん小さい食い違いを読む。** 関数ごとの大きさを比べると
 442/675 がバイト一致で，残りが短い。いちばん小さいものは
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 ST_FUNC void gen_le16(int i) { gen_le8(i); gen_le8(i >> 8); }
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 で，T1 は **1 つめの呼出ししか出さない**。`tok_str_alloc` では
 `return str;` の読み直しが消え，**直前の呼出しの返り値を返してしまう**。
@@ -899,9 +927,16 @@ void f(int c) { ext(); }    /* 定義 */
 壊れている。tcc のその経路 (tccgen.c の `patch_type`) にはこの 1 行が
 ある。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 struct FuncAttr f = sym->type.ref->f;
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 **6. 我々の cc で再現する。**
 
@@ -1068,6 +1103,11 @@ strtod を直した後の実測。
 
 原因は `gen_cvt_ftof` (riscv64-gen.c)。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
     if (st == dt) return;                  /* VT_DOUBLE と VT_LDOUBLE は別 */
     if (IS_LDBL(dt) || IS_LDBL(st)) { ... } /* RV32 では両方とも偽 */
@@ -1075,6 +1115,8 @@ strtod を直した後の実測。
     if (IS_DBL(dt))
       EI(0x53, 0, freg(rd), freg(rs), 0x21 << 5);   // fcvt.d.s (単精度 -> 倍精度)
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 RV32 (ilp32) では `long double` は double そのものである
 (`LDOUBLE_SIZE 8`)。ところが `VT_DOUBLE` と `VT_LDOUBLE` は別のトークン
