@@ -90,16 +90,50 @@ fi
 # 決める。ビルドチェーンで最も重い 1 回 (kernel の翻訳) でも 1 分に届かないので，
 # 15 分は十分に上である。gdb で止めるときは待機が前提なので無効にする
 _to=${STONE_QEMU_TIMEOUT:-900}
-if [ -n "${STONE_QEMU_GDB:-}" ] || [ "$_to" = 0 ] \
-        || ! command -v timeout > /dev/null 2>&1; then
-    exec qemu-system-riscv32 "$@"
+
+# **UART の出力はいったん通常のファイルで受ける。**
+#
+# QEMU の 16550 は，ホスト側への書込みが詰まる (パイプが一杯で EAGAIN) と
+# 数回だけ再試行し，それでも書けなければ**そのバイトを捨てる**。ゲストは
+# LSR の THRE を見て待つが，QEMU は捨てた後に THRE を立てるので，ゲストからは
+# 失われたことが見えない。標準出力が docker の転送や並列実行で詰まると，
+# 生成物の途中が黙って欠ける (gcc/ の 347 単位を 4 並列で訳したとき，
+# insn-attrtab.o の 2 MB 付近で 264 バイトが欠け，節表が末尾を越えていた。
+# docs/stage017-gcc.md 8.15)。
+#
+# 通常のファイルへの書込みは詰まらないので捨てられない。終わってから
+# 一度に流す。端末へ出すとき (対話・gdb) と，呼び手が既にファイルへ
+# 向けているときは直結のままにする
+_out=""
+if [ ! -t 1 ] && [ ! -f /dev/stdout ] && [ -z "${STONE_QEMU_GDB:-}" ]; then
+    _dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)/tmp/qemu-out"
+    mkdir -p "$_dir"
+    _out=$(mktemp "$_dir/out.XXXXXX")
+    trap 'rm -f "$_out"' EXIT
 fi
+
+run_qemu() {
+    if [ -n "$_out" ]; then
+        "$@" > "$_out"
+    else
+        "$@"
+    fi
+}
+
 # **`|| _rc=$?` の形で受ける。** このスクリプトは set -e なので，
 # `timeout ...` をそのまま書くと 124 で返った時点で下の案内へ来ない。
 # 打ち切ったことを言わずに終わると，ただの失敗と見分けが付かない
 _rc=0
-timeout -k 5 "$_to" qemu-system-riscv32 "$@" || _rc=$?
-if [ "$_rc" -eq 124 ]; then
-    echo "run-qemu.sh: ${_to} 秒を超えたので打ち切った (STONE_QEMU_TIMEOUT)" >&2
+if [ -n "${STONE_QEMU_GDB:-}" ] || [ "$_to" = 0 ] \
+        || ! command -v timeout > /dev/null 2>&1; then
+    run_qemu qemu-system-riscv32 "$@" || _rc=$?
+else
+    run_qemu timeout -k 5 "$_to" qemu-system-riscv32 "$@" || _rc=$?
+    if [ "$_rc" -eq 124 ]; then
+        echo "run-qemu.sh: ${_to} 秒を超えたので打ち切った (STONE_QEMU_TIMEOUT)" >&2
+    fi
+fi
+if [ -n "$_out" ]; then
+    cat "$_out"
 fi
 exit "$_rc"
