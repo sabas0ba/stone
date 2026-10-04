@@ -1745,6 +1745,50 @@ else
     echo "   skip: tmp/build/awk1 が無い"
 fi
 
+section "第 12 部: cc1 を組む道具 (ld18 / libc26。docs/stage017-gcc.md 8.15)"
+
+# GCC の cc1 は 128 MB を超えるコードになり，ld17 では組めない
+# (stage015/ld18.md)。cc1 をリンクして名指しされた libc の不足は libc26 で
+# 足した (stage017/libc26.md)。ここでは小さなプログラムを遠距離呼出し
+# (cc15am) で訳し，ld18 で libc26 を**ライブラリの部品として**組んで
+# kernel27 の上で走らせる。期待値の意味は tests/stage017/user/l26x.c の註にある
+r=$out/l26root
+rm -rf "$r"; mkdir -p "$r"
+ok=0
+sh tools/bundle.sh stage017/libc26/include/*.h \
+        "sys/time.h=stage017/libc26/include/sys/time.h" \
+        "sys/times.h=stage017/libc26/include/sys/times.h" \
+        "sys/stat.h=stage017/libc26/include/sys/stat.h" \
+        "sys/types.h=stage017/libc26/include/sys/types.h" \
+        tests/stage017/user/l26x.c \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/l26x.i" \
+    && { printf '#pragma stone far_call\n'; cat "$out/l26x.i"; } \
+        | sh tools/env.sh qemu tmp/build/cc15am.bin > "$out/l26x.o" \
+    && sh tools/ld18.sh -o "$r/l26x" -L tmp/build/l26_*.o tmp/build/rt64.o \
+        tmp/build/rtfp.o -N "$out/l26x.o" > "$out/l26x.ld" 2>&1 || ok=1
+[ "$ok" -eq 0 ]
+report $? "build: ld18 が libc26 をライブラリの部品として組む"
+cp tmp/build/sh2.bin "$r/sh2"
+printf 'l26x\necho "rc $?"\ncat y.txt\n' > "$r/go.sh"
+printf 'sh2 go.sh\n' > "$r/boot"
+cat > "$out/l26.want" <<'L26EOF'
+tok [a] [b] [c]
+cmp 1 1 1
+frexp 750 6 -62500 -2
+fstat 0 6 1 1
+access 0 -1
+asctime Sun Sep 16 01:03:52 1973
+alloca 42000
+misc 5 123 4096 1 3 3
+rc 0
+freopen y
+L26EOF
+runroot5 "$r" "$out/l26.out" 4194304 128
+rc=$?
+[ "$rc" -eq 0 ] && diff -u "$out/l26.want" "$out/l26.out" > "$out/l26.diff"
+report $? "run: libc26 の関数が kernel27 の上で期待どおりに動く (ld18 / cc15am の遠距離呼出し)"
+[ -s "$out/l26.diff" ] && sed -n '4,$p' "$out/l26.diff"
+
 section "差分試験の OS 側 (libc を我々の OS の上でホストと突き合わせる)"
 
 # **libc の不足は，我々が書いた期待値では出ない。** 我々は自分が使う

@@ -239,6 +239,25 @@ build_stage017() {
             -- libc25_run "$f" "$n"
     done
 
+    # libc の第 26 世代 (docs/stage017-gcc.md 8.15)。GCC 4.7.4 の cc1 を
+    # リンクして名指しされた不足を足した (src/misc26.c / posix/sys26.c と
+    # 各 header の末尾)。cc1 の単位と同じく最前線の cc (cc15am) で訳す
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             src/misc26 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal posix/sys26; do
+        n=$(echo "$f" | tr / _)
+        step "l26_$n" "l26_$n.o" \
+            -- "stage017/libc26/$f.c" \
+               stage017/libc26/include/*.h \
+               stage017/libc26/include/sys/time.h \
+               stage017/libc26/include/sys/times.h \
+               stage017/libc26/include/sys/stat.h \
+               stage017/libc26/include/sys/types.h \
+               tmp/build/cc15am.bin tmp/build/pp.bin \
+            -- libc26_run "$f" "$n"
+    done
+
     # 第 25 世代の検査用のプログラム (tests/stage017 第 9 部)。子の時間が
     # cutime へ入ることと，255 バイトの経路が stat を通ることを見る。
     # **libc25 とリンクする**ので kernel27 の上でしか動かない
@@ -460,6 +479,19 @@ libc25_run() {
     sh tools/env.sh qemu tmp/build/cc15ag.bin < "tmp/build/l25_$2.i" \
         > "tmp/build/l25_$2.o"
     echo "built tmp/build/l25_$2.o" >&2
+}
+
+libc26_run() {
+    sh tools/bundle.sh stage017/libc26/include/*.h \
+        "sys/time.h=stage017/libc26/include/sys/time.h" \
+        "sys/times.h=stage017/libc26/include/sys/times.h" \
+        "sys/stat.h=stage017/libc26/include/sys/stat.h" \
+        "sys/types.h=stage017/libc26/include/sys/types.h" \
+        "stage017/libc26/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l26_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15am.bin < "tmp/build/l26_$2.i" \
+        > "tmp/build/l26_$2.o"
+    echo "built tmp/build/l26_$2.o" >&2
 }
 
 # libc23 と最前線のコンパイラ (cc15ab) で組む OS プログラム。
@@ -695,7 +727,12 @@ do_stage017() {
         l25_src_string.o l25_src_ctype.o l25_src_stdlib.o \
         l25_src_morecore.o l25_src_misc15.o \
         l25_posix_sys.o l25_posix_morecore.o l25_posix_stdio.o \
-        l25_posix_assert.o l25_posix_dir.o l25_posix_signal.o tmx \
+        l25_posix_assert.o l25_posix_dir.o l25_posix_signal.o \
+        l26_src_string.o l26_src_ctype.o l26_src_stdlib.o \
+        l26_src_morecore.o l26_src_misc15.o l26_src_misc26.o \
+        l26_posix_sys.o l26_posix_morecore.o l26_posix_stdio.o \
+        l26_posix_assert.o l26_posix_dir.o l26_posix_signal.o \
+        l26_posix_sys26.o tmx \
         sed1 sed2 sed3 re1.o re2.o sh3 sh4 sh5 awkfmt1.o awk1 \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc stage017/pp18.sc stage017/pp19.sc \
@@ -719,6 +756,8 @@ do_stage017() {
            stage017/libc24/src/*.c stage017/libc24/posix/*.c \
            stage017/libc25/include/*.h stage017/libc25/include/sys/*.h \
            stage017/libc25/src/*.c stage017/libc25/posix/*.c \
+           stage017/libc26/include/*.h stage017/libc26/include/sys/*.h \
+           stage017/libc26/src/*.c stage017/libc26/posix/*.c \
            stage017/sed1.c stage017/sed2.c stage017/sed3.c \
            stage017/re1.c stage017/re1.h stage017/re2.c stage017/re2.h \
            stage017/sh3.c stage017/sh4.c stage017/sh5.c \
