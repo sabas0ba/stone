@@ -10,6 +10,7 @@
 | `posix/sys26.c` | 新規。カーネルと stdio に依る関数 |
 | `posix/sys.c` | `open` / `close` が記述子の経路を控える (`fstat` のため) |
 | `include/float.h` | 新規。浮動小数点型の特性 (C89 5.2.4.2.2) |
+| `include/alloca.h` | 新規。`alloca` の宣言 (glibc と同じく stdlib.h には置かない) |
 | `include/stdlib.h` / `string.h` / `stdio.h` / `unistd.h` / `time.h` / `math.h` / `sys/stat.h` | 末尾に宣言を足した |
 
 ## 1. 立場

@@ -45,6 +45,8 @@ static int many (int a0, int a1, int a2, int a3, int a4, int a5, int a6,
 }
 
 struct bf { unsigned int lo : 5; unsigned int mid : 11; int hi : 16; };
+/* 幅 32 は型の幅いっぱい (GMP の gmp-impl.h の manl:32。cc15an) */
+struct bf32 { unsigned int a : 32; unsigned int b : 20; unsigned int c : 12; };
 
 static long long ctab[] = {
   1LL << 40,
@@ -81,6 +83,7 @@ int main(void) {
   static struct big s;
   struct big d;
   struct bf b;
+  struct bf32 x;
   long long w;
   int i;
   for (i = 0; i < 700; i++) s.w[i] = i * 3 + 1;
@@ -112,6 +115,12 @@ int main(void) {
   pn(b.hi = 70000);                      /* 代入式の値は幅で切った値 */
   pn(b.lo = 35);
   pn(b.hi = -1);
+  nl();
+  x.a = 0xfffffffeU;
+  x.b = 0xabcde;
+  x.c = 0x123;
+  x.a += 3;
+  pl((long long)x.a); pn(x.b); pn(x.c); pn((int)sizeof(struct bf32));
   nl();
   for (i = 0; i < 17; i++) pl(ctab[i]);
   pl((long long)uwide);

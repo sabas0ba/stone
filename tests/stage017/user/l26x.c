@@ -18,6 +18,7 @@
  *   freopen  stdout を開き直した先 (y.txt) に書かれる */
 #include <stdio.h>
 #include <stdlib.h>
+#include <alloca.h>
 #include <string.h>
 #include <unistd.h>
 #include <math.h>

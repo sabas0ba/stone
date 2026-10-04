@@ -61,11 +61,6 @@ long labs(long n);
 long atol(char *s);
 double atof(char *s);
 
-/* 呼び手の関数が戻るまで使える領域。**ヒープから取り**，次に呼ばれたとき
- * 呼び手より深い (既に戻った) 関数が取った分を返す (src/misc26.c)。
- * 真のスタック上の確保ではないが，戻った後に触らない限り同じに振る舞う */
-void *alloca(size_t n);
-
 /* GNU の拡張。realpath(path, NULL) と同じ */
 char *canonicalize_file_name(char *path);
 

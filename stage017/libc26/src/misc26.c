@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <time.h>
 #include <math.h>
+#include <alloca.h>
 
 void abort(void) {
   raise(SIGABRT);
