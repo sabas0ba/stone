@@ -11,6 +11,7 @@
 | `include/float.h` | 新規。浮動小数点型の特性 (C89 5.2.4.2.2) |
 | `include/alloca.h` | 新規。`alloca` の宣言 (glibc と同じく stdlib.h には置かない) |
 | `include/stdlib.h` / `string.h` / `stdio.h` / `unistd.h` / `time.h` / `math.h` / `sys/stat.h` | 末尾に宣言を足した |
+| `include/fcntl.h` / `posix/sys.c` | `O_EXCL`，`F_GETFD` / `F_SETFD`。`fcntl` を可変引数にした (下の 5 章) |
 
 ## 1. 立場
 
@@ -75,9 +76,20 @@ cc15ao 以降の cc は `alloca(n)` を `__alloca2(n, fp)` に書き換え，all
 
 戻った後に触る使い方は本物と同じく誤りである。
 
-## 5. 測り方
+## 5. `O_EXCL` と close-on-exec —— libiberty の 2 単位
 
-`tests/stage017` 第 12 部が `tests/stage017/user/l26x.c` を cc15ao の遠距離呼出しで訳し，ld18 で libc26 をライブラリの部品として組んで kernel28 の上で走らせる。
+libiberty の `mkstemps.c` は `O_EXCL` を，`pex-unix.c` は `fcntl (fd, F_SETFD, FD_CLOEXEC)` を #ifdef で守らずに使う。`libc25` はどちらも配っていなかったので，2 単位が宣言の不足で訳せなかった。
+
+**`O_EXCL`** (`O_CREAT` と組で，既にあれば `EEXIST` で失敗する)。カーネルの `openat` はこのフラグを知らないので，`open()` が先に `stat` して確かめ，フラグはカーネルへ渡さない。確かめてから作るまでの間に他が割り込むことは無い。走行は逐次で，`spawn` は子の終わりを待つ (助言的ロックが常に取れるのと同じ理由)。`libc25` の `fcntl.h` は「無いものは無いと言う」ために `O_EXCL` を定義していなかったが，意味どおりに実装できたので定義する。
+
+**close-on-exec。** kernel28 の `spawn` は子の記述子の表を 3 以上すべて空にして始める。どの記述子も既に close-on-exec である。`F_GETFD` は常に `FD_CLOEXEC` を返し，`F_SETFD` は `FD_CLOEXEC` を立てる依頼だけを受ける。落とす依頼 (子に渡したい) は叶えられないので `EINVAL` で拒む。
+
+**`fcntl` を可変引数にした。** 第 3 引数は命令によって整数 (`F_SETFD`) か `struct flock *` (ロック) である。`libc25` は `void *arg` で宣言していたので，整数を渡す呼出しが型で合わなかった。POSIX の宣言 `int fcntl(int, int, ...)` に合わせる。ロックの依頼は `va_arg` でポインタとして受ける。
+
+## 6. 測り方
+
+`tests/stage017` 第 12 部が `tests/stage017/user/l26x.c` を 最前線の cc (cc15ap) の遠距離呼出しで訳し，ld18 で libc26 をライブラリの部品として組んで kernel28 の上で走らせる。
 
 - `alloca`: 同じ深さで alloca を呼ぶ関数を 10 万回呼ぶ。1 回 4000 バイトなので，戻りで返さなければ 400 MB を取ろうとしてヒープ (プロセスの領域は 256 MiB) が尽きる。cc15an で訳すと `abort` で 134 になる。
 - `fstat`: 開いたファイルを unlink した後に `fstat` し，書いた長さが返ることを見る。
+- `O_EXCL`: 在るファイルは `EEXIST` (17) で拒み，無いファイルは作る。`F_GETFD` は 1，`F_SETFD` は立てる依頼に 0，落とす依頼に -1 を返す。 ポインタを渡すロック (`F_SETLK` / `F_GETLK`) が可変引数の後も受かることも見る。

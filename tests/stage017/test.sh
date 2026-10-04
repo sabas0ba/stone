@@ -1750,7 +1750,7 @@ section "第 12 部: cc1 を組む道具 (ld18 / libc26 / kernel28。docs/stage0
 # GCC の cc1 は 128 MB を超えるコードになり，ld17 では組めない
 # (stage015/ld18.md)。cc1 をリンクして名指しされた libc の不足は libc26 で
 # 足した (stage017/libc26.md)。ここでは小さなプログラムを遠距離呼出し
-# (cc15ao。alloca を呼んだ関数の戻りで返す) で訳し，ld18 で libc26 を
+# (cc15ao 以降。alloca を呼んだ関数の戻りで返す) で訳し，ld18 で libc26 を
 # **ライブラリの部品として**組んで kernel28 (fstat2) の上で走らせる。
 # 期待値の意味は tests/stage017/user/l26x.c の註にある
 
@@ -1778,7 +1778,7 @@ sh tools/bundle.sh stage017/libc26/include/*.h \
         tests/stage017/user/l26x.c \
     | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/l26x.i" \
     && { printf '#pragma stone far_call\n'; cat "$out/l26x.i"; } \
-        | sh tools/env.sh qemu tmp/build/cc15ao.bin > "$out/l26x.o" \
+        | sh tools/env.sh qemu tmp/build/cc15ap.bin > "$out/l26x.o" \
     && sh tools/ld18.sh -o "$r/l26x" -L tmp/build/l26_*.o tmp/build/rt64.o \
         tmp/build/rtfp.o -N "$out/l26x.o" > "$out/l26x.ld" 2>&1 || ok=1
 [ "$ok" -eq 0 ]
@@ -1795,6 +1795,7 @@ access 0 -1
 asctime Sun Sep 16 01:03:52 1973
 alloca 42000 50000
 unlink 0 8 -1
+excl -1 17 1 1 0 -1 0 0 1
 misc 5 123 4096 1 3 3
 rc 0
 freopen y
@@ -1802,7 +1803,7 @@ L26EOF
 runroot6 "$r" "$out/l26.out" 4194304 128
 rc=$?
 [ "$rc" -eq 0 ] && diff -u "$out/l26.want" "$out/l26.out" > "$out/l26.diff"
-report $? "run: libc26 の関数が kernel28 の上で期待どおりに動く (ld18 / cc15ao の遠距離呼出しと alloca の返却)"
+report $? "run: libc26 の関数が kernel28 の上で期待どおりに動く (ld18 / cc15ap の遠距離呼出しと alloca の返却)"
 [ -s "$out/l26.diff" ] && sed -n '4,$p' "$out/l26.diff"
 
 want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage017/pp21.md | cut -d' ' -f2)

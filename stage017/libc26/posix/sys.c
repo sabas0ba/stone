@@ -12,6 +12,7 @@
  * (docs/stage013-tools.md 3.2)。
  */
 #include <stddef.h>
+#include <stdarg.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -76,6 +77,16 @@ int open(char *path, int flags, ...) {
     errno = EINVAL;
     return -1;
   }
+  /* O_CREAT | O_EXCL: 既にあれば作らない (libc26。fcntl.h の註)。
+   * フラグはカーネルへ渡さない —— 知らないフラグとして黙って捨てられる */
+  if ((flags & O_EXCL) && (flags & O_CREAT)) {
+    struct stat st;
+    if (stat(path, &st) == 0) {
+      errno = EEXIST;
+      return -1;
+    }
+  }
+  flags &= ~O_EXCL;
   return wrap(sys_openat(AT_FDCWD, path, flags, 0));
 }
 
@@ -130,7 +141,10 @@ int spawn(char *path, char **argv, char *in, char *out) {
  * 我々の形では意味を持たない**からである。
  */
 
-int fcntl(int fd, int cmd, void *arg) {
+int fcntl(int fd, int cmd, ...) {
+  va_list ap;
+  void *arg;
+  int iarg;
   struct flock *fl;
   /* 開いていない fd を黙って受けない。**受けると「ロックが取れた」と
    * 読める答を返してしまう。**
@@ -145,7 +159,19 @@ int fcntl(int fd, int cmd, void *arg) {
     errno = EBADF;
     return -1;
   }
+  /* close-on-exec (libc26)。どの fd も既に立っている (fcntl.h の註) */
+  if (cmd == F_GETFD) return FD_CLOEXEC;
+  if (cmd == F_SETFD) {
+    va_start(ap, cmd);
+    iarg = va_arg(ap, int);
+    va_end(ap);
+    if (iarg != FD_CLOEXEC) { errno = EINVAL; return -1; }
+    return 0;
+  }
   if (cmd == F_GETLK || cmd == F_SETLK || cmd == F_SETLKW) {
+    va_start(ap, cmd);
+    arg = va_arg(ap, void *);
+    va_end(ap);
     /* **依頼の形は 3 つとも同じに見る。** 問い合わせ (F_GETLK) も
      * 「どの種類の錠を，どの範囲について訊くのか」を書いて渡すもので，
      * 取りに行く側と同じ形である。片方だけ見ていると，壊れた依頼が

@@ -19,6 +19,11 @@
  *            ヒープ (プロセスの領域は 256 MiB) が尽きる (cc15ao が
  *            __alloca_release を呼ぶ。cc15an では abort で 134 になる)
  *   unlink   開いたファイルを unlink した後も fstat が長さを返す (kernel28)
+ *   excl     O_CREAT | O_EXCL は在るファイルを EEXIST (17) で拒み，無い
+ *            ファイルは作る。F_GETFD は FD_CLOEXEC (1) を返し，F_SETFD は
+ *            立てる依頼だけを受ける (spawn は子に fd 3 以上を渡さない)。
+ *            fcntl を可変引数にしたので，ポインタを渡すロック (F_SETLK)
+ *            が引き続き受かることも見る
  *   freopen  stdout を開き直した先 (y.txt) に書かれる */
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +33,8 @@
 #include <math.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 
 static int flat(int n) {
   char *p;
@@ -53,6 +60,7 @@ int main(void) {
   FILE *f;
   int fd;
   struct tm tm;
+  struct flock fl;
   int i;
   int s;
   strcpy(buf, "a,b,,c");
@@ -88,6 +96,17 @@ int main(void) {
   unlink("z.txt");
   i = fstat(fd, &st);
   printf("unlink %d %ld %d\n", i, st.st_size, access("z.txt", F_OK));
+  close(fd);
+  i = open("x.txt", O_WRONLY | O_CREAT | O_EXCL, 0600);
+  e = errno;
+  fd = open("w.txt", O_WRONLY | O_CREAT | O_EXCL, 0600);
+  printf("excl %d %d %d", i, e, fd >= 3);
+  printf(" %d %d %d", fcntl(fd, F_GETFD), fcntl(fd, F_SETFD, FD_CLOEXEC),
+         fcntl(fd, F_SETFD, 0));
+  fl.l_type = F_WRLCK; fl.l_whence = 0; fl.l_start = 0; fl.l_len = 0;
+  printf(" %d", fcntl(fd, F_SETLK, &fl));
+  fl.l_type = F_WRLCK;
+  printf(" %d %d\n", fcntl(fd, F_GETLK, &fl), fl.l_type == F_UNLCK);
   close(fd);
   printf("misc %ld %ld %d %d %d %d\n", labs(-5), atol("123"), getpagesize(),
          environ[0] == 0, (int)(stpcpy(buf, "xyz") - buf), (int)strnlen("abcdef", 3));

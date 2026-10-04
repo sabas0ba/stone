@@ -25,10 +25,18 @@
  * 渡すと「追記のつもりが先頭から上書き」という静かに誤る形になる。
  * **拒むのは実装をさぼるためではなく、嘘をつかないためである。**
  *
- * O_EXCL と O_CLOEXEC は **わざと定義しない**。zlib はどちらも
- * #ifdef で守っているので、無ければその分岐が除かれて正しく動く。
- * 「無いものは無いと言う」方が、あるふりより通る範囲が広い。 */
+ * O_CLOEXEC は **わざと定義しない**。zlib は #ifdef で守っているので、
+ * 無ければその分岐が除かれて正しく動く。 */
 #define O_APPEND 1024
+
+/* O_CREAT と組で「既にあれば EEXIST で失敗する」(libc26)。libiberty の
+ * mkstemps.c が一時ファイルを作るのに #ifdef で守らずに使う。
+ *
+ * カーネルの openat はこのフラグを知らないので，open() が先に stat して
+ * 確かめる。確かめてから作るまでの間に他が割り込むことは無い ——
+ * 走行は逐次で，spawn は子の終わりを待つ (下の助言的ロックと同じ理由)。
+ * O_CREAT を伴わない O_EXCL は意味を持たないので見ない (Linux と同じ) */
+#define O_EXCL   128
 
 #define AT_FDCWD (-100)
 
@@ -81,6 +89,21 @@ struct flock {
  * 「どの種類の錠を，どの範囲について訊くのか」を書いて渡すものなので，
  * 取りに行く側と同じ形である。「知らないものは受けて捨てない」を，
  * 命令だけでなく**中身にも**当てる */
-int fcntl(int fd, int cmd, void *arg);
+/* ---- close-on-exec (libc26) ----
+ *
+ * libiberty の pex-unix.c が `fcntl (fd, F_SETFD, FD_CLOEXEC)` と書く。
+ *
+ * **我々の spawn は子に fd 3 以上を渡さない** (kernel28 が子の表を
+ * 空にする)。どの fd も既に close-on-exec である。そこで F_GETFD は
+ * 常に FD_CLOEXEC を返し，F_SETFD は FD_CLOEXEC を立てる依頼だけを
+ * 受ける。落とす依頼 (子に渡したい) は叶えられないので EINVAL で拒む */
+#define F_GETFD    1
+#define F_SETFD    2
+#define FD_CLOEXEC 1
+
+/* 第 3 引数は命令によって整数 (F_SETFD) か struct flock * (ロック) で
+ * ある。POSIX の宣言どおり可変引数で受ける (libc25 までは void * で
+ * 受けていたので，整数を渡す F_SETFD の呼出しが型で合わなかった) */
+int fcntl(int fd, int cmd, ...);
 
 #endif
