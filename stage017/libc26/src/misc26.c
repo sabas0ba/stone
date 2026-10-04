@@ -145,33 +145,43 @@ char *asctime(struct tm *t) {
  *
  * 呼び手の関数が戻るまで使える領域を返す。本物はスタックを伸ばすが，
  * 我々の cc は関数の枠の大きさを翻訳時に決めるので，呼出しで伸ばせない。
- * **ヒープから取り，取ったときのスタックの深さを控える。** 次に呼ばれた
- * とき，今より深い所 (番地が小さい所。スタックは下へ伸びる) で取った分は
- * その関数が既に戻っているので返す。同じ関数から何度呼んでも深さは同じ
- * なので返さない。
+ * **ヒープから取り，取った関数の枠の基底 (深さ) を控える。**
  *
- * **戻った後に触る使い方は本物と同じく誤りである。** 違うのは，返すのが
- * 次の alloca の呼出しまで遅れることだけである。alloca(0) は返すだけを行う */
+ * cc15ao 以降の cc は `alloca(n)` を `__alloca2(n, fp)` に書き換え，
+ * alloca を呼んだ関数が戻る直前に `__alloca_release(fp)` を呼ぶ
+ * (stage015/cc15ao.sc)。fp は呼んだ関数の枠の基底である。返すのは
+ * 基底が fp 以下 (その呼出しと，より深い呼出し) の領域で，寿命は本物と
+ * 同じく「呼んだ関数が戻るまで」になる。
+ *
+ * 名前で呼ばれる `alloca` (関数へのポインタを通した呼出しや，書き換えない
+ * cc で訳したもの) は，alloca 自身の枠の位置を深さとして控え，次の
+ * 呼出しで今より深い所の分を返す。こちらは同じ深さで繰り返し呼ばれる
+ * 関数の分を返さない —— 返すのはより浅い所から呼ばれたときである。
+ *
+ * 戻った後に触る使い方は本物と同じく誤りである */
 struct alloca_hdr {
   struct alloca_hdr *next;      /* 1 つ前に取った領域 */
-  char *depth;                  /* 取ったときのスタックの深さ */
+  char *depth;                  /* 取った関数の枠の基底 */
 };
 
 static struct alloca_hdr *alloca_last;
 
-void *alloca(size_t n) {
-  char probe;
-  char *depth;
+/* 基底が depth より深い (番地が小さい) 領域を返す。eq が 1 なら同じ深さも返す。
+ * スタックは下へ伸びるので，深い所で取った領域ほど新しい */
+static void alloca_free_below(char *depth, int eq) {
   struct alloca_hdr *h;
   struct alloca_hdr *nx;
-  depth = &probe;
   h = alloca_last;
-  while (h != 0 && h->depth < depth) {
+  while (h != 0 && (h->depth < depth || (eq && h->depth == depth))) {
     nx = h->next;
     free(h);
     h = nx;
   }
   alloca_last = h;
+}
+
+static void *alloca_take(size_t n, char *depth) {
+  struct alloca_hdr *h;
   if (n == 0) return 0;
   h = (struct alloca_hdr *)malloc(sizeof(struct alloca_hdr) + n);
   if (h == 0) abort();
@@ -179,4 +189,23 @@ void *alloca(size_t n) {
   h->depth = depth;
   alloca_last = h;
   return (void *)(h + 1);
+}
+
+void *alloca(size_t n) {
+  char probe;
+  alloca_free_below(&probe, 0);
+  return alloca_take(n, &probe);
+}
+
+/* cc が alloca(n) を書き換えた形。fp は呼んだ関数の枠の基底 */
+void *__alloca2(size_t n, char *fp) {
+  /* 呼んだ関数より深い呼出しは既に戻っている */
+  alloca_free_below(fp, 0);
+  return alloca_take(n, fp);
+}
+
+/* alloca を呼んだ関数が戻る直前に cc が呼ぶ */
+int __alloca_release(char *fp) {
+  alloca_free_below(fp, 1);
+  return 0;
 }

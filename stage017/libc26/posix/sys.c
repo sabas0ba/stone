@@ -72,15 +72,11 @@ int open(char *path, int flags, ...) {
    * O_CREAT と O_TRUNC しか見ないので、O_APPEND を渡すと「追記のつもりが
    * 先頭から上書き」になる。ここで拒めば呼び手が気づく
    * (docs/stage017-cc.md 32 章) */
-  int fd;
   if (flags & O_APPEND) {
     errno = EINVAL;
     return -1;
   }
-  fd = wrap(sys_openat(AT_FDCWD, path, flags, 0));
-  /* fstat のために開いた経路を控える (第 26 世代。posix/sys26.c) */
-  if (fd >= 0) __fdpath_set(fd, path);
-  return fd;
+  return wrap(sys_openat(AT_FDCWD, path, flags, 0));
 }
 
 int read(int fd, void *buf, size_t n) {
@@ -92,7 +88,6 @@ int write(int fd, void *buf, size_t n) {
 }
 
 int close(int fd) {
-  __fdpath_set(fd, 0);
   return wrap(sys_close(fd));
 }
 

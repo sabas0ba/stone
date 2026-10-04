@@ -105,9 +105,9 @@ int newer(struct stat *a, struct stat *b);
 
 /* ---- 第 26 世代 (docs/stage017-gcc.md 8.15) ---- */
 
-/* **カーネルに記述子の stat は無い。** libc の open が開いた経路を控えて
- * おき (posix/sys26.c)，その経路を stat する。経路を持たない記述子
- * (0 / 1 / 2 の端末) は -1 (errno = EBADF) である */
+/* 記述子で stat する。カーネル (kernel28) の fstat2 (503) が答える。
+ * 開いたまま unlink したファイルも引ける。0 / 1 / 2 (端末) は表の項目を
+ * 持たないので -1 (errno = EBADF) である */
 int fstat(int fd, struct stat *st);
 /* sfs に記号リンクは無いので stat と同じである */
 int lstat(char *path, struct stat *st);

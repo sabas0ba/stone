@@ -92,7 +92,4 @@ int getpagesize(void);
 /* 環境変数の並び。カーネルは環境を渡さないので，常に空 (NULL だけ) である */
 extern char **environ;
 
-/* libc の内部: open / close が経路を控える (fstat が使う) */
-void __fdpath_set(int fd, char *path);
-
 #endif

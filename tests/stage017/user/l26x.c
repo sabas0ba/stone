@@ -13,8 +13,12 @@
  *   fstat    open した記述子の大きさと種別。fileno(stdout) は 1
  *   access   在るファイルは 0，無いファイルは -1
  *   asctime  C89 7.12.3.1 の形
- *   alloca   20 段の再帰で 1000 バイトずつ取り，200 回繰り返す。戻った
- *            関数の分を返さなければ 4 MB を超えて取り続ける
+ *   alloca   20 段の再帰で 1000 バイトずつ取り，200 回繰り返す。続けて
+ *            同じ深さで alloca を呼ぶ関数を 10 万回呼ぶ。1 回 4000 バイト
+ *            なので，呼んだ関数の戻りで返さなければ 400 MB を取ろうとして
+ *            ヒープ (プロセスの領域は 256 MiB) が尽きる (cc15ao が
+ *            __alloca_release を呼ぶ。cc15an では abort で 134 になる)
+ *   unlink   開いたファイルを unlink した後も fstat が長さを返す (kernel28)
  *   freopen  stdout を開き直した先 (y.txt) に書かれる */
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +28,13 @@
 #include <math.h>
 #include <time.h>
 #include <sys/stat.h>
+
+static int flat(int n) {
+  char *p;
+  p = alloca(4000);
+  p[3999] = (char)n;
+  return p[3999];
+}
 
 static int depth(int n) {
   char *p;
@@ -66,7 +77,18 @@ int main(void) {
   printf("asctime %s", asctime(&tm));
   s = 0;
   for (i = 0; i < 200; i++) s = s + depth(20);
-  printf("alloca %d\n", s);
+  printf("alloca %d", s);
+  s = 0;
+  for (i = 0; i < 100000; i++) s = s + flat(i & 1);
+  printf(" %d\n", s);
+  f = fopen("z.txt", "w");
+  fputs("12345678", f);
+  fclose(f);
+  fd = open("z.txt", 0);
+  unlink("z.txt");
+  i = fstat(fd, &st);
+  printf("unlink %d %ld %d\n", i, st.st_size, access("z.txt", F_OK));
+  close(fd);
   printf("misc %ld %ld %d %d %d %d\n", labs(-5), atol("123"), getpagesize(),
          environ[0] == 0, (int)(stpcpy(buf, "xyz") - buf), (int)strnlen("abcdef", 3));
   freopen("y.txt", "w", stdout);

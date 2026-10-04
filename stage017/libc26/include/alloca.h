@@ -4,9 +4,8 @@
  * 置く。stdlib.h に置くと，自前で `char *alloca ();` を宣言する
  * ソース (GMP の gmp-impl.h) と型がぶつかる (docs/stage017-gcc.md 8.15)。
  *
- * **ヒープから取り**，次に呼ばれたとき呼び手より深い (既に戻った) 関数が
- * 取った分を返す (src/misc26.c)。真のスタック上の確保ではないが，戻った
- * 後に触らない限り同じに振る舞う。
+ * **ヒープから取る。** cc15ao 以降の cc は呼んだ関数の戻りで返すので，
+ * 寿命は本物と同じである (src/misc26.c / stage015/cc15ao.sc)。
  */
 #ifndef _ALLOCA_H
 #define _ALLOCA_H
@@ -14,5 +13,9 @@
 #include <stddef.h>
 
 void *alloca(size_t n);
+
+/* cc15ao 以降の cc が使う形 (src/misc26.c の註)。直接は呼ばない */
+void *__alloca2(size_t n, char *fp);
+int __alloca_release(char *fp);
 
 #endif

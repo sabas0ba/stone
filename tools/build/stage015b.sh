@@ -167,6 +167,9 @@ build_stage015b() {
     # 第 40 世代。単項の + と，符号なしの - / ~ の型 (`~0U >> 1` が算術
     # シフトになっていた)。幅 32 のビットフィールド (docs/stage017-gcc.md 8.15)
     ccgen cc15an cc15am stage015/cc15an.sc
+    # 第 41 世代。alloca を __alloca2(n, fp) に書き換え，呼んだ関数の戻りで
+    # __alloca_release(fp) を呼ぶ (docs/stage017-gcc.md 8.15)
+    ccgen cc15ao cc15an stage015/cc15ao.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -199,6 +202,7 @@ do_stage015b() {
         cc15ai0.bin cc15ai.bin cc15aj0.bin cc15aj.bin \
         cc15ak0.bin cc15ak.bin cc15al0.bin cc15al.bin \
         cc15am0.bin cc15am.bin cc15an0.bin cc15an.bin \
+        cc15ao0.bin cc15ao.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin ld18.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
@@ -209,7 +213,7 @@ do_stage015b() {
            stage015/cc15ad.sc stage015/cc15ae.sc stage015/cc15af.sc \
            stage015/cc15ag.sc stage015/cc15ah.sc stage015/cc15ai.sc \
            stage015/cc15aj.sc stage015/cc15ak.sc stage015/cc15al.sc \
-           stage015/cc15am.sc stage015/cc15an.sc \
+           stage015/cc15am.sc stage015/cc15an.sc stage015/cc15ao.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc stage015/ld18.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh

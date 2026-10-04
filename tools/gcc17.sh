@@ -326,8 +326,8 @@ pp16=tmp/build/pp16.bin
 # 押し戻しの器が尽き，pp19 は gcc/ のマクロ表に収まらない。docs/stage017-gcc.md
 # 8.10 / 8.11)。STONE_GCC17_PPOS で
 # 前の世代を測り直せる
-ppos=${STONE_GCC17_PPOS:-tmp/build/pp20}
-cc15=tmp/build/cc15an.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+ppos=${STONE_GCC17_PPOS:-tmp/build/pp21}
+cc15=tmp/build/cc15ao.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
@@ -1117,7 +1117,8 @@ unit_run() {
         # (-I) から見た相対経路である。同じ階層からの "c-common.def" の
         # ような綴りは basename の方が受ける
         # libdecnumber の bid/ の単位も "dpd/decimal32.c" の綴りで取り込む
-        case $lib in gcc|libdecnumber) ;; *) continue ;; esac
+        # GMP の mpn/generic/hgcd2.c は "mpn/generic/hgcd2-div.h" と書く
+        case $lib in gcc|libdecnumber|gmp|mpfr|mpc) ;; *) continue ;; esac
         for _i in $(lib_dirs "$lib" "$u"); do
             _dir=${_i#-I}
             case $h in
@@ -1388,6 +1389,11 @@ elf_whole() {
     [ $((_shoff + _shes * _shn)) -eq "$(wc -c < "$1" | tr -d ' ')" ]
 }
 
+# .o を作った入力の鍵。cc と .i のどちらが変わっても違う値になる
+obj_key() {
+    { sha256sum < "$cc15"; sha256sum < "$1"; } | sha256sum | cut -d' ' -f1
+}
+
 # 1 単位を遠距離呼出しで訳す。結果を 1 行で出す
 object1() {
     lu=$1
@@ -1399,6 +1405,7 @@ object1() {
             | sh tools/env.sh qemu "$cc15" > "$o.tmp" 2> /dev/null; then
         if elf_whole "$o.tmp"; then
             mv "$o.tmp" "$o"
+            obj_key "$i" > "$o.key"
             printf '%s\tok\t%s\n' "$lu" "$(wc -c < "$o" | tr -d ' ')"
         else
             printf '%s\tbroken\n' "$lu"
@@ -1412,20 +1419,24 @@ objects() {
     [ -s "$cc15" ] || die "ビルドチェーンのイメージが無い: $cc15 (sh tools/build.sh all)"
     mkdir -p "$work/obj"
     jobs=${STONE_GCC17_JOBS:-1}
-    # 既に出来ていて壊れていない .o は飛ばす (cc の SHA が変われば作り直す)
-    stamp="$work/obj/cc.sha"
-    cur=$(sha256sum < "$cc15")
-    if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$cur" ]; then
-        find "$work/obj" -name '*.o' -exec rm -f {} +
-        printf '%s\n' "$cur" > "$stamp"
-    fi
+    # 既に出来ていて壊れておらず，**鍵 (cc と .i の SHA-256) が今と同じ** .o は
+    # 飛ばす。cc だけで判じると，configure や header を変えて units を通し
+    # 直した後も古い .o を使い続ける (自動レビューの指摘)
     for lib in ${1:-libiberty libcpp gcc}; do
         unit_list "$lib" | grep . | sed "s|^|$lib/|"
     done | while IFS= read -r lu; do
-        elf_whole "$work/obj/${lu%%/*}.${lu#*/}.o" || echo "$lu"
+        _o="$work/obj/${lu%%/*}.${lu#*/}.o"
+        _i="$work/out/${lu%%/*}.${lu#*/}.i"
+        if elf_whole "$_o" && [ -s "$_i" ] && [ -f "$_o.key" ] \
+                && [ "$(cat "$_o.key")" = "$(obj_key "$_i")" ]; then
+            continue
+        fi
+        echo "$lu"
     done > "$work/obj.todo"
     echo "objects: $(wc -l < "$work/obj.todo" | tr -d ' ') 単位を訳す"
-    xargs -P "$jobs" -n 1 sh "$0" object1 < "$work/obj.todo" | tee "$work/obj.log"
+    # -r: 訳すものが無ければ object1 を呼ばない (GNU xargs は空の入力でも
+    # 1 度は呼ぶので，単位名の無い行が誤りとして残っていた)
+    xargs -r -P "$jobs" -n 1 sh "$0" object1 < "$work/obj.todo" | tee "$work/obj.log"
     bad=$(awk -F '\t' '$2 != "ok"' "$work/obj.log" | wc -l | tr -d ' ')
     [ "$bad" -eq 0 ] || die "$bad 単位が .o にならなかった ($work/obj.log)"
 }

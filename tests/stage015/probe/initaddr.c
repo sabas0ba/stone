@@ -56,6 +56,15 @@ int add2 (int x, int y) { return x + y; }
 int mul2 (int x, int y) { return x * y; }
 static int sub2 (int x, int y) { return x - y; }
 
+/* 関数内 static の初期化子で，同じ関数の static のアドレスを二重の括弧と
+ * キャストで置く (GMP の mpq/cmp.c の `{{0, (1), ((mp_limb_t *) &one)}}`。cc15ao) */
+struct lim { int alloc; int size; unsigned *d; };
+static int fstat_like(void) {
+  const static unsigned one = 41;
+  const static struct lim den = { 0, (1), ((unsigned *) &one) };
+  return (int)den.d[0] + den.size;
+}
+
 int main(void) {
   int i;
   binop_t *fp;
@@ -72,6 +81,7 @@ int main(void) {
   pn(add2(3, 4));
   pn(fp(5, 6));
   pn(sub2(9, 20));
+  pn(fstat_like());
   nl();
   return 0;
 }
