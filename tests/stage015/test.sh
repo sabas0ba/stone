@@ -11,7 +11,7 @@ cd "$repo_root"
 mkdir -p tmp/s15
 stable_dir=tmp/s15/stable
 
-cc=tmp/build/cc15al.bin  # 台帳は最前線の世代で測る
+cc=tmp/build/cc15am.bin  # 台帳は最前線の世代で測る
 pp=tmp/build/pp.bin
 ld=tmp/build/ld.bin
 prb=tests/stage015/probe
@@ -70,15 +70,16 @@ for pair in cc15a.bin:stage015/cc15a.md cc15b.bin:stage015/cc15b.md \
         cc15ai.bin:stage015/cc15ai.md cc15aj.bin:stage015/cc15aj.md \
         cc15ak.bin:stage015/cc15ak.md \
         cc15al.bin:stage015/cc15al.md \
+        cc15am.bin:stage015/cc15am.md \
         pp15.bin:stage015/pp15.md \
         pp16.bin:stage015/pp16.md ld16.bin:stage015/ld16.md \
-        ld17.bin:stage015/ld17.md; do
+        ld17.bin:stage015/ld17.md ld18.bin:stage015/ld18.md; do
     want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' "${pair##*:}" | cut -d' ' -f2)
     got=$(sha256sum "tmp/build/${pair%%:*}"); got=${got%% *}
     [ -n "$want" ] && [ "$want" = "$got" ] || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "build: cc15a..cc15al と pp15 / pp16 / ld16 / ld17 の SHA-256 が各 .md 記載値と一致"
+report $? "build: cc15a..cc15am と pp15 / pp16 / ld16 / ld17 / ld18 の SHA-256 が各 .md 記載値と一致"
 
 # **落ちたときに「中身が違う」のか「実行が再現していない」のかを
 # 分ける** (1.6)。この検査は CI で実際に揺らいだ
@@ -285,6 +286,15 @@ fp15algen() {
 stable_cmp "fixpoint(cc15al)" fp15algen tmp/build/cc15al.bin
 report $? "fixpoint: cc15al が自分自身を再生成する (B2 == B3)"
 
+fp15amgen() {
+    { cat stage015/cc15am.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15am.bin > tmp/s15/b3am.o \
+        && { cat tmp/s15/b3am.o; printf '\0'; } \
+            | sh tools/env.sh qemu "$ld" > "$1"
+}
+stable_cmp "fixpoint(cc15am)" fp15amgen tmp/build/cc15am.bin
+report $? "fixpoint: cc15am が自分自身を再生成する (B2 == B3)"
+
 # 64 bit を足しただけで，32 bit のコード生成は変えていない
 ok=0
 for n in sh ed mk; do
@@ -294,7 +304,7 @@ for n in sh ed mk; do
         && cmp -s "tmp/s15/r_$n.o" "tmp/build/${n}13.o" || ok=1
 done
 [ "$ok" -eq 0 ]
-report $? "regress: cc15al が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
+report $? "regress: cc15am が既存のソース (sh / ed / mk) を cc10l と同じ .o にする"
 
 # 大域記号を 8300 個持つ単位 (cc15ai で表を 8192 個から広げた。
 # docs/stage017-gcc.md 8.12)。bare のリンカ (stage008 の ld) は 1 オブジェクト
@@ -304,7 +314,40 @@ sh tools/bundle.sh tests/stage015/probe/manyglob.c 2> /dev/null \
     | sh tools/env.sh qemu "$pp" > tmp/s15/manyglob.i 2> /dev/null \
     && sh tools/env.sh qemu "$cc" < tmp/s15/manyglob.i > tmp/s15/manyglob.o 2> /dev/null \
     && [ -s tmp/s15/manyglob.o ]
-report $? "build: 大域記号を 8300 個持つ単位を cc15al が訳せる (manyglob)"
+report $? "build: 大域記号を 8300 個持つ単位を cc15am が訳せる (manyglob)"
+
+# **遠距離呼出し** (`#pragma stone far_call`。cc15am。docs/stage017-gcc.md 8.15)。
+# 同じ probe を近距離 (jal) と遠距離 (lui x31 + jalr) の両方で訳して走らせ，
+# 出力が一致することを見る。遠距離の .o に R_RISCV_JAL (17) が残っていない
+# ことも見る (残っていれば 1 MiB を越える呼出しがリンクで落ちる)
+farcall_run() {
+    # $1 = probe 名, $2 = near | far
+    sh tools/bundle.sh stage015/libc/include/stdarg.h \
+        "tests/stage015/probe/$1.c" 2> /dev/null \
+        | sh tools/env.sh qemu "$pp" > "tmp/s15/fc_$1.i" 2> /dev/null || return 1
+    if [ "$2" = far ]; then
+        { printf '#pragma stone far_call\n'; cat "tmp/s15/fc_$1.i"; } \
+            | sh tools/env.sh qemu "$cc" > "tmp/s15/fc_$1_$2.o" || return 1
+    else
+        sh tools/env.sh qemu "$cc" < "tmp/s15/fc_$1.i" \
+            > "tmp/s15/fc_$1_$2.o" || return 1
+    fi
+    { cat "tmp/s15/fc_$1_$2.o" tmp/build/rt64.o tmp/build/rtfp.o; printf '\0'; } \
+        | sh tools/env.sh qemu "$ld" > "tmp/s15/fc_$1_$2.bin" || return 1
+    sh tools/env.sh qemu "tmp/s15/fc_$1_$2.bin" < /dev/null > "tmp/s15/fc_$1_$2.out"
+}
+ok=0
+for n in fpstru bigarg declform; do
+    farcall_run "$n" near && farcall_run "$n" far \
+        && cmp -s "tmp/s15/fc_${n}_near.out" "tmp/s15/fc_${n}_far.out" \
+        && [ -s "tmp/s15/fc_${n}_far.out" ] \
+        && sh tools/env.sh run riscv64-unknown-elf-readelf -r "tmp/s15/fc_${n}_far.o" \
+            < /dev/null > "tmp/s15/fc_${n}_far.rel" 2>&1 \
+        && grep -q R_RISCV_LO12_I "tmp/s15/fc_${n}_far.rel" \
+        && ! grep -q R_RISCV_JAL "tmp/s15/fc_${n}_far.rel" || ok=1
+done
+[ "$ok" -eq 0 ]
+report $? "build: 遠距離呼出しで訳した probe が近距離と同じ値を出し，JAL の再配置を持たない (cc15am)"
 
 # **ld17 は診断だけを足したもの。** 正常系の経路が 1 ビットも変わっていない
 # ことをここで見る —— 変わっていたら「診断を足しただけ」が嘘になる
