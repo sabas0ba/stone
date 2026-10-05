@@ -11,6 +11,9 @@
 #   gcc17.sh unit <lib>/<unit>    1 単位を bundle -> pp -> cc15v に通し，結果を 1 行で出す
 #   gcc17.sh units [lib]          全単位を通し，tmp/g17u/units.txt に表を出す (6.1 の 4)
 #   gcc17.sh where <lib>/<unit>   gap の単位で，cc が落ちる最初の関数の塊を絞る
+#   gcc17.sh objects [lib]        単位を遠距離呼出しで .o にする (tmp/g17u/obj)
+#   gcc17.sh link                 cc1 を ld18 で組む (tmp/g17u/cc1)
+#   gcc17.sh run-cc1 <file> [opt...]  cc1 を kernel28 の上で走らせ，<file> を訳す
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 # unit / units はビルドチェーンで生成したバイナリ (tmp/build) と QEMU を要る。STONE_ENGINE と
@@ -1441,6 +1444,67 @@ objects() {
     [ "$bad" -eq 0 ] || die "$bad 単位が .o にならなかった ($work/obj.log)"
 }
 
+# cc1 を組む (docs/stage017-gcc.md 8.15)。gcc/ の単位 (C_OBJS / OBJS /
+# libcommon / main) と cc1-checksum を必ず組み，libiberty / libcpp /
+# libdecnumber / zlib / GMP / MPFR / MPC は**ライブラリの部品**として
+# 未定義の名前を定義するものだけを組む (本物の build の .a と同じ)。
+#
+# 並びは libc26 と実行時ルーチンが先である。libc の部品は前置部の syscall
+# スタブを jal で呼ぶので，前置部から 1 MiB 以内に要る (stage015/ld18.md)。
+#
+# cc1-checksum.c は本物の build では genchecksum が実行ファイルの MD5 を
+# 書く。cc1 はこれを PCH の照合にだけ使う。我々は PCH を使わないので
+# 0 の 16 バイトに固定する (同じ入力から同じ cc1 ができる)
+link_libs="libiberty libcpp libdecnumber zlib gmp mpfr mpc"
+link_cc1() {
+    objects "gcc $link_libs"
+    c=$work/obj/cc1-checksum
+    { printf '%s\n' '#pragma stone far_call' \
+        'const unsigned char executable_checksum[16] = { 0 };'; printf '\004'; } \
+        | sh tools/env.sh qemu "$cc15" > "$c.o" \
+        || die "cc1-checksum.c を訳せない"
+    set -- -L tmp/build/l26_*.o tmp/build/rt64.o tmp/build/rtfp.o -N
+    for u in $(unit_list gcc); do
+        set -- "$@" "$work/obj/gcc.$u.o"
+    done
+    set -- "$@" "$c.o" -L
+    for lib in $link_libs; do
+        for u in $(unit_list "$lib"); do
+            set -- "$@" "$work/obj/$lib.$u.o"
+        done
+    done
+    # データスタックは 8 MiB。cc1 は木を再帰で辿る (fold / expand / gimplify)
+    sh tools/ld18.sh -s "${STONE_GCC17_DSTK:-8388608}" -o "$work/cc1" "$@"
+    echo "cc1: $(wc -c < "$work/cc1" | tr -d ' ') バイト ($work/cc1)"
+}
+
+# cc1 を stone の OS (kernel28) の上で走らせる (docs/stage017-gcc.md 8.15)。
+# 根に cc1 / sh2 / 入力を置いて sfs4 に詰め，sh2 が go.sh を実行する。
+# 出力は「rc <終了コード>」の行と，訳した .s (あれば) である。
+#
+# 窓は 512 MiB (kernel27 以降)。cc1 は 100 MiB を超えるので，イメージは
+# 256 MiB 取る。RAM ファイルの組み方は tests/stage017 の runroot6 と同じ
+run_cc1() {
+    [ -s "$work/cc1" ] || die "cc1 が無い (sh tools/gcc17.sh link)"
+    f=$1; shift
+    [ -s "$f" ] || die "入力が無い: $f"
+    r=$work/run
+    rm -rf "$r" "$work/run.img" "$work/run.ram"
+    mkdir -p "$r/root"
+    cp "$work/cc1" "$r/root/cc1"
+    cp tmp/build/sh2.bin "$r/root/sh2"
+    cp "$f" "$r/root/t.c"
+    printf 'cc1 %s t.c -o t.s\necho "rc $?"\ncat t.s\n' "${*:--quiet}" > "$r/root/go.sh"
+    printf 'sh2 go.sh\n' > "$r/root/boot"
+    sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 128 > /dev/null \
+        || die "sfs4 に詰められない"
+    dd if=/dev/null of="$work/run.ram" bs=1 seek=1073741824 2> /dev/null
+    dd if="$work/run.img" of="$work/run.ram" bs=64K oflag=seek_bytes \
+        seek=536870912 conv=notrunc 2> /dev/null
+    STONE_QEMU_RAMFILE="$work/run.ram" STONE_QEMU_RAM=1G \
+        sh tools/env.sh qemu tmp/build/kernel28.bin < /dev/null
+}
+
 cmd=${1:-}
 case "$cmd" in
 measure) measure ;;
@@ -1458,11 +1522,13 @@ unit-row)
     ;;
 units) units "${2:-}" ;;
 objects) objects "${2:-}" ;;
+link) link_cc1 ;;
+run-cc1) [ -n "${2:-}" ] || die "run-cc1 <file> [opt...]"; shift; run_cc1 "$@" ;;
 list) [ -n "${2:-}" ] || die "list <lib>"; unit_list "$2" ;;
 object1) [ -n "${2:-}" ] || die "object1 <lib>/<unit>"; object1 "$2" ;;
 where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)
-    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib]}" >&2
+    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...]}" >&2
     exit 2
     ;;
 esac
