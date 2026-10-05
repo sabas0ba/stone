@@ -330,7 +330,7 @@ pp16=tmp/build/pp16.bin
 # 8.10 / 8.11)。STONE_GCC17_PPOS で
 # 前の世代を測り直せる
 ppos=${STONE_GCC17_PPOS:-tmp/build/pp21}
-cc15=tmp/build/cc15ap.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+cc15=tmp/build/cc15aq.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
@@ -618,6 +618,14 @@ func_cache() {
 #   2. 語長は autoconf の cache 変数で RV32 の値を与える。host は 64 bit
 #      なので，放っておくと SIZEOF_LONG が 8 になる
 #
+#      **sizeof を使う翻訳試験は cache 変数を通らない。** host の cc で
+#      訳すので host の語長で答える。libiberty の「64 bit の型」の検査は
+#      stdint.h が無いと `sizeof(long) * CHAR_BIT >= 64` を訳せるかで決め，
+#      host では unsigned long になる。RV32 の long は 32 bit なので，
+#      hashtab.c の `((unsigned long) x * inv) >> 32` が 0 にならず不定の
+#      添字を作り，cc1 が起動してすぐ落ちた (docs/stage017-gcc.md 8.15)。
+#      この検査の答 (liberty_cv_uint64) も与える
+#
 #   3. 関数の有無 (HAVE_STRERROR など) は我々の libc の記号表から与える
 #      (func_cache)。host の link 試験に任せると glibc の答になる。libiberty
 #      は「無い」と言われた関数の代わりを LIBOBJS に入れる (unit_list)
@@ -631,6 +639,7 @@ configure() {
          && env CPPFLAGS="-nostdinc -isystem $ours" \
             ac_cv_sizeof_short=2 ac_cv_sizeof_int=4 ac_cv_sizeof_long=4 \
             ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4 ac_cv_c_bigendian=no \
+            liberty_cv_uint64='unsigned long long' \
             $(func_cache "$src/$lib/configure") \
             sh "$src/$lib/configure" --srcdir="$src/$lib" > configure.log 2>&1) \
             || die "$lib の configure が落ちた ($work/$lib/configure.log)"
@@ -823,6 +832,20 @@ configure_gcc() {
 }
 
 # 書庫が -c する翻訳単位の一覧。Makefile.in の変数から取る (自分で選ばない)
+# gcc/ の Makefile の変数 ($1。空白区切り) に並ぶ単位と，$2 以降の単位を
+# 重ねずに出す (unit_list gcc と link が使う)
+gcc_units() {
+    _vars=$1; shift
+    {
+        for v in $_vars; do
+            make -s -C "$work/gcc-gen/gcc" -f Makefile -f "$work/print.mk" \
+                "print-$v" 2> /dev/null
+        done
+        for u in "$@"; do echo "$u.o"; done
+    } | tr -s ' ' '\n' | grep -E '\.o$' | sed 's|\.o$||' \
+        | sed 's|^host-linux$|host-default|' | awk '!seen[$0]++'
+}
+
 unit_list() {
     case $1 in
     libiberty)
@@ -904,14 +927,7 @@ unit_list() {
         # 同じ単位が 2 つの変数に入ることがある (i386-c.o) ので 1 つにする
         [ -s "$work/gcc-gen/gcc/Makefile" ] \
             || die "gcc/ が configure されていない (sh tools/gcc17.sh configure-gcc)"
-        {
-            for v in C_OBJS C_TARGET_OBJS OBJS OBJS-libcommon-target OBJS-libcommon; do
-                make -s -C "$work/gcc-gen/gcc" -f Makefile -f "$work/print.mk" \
-                    "print-$v" 2> /dev/null
-            done
-            echo main.o
-        } | tr -s ' ' '\n' | grep -E '\.o$' | sed 's|\.o$||' \
-            | sed 's|^host-linux$|host-default|' | awk '!seen[$0]++'
+        gcc_units "C_OBJS C_TARGET_OBJS OBJS OBJS-libcommon-target OBJS-libcommon" main
         # **host hook は host-default にする。** config.host は host の 3 つ組が
         # *-linux* のとき host-linux.o を選ぶ。configure は build と同じ
         # host (x86_64-linux) で走らせているのでそちらになるが，cc1 が走るのは
@@ -1444,10 +1460,13 @@ objects() {
     [ "$bad" -eq 0 ] || die "$bad 単位が .o にならなかった ($work/obj.log)"
 }
 
-# cc1 を組む (docs/stage017-gcc.md 8.15)。gcc/ の単位 (C_OBJS / OBJS /
-# libcommon / main) と cc1-checksum を必ず組み，libiberty / libcpp /
-# libdecnumber / zlib / GMP / MPFR / MPC は**ライブラリの部品**として
-# 未定義の名前を定義するものだけを組む (本物の build の .a と同じ)。
+# cc1 を組む (docs/stage017-gcc.md 8.15)。本物の build と同じく，C の
+# 前処理系 (C_OBJS / C_TARGET_OBJS) と main と cc1-checksum を必ず組み，
+# 残り (OBJS = libbackend.a，libcommon-target.a，libcommon.a，libiberty /
+# libcpp / libdecnumber / zlib / GMP / MPFR / MPC) は**ライブラリの部品**
+# として未定義の名前を定義するものだけを組む。OBJS には tree-mudflap と
+# 同じ名前を定義する tree-nomudflap (C 以外の前処理系のための代役) が
+# あり，全部を必ず組むと名前が重なる。
 #
 # 並びは libc26 と実行時ルーチンが先である。libc の部品は前置部の syscall
 # スタブを jal で呼ぶので，前置部から 1 MiB 以内に要る (stage015/ld18.md)。
@@ -1464,10 +1483,15 @@ link_cc1() {
         | sh tools/env.sh qemu "$cc15" > "$c.o" \
         || die "cc1-checksum.c を訳せない"
     set -- -L tmp/build/l26_*.o tmp/build/rt64.o tmp/build/rtfp.o -N
-    for u in $(unit_list gcc); do
+    forced=$(gcc_units "C_OBJS C_TARGET_OBJS" main)
+    for u in $forced; do
         set -- "$@" "$work/obj/gcc.$u.o"
     done
     set -- "$@" "$c.o" -L
+    for u in $(gcc_units "OBJS OBJS-libcommon-target OBJS-libcommon"); do
+        case " $(echo $forced) " in *" $u "*) continue ;; esac
+        set -- "$@" "$work/obj/gcc.$u.o"
+    done
     for lib in $link_libs; do
         for u in $(unit_list "$lib"); do
             set -- "$@" "$work/obj/$lib.$u.o"
@@ -1501,7 +1525,9 @@ run_cc1() {
     dd if=/dev/null of="$work/run.ram" bs=1 seek=1073741824 2> /dev/null
     dd if="$work/run.img" of="$work/run.ram" bs=64K oflag=seek_bytes \
         seek=536870912 conv=notrunc 2> /dev/null
-    STONE_QEMU_RAMFILE="$work/run.ram" STONE_QEMU_RAM=1G \
+    # RAM ファイルはリポジトリからの相対で渡す。コンテナの中の QEMU は
+    # ホストの絶対経路を見られない (tools/env.sh はリポジトリだけを渡す)
+    STONE_QEMU_RAMFILE="${work#"$repo_root"/}/run.ram" STONE_QEMU_RAM=1G \
         sh tools/env.sh qemu tmp/build/kernel28.bin < /dev/null
 }
 

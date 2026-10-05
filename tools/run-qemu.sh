@@ -13,6 +13,9 @@
 #                     翻訳ブロックを命令単位に分割し (-singlestep)，実行命令と
 #                     割込み・例外を記録する (-d in_asm,int)。
 #                     レジスタ値も必要な場合は追加オプションで -d in_asm,cpu,int を渡す
+#   STONE_QEMU_INTLOG 例外と割込みだけの記録先ファイルパス (コンテナ内パス)。
+#                     -d int で mcause / mepc / mtval を記録する。命令は記録しない
+#                     ので，大きなプログラム (GCC の cc1) が落ちた番地を調べられる
 #   STONE_QEMU_GDB    GDB stub の待受け TCP ポート。指定時は最初の命令を実行する前に
 #                     停止し (-S)，デバッガの接続を待つ
 #   STONE_QEMU_RAMFILE
@@ -73,6 +76,10 @@ fi
 
 if [ -n "${STONE_QEMU_TRACE:-}" ]; then
     set -- "$@" -singlestep -d in_asm,int -D "$STONE_QEMU_TRACE"
+fi
+
+if [ -n "${STONE_QEMU_INTLOG:-}" ]; then
+    set -- "$@" -d int -D "$STONE_QEMU_INTLOG"
 fi
 
 if [ -n "${STONE_QEMU_GDB:-}" ]; then
