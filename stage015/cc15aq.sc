@@ -24,7 +24,10 @@
 ///     仮引数並びを読み飛ばさずに読み，型を作る (fnproto)
 ///   - 関数名を値として使うと，その関数の宣言の情報を持つ型になる
 ///   - ecalli は ecallseq と同じ変換 (argconv) と積み方 (argpush) を使う。
-///     可変長の関数をポインタで呼ぶときも，可変部を逆順に先に積む
+///     ただし可変長の型のポインタでは名前つきの部分だけ変換し，実引数は
+///     順に積む。GCC の GEN_FCN は可変長の型 (insn_gen_fn) のポインタで
+///     固定個の仮引数の gen_* を呼ぶ。可変部を逆順に積むと gen_* の
+///     実引数が逆になり，cc1 が内部の検査 (gcc_assert) で止まった
 ///   - 関数型の typedef で宣言した関数 (`static refmarker_fn f;`) も
 ///     型の情報を宣言として持つ
 ///
@@ -4035,7 +4038,15 @@ int ecalli(int f, int ft) {
   if (tok != o_rp) exit(1);
   next();
   n = argconv(np, av, aw, ah, at, frna[ft], frllm[ft], frdbm[ft], frflm[ft]);
-  n = argpush(np, av, aw, ah, at, frna[ft], frvar[ft], n);
+  // **可変長の型のポインタでも，実引数は順に積む。** GCC の GEN_FCN は
+  // 可変長の型 (`rtx (*insn_gen_fn) (rtx, ...)`) のポインタで固定個の
+  // 仮引数を持つ gen_* を呼ぶ。広く使われる呼出し規約では両者の積み方が
+  // 同じなので成り立つが，我々の可変長の積み方 (可変部を逆順に先に積む)
+  // は固定個と違う。GCC の使い方に合わせ，名前つきの部分だけ変換して，
+  // 残りは固定個と同じに順に積む。本物の可変長の関数をポインタで
+  // 呼ぶ形は受けない (cc15ap までと同じ)
+  if (frvar[ft]) n = argpush(np, av, aw, ah, at, 0 - 1, 0, n);
+  else n = argpush(np, av, aw, ah, at, frna[ft], 0, n);
   n = emit(c_calli, f, n);
   if (isstru(rt)) {
     // 返却された構造体はデータスタックに積まれて来る。名前つきの呼出しと

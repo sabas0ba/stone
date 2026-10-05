@@ -10,11 +10,13 @@
  *
  * 見るもの: 64 bit -> int / int -> 64 bit / int -> double / double -> float /
  * double -> int の変換，構造体のメンバ・局所・配列の関数へのポインタ，
- * 関数型の typedef，関数型の仮引数，(*f)(x)，可変長の関数をポインタで
- * 呼ぶ形 (可変部の積み方)，仮引数に関数ポインタを持つ関数ポインタの
- * typedef (GCC の tree.h の walk_tree_lh。内側の宣言子が外側の名前を
- * 消していた)。 */
-#include <stdarg.h>
+ * 関数型の typedef，関数型の仮引数，(*f)(x)，仮引数に関数ポインタを持つ
+ * 関数ポインタの typedef (GCC の tree.h の walk_tree_lh。内側の宣言子が
+ * 外側の名前を消していた)，可変長の型のポインタで固定個の関数を呼ぶ形
+ * (GCC の GEN_FCN。insn_gen_fn は `rtx (*) (rtx, ...)` で，gen_* は固定個)。
+ *
+ * 本物の可変長の関数をポインタで呼ぶ形は入れない。我々の可変長の積み方は
+ * 固定個と違い，GEN_FCN の形を優先したので受けない (stage015/cc15aq.md)。 */
 int putc(int c);
 
 static void pn(long long v) {
@@ -55,22 +57,16 @@ typedef int (*walk_fn) (int *, int (*) (int), long long);
 static int dbl(int x) { return 2 * x; }
 static int walk_impl(int *p, int (*g) (int), long long k) { return g(*p) + (int)k; }
 
-static int vsum(int n, ...) {
-  va_list ap;
-  int s;
-  int i;
-  s = 0;
-  va_start(ap, n);
-  for (i = 0; i < n; i++) s = s * 10 + va_arg(ap, int);
-  va_end(ap);
-  return s;
-}
+typedef int (*gen_fn) (int, ...);
+static int gen3(int a, int b, int c) { return a * 100 + b * 10 + c; }
+static int gen2(int a, int b) { return a * 10 + b; }
 
 int main(void) {
   long long big;
   int (*fp) (char *, char *, int);
   binop_t *bp;
-  int (*vp) (int, ...);
+  gen_fn g3;
+  gen_fn g2;
   int (*tab[2]) (char *, char *, int);
   walk_fn w;
   int four;
@@ -78,7 +74,8 @@ int main(void) {
   fp = pops_impl;
   tab[1] = pops_impl;
   bp = sub2;
-  vp = vsum;
+  g3 = (gen_fn) gen3;
+  g2 = (gen_fn) gen2;
   w = walk_impl;
   four = 4;
   pn(h.pops("1", "2", big));          /* 64 bit -> int */
@@ -90,8 +87,8 @@ int main(void) {
   pn(bp(10, 3));
   pn(apply(sub2, 20, 6));
   pn((*sub2)(9, 4));
-  pn(vp(3, 1, 2, 3));                  /* 可変部は逆順に積む */
-  pn(vp(2, 4, 5));
+  pn(g3(1, 2, 3));                     /* 可変長の型で固定個を呼ぶ (GEN_FCN) */
+  pn(g2(4, 5));
   pn(w(&four, dbl, 1));                /* int -> 64 bit (typedef の関数ポインタ) */
   putc('\n');
   return 0;

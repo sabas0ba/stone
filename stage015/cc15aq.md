@@ -24,7 +24,7 @@ targetm.calls.return_pops_args (fndecl, funtype, stack_size)
 | 64 bit -> int の仮引数 | 2 語を積む (以降がずれる) | 下位語を積む |
 | int -> 64 bit の仮引数 | 1 語を積む (以降がずれる) | 符号に応じて広げる |
 | int -> double / double -> float / double -> int | 変換しない | 変換する |
-| 可変長の関数をポインタで呼ぶ | 実引数を順に積む (可変部の位置が違う) | 可変部を逆順に先に積む (名前つきの呼出しと同じ) |
+| 可変長の型のポインタで呼ぶ | 実引数を順に積む | 名前つきの部分を変換し，実引数は順に積む (下の「可変長の型のポインタ」) |
 | 個数 | 検査しない | 仮引数の情報があれば検査する (5) |
 
 ## 型の持ち方
@@ -37,6 +37,16 @@ targetm.calls.return_pops_args (fndecl, funtype, stack_size)
 - 関数型の typedef で宣言した関数 (`static refmarker_fn f;`) は，型の情報を宣言として持つ
 - 名前つきの呼出しとポインタを通した呼出しは同じ変換 (`argconv`) と積み方 (`argpush`) を使う
 
+## 可変長の型のポインタ —— GCC の GEN_FCN に合わせる
+
+GCC は命令の生成関数を `GEN_FCN (icode) (op0, op1, op2)` で呼ぶ。表の型は `typedef rtx (*insn_gen_fn) (rtx, ...);` (可変長) で，指す先の `gen_addsi3` などは固定個の仮引数を持つ。C としては未定義の動作だが，広く使われる呼出し規約では可変長と固定個の積み方が同じなので成り立つ。
+
+我々の可変長の積み方 (可変部を逆順に先に積む。呼ばれた側は可変部の個数を知らないので，名前つきの位置を固定するためにこうしている) は固定個と違う。最初の版は可変長の型のポインタで可変部を逆順に積んだので，`gen_*` の実引数が逆になり，cc1 が `t.c` の 1 行の関数でも内部の検査 (`gcc_assert`。dwarf2cfi.c / i386.c) で止まった。
+
+両方を満たす積み方は無いので，GCC の使い方に合わせる。可変長の型のポインタでは名前つきの部分だけ仮引数の型へ変換し，実引数は固定個と同じく順に積む。**本物の可変長の関数をポインタで呼ぶ形は受けない** (`cc15ap` までと同じ。値が誤る)。
+
+変換が効く箇所は，間接呼出しの変換だけを外した版と `.o` を比べて確かめた。全 1282 単位のうち 17 単位で，GEN_FCN・target hook (64 bit -> int など)・libiberty の simple-object・GMP の doscan などの呼出しだった。
+
 ## 直したもの 2: 関数型の typedef で書いた仮引数
 
 `static int apply(binop_t f, int a, int b)` (`binop_t` は関数型の typedef) の `f` は関数へのポインタになる (C89 6.7.1)。`cc15ap` までは関数型のまま登録したので，`f(a, b)` を 5 で拒んでいた。
@@ -47,7 +57,7 @@ targetm.calls.return_pops_args (fndecl, funtype, stack_size)
 
 ## 測り方
 
-`tests/stage015/probe/fpll.c` は構造体のメンバ・局所・配列の関数へのポインタ，関数型の typedef，関数型の仮引数，`(*f)(x)`，可変長の関数，仮引数に関数ポインタを持つ関数ポインタの typedef を通して，上の表の変換を値で見る。
+`tests/stage015/probe/fpll.c` は構造体のメンバ・局所・配列の関数へのポインタ，関数型の typedef，関数型の仮引数，`(*f)(x)`，仮引数に関数ポインタを持つ関数ポインタの typedef，可変長の型のポインタで固定個の関数を呼ぶ形 (GEN_FCN) を通して，上の表の変換を値で見る。
 
 | | `cc15ap` | `cc15aq` |
 |---|---|---|
@@ -62,7 +72,7 @@ sh tools/build.sh stage015
 # cc15aq0(cc15aq.sc) -> cc15aq    (2 段目。以降は固定点)
 ```
 
-SHA-256: 3fb5811dd9cc2ef1bedbb35ed81d277dcc44c041be03868c6de8e7120668929e
+SHA-256: 07fccac40db110fd699b6bd292d44b1b42906e3353b1f45fd1c04cac988333e0
 
 - 対象: RV32IM，リトルエンディアン
 - ロードアドレス: 0x8000_0000 (QEMU virt, `-bios`)
