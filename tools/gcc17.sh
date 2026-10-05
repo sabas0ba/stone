@@ -332,7 +332,7 @@ pp16=tmp/build/pp16.bin
 # 8.10 / 8.11)。STONE_GCC17_PPOS で
 # 前の世代を測り直せる
 ppos=${STONE_GCC17_PPOS:-tmp/build/pp21}
-cc15=tmp/build/cc15ar.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+cc15=tmp/build/cc15as.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
@@ -1584,7 +1584,17 @@ host_cc1() {
 # 単位の .i (我々の pp と libc の header で前処理したもの) を，stone の OS の
 # 上の cc1 と host の cc1 で訳し，.s を突き合わせる (docs/stage017-gcc.md 8.15)。
 # 結果を 1 行で出す: 単位名 / 選択肢 / identical か diff か / 行数 / OS の上の秒数。
-# 食い違いは $work/cmp/<単位>.diff に残す
+# 食い違いは $work/cmp/<単位>.diff に残す。
+#
+# **`.long` の値は 32 bit の符号なしに揃えてから比べる。** GCC は浮動小数点の
+# 定数を host の long の配列 (real_to_target) から出す。host の long が
+# 64 bit なら 0..2^32-1 の値が CONST_INT になって正で出，32 bit なら同じ
+# ビット列が負で出る (0x9999999a が 2576980378 と -1717986918)。GCC 自身の
+# host 依存で，アセンブラが作るバイト列は同じである
+norm_long() {
+    awk '$1 == ".long" && $2 ~ /^-[0-9]+$/ { printf "\t.long\t%.0f\n", $2 + 4294967296; next } { print }' "$1"
+}
+
 cmp_cc1() {
     lu=$1; shift
     [ -x "$work/gcc-gen/gcc/cc1" ] || die "host の cc1 が無い (sh tools/gcc17.sh host-cc1)"
@@ -1600,13 +1610,16 @@ cmp_cc1() {
     run_cc1 "$c/$n.c" -quiet -fpreprocessed "$@" > "$c/$n.out" 2>&1
     t1=$(date +%s)
     (cd "$c/ref" && "$work/gcc-gen/gcc/cc1" -quiet -fpreprocessed "$@" t.c -o ref.s 2> ref.err)
-    awk 'f { print } /^rc / { f = 1 }' "$c/$n.out" > "$c/$n.s"
+    awk 'f { print } /^rc / { f = 1 }' "$c/$n.out" > "$c/$n.raw.s"
+    norm_long "$c/$n.raw.s" > "$c/$n.s"
+    norm_long "$c/ref/ref.s" > "$c/ref/ref.norm.s"
+    mv "$c/ref/ref.norm.s" "$c/ref/ref.s"
     if cmp -s "$c/ref/ref.s" "$c/$n.s"; then
         r=identical
         rm -f "$c/$n.diff"
     else
         r="diff ($(grep -E '^!|^rc' "$c/$n.out" | tr '\n' ' '))"
-        diff "$c/ref/ref.s" "$c/$n.s" > "$c/$n.diff"
+        diff "$c/ref/ref.s" "$c/$n.s" > "$c/$n.diff" || true
     fi
     printf '%s\t%s\t%s\t%s\t%ss\n' "$lu" "$*" "$r" "$(wc -l < "$c/ref/ref.s" | tr -d ' ')" "$((t1 - t0))"
 }

@@ -180,6 +180,9 @@ build_stage015b() {
     # 第 44 世代。ポインタの大小を符号なしで比べる (RAM は 0x8000_0000 から上。
     # docs/stage017-gcc.md 8.15)
     ccgen cc15ar cc15aq stage015/cc15ar.sc
+    # 第 45 世代。?: の結果の型を通常の算術変換の型にする (GCC の real.c。
+    # docs/stage017-gcc.md 8.15)
+    ccgen cc15as cc15ar stage015/cc15as.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -214,6 +217,7 @@ do_stage015b() {
         cc15am0.bin cc15am.bin cc15an0.bin cc15an.bin \
         cc15ao0.bin cc15ao.bin cc15ap0.bin cc15ap.bin \
         cc15aq0.bin cc15aq.bin cc15ar0.bin cc15ar.bin \
+        cc15as0.bin cc15as.bin \
         pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin ld18.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
@@ -226,6 +230,7 @@ do_stage015b() {
            stage015/cc15aj.sc stage015/cc15ak.sc stage015/cc15al.sc \
            stage015/cc15am.sc stage015/cc15an.sc stage015/cc15ao.sc \
            stage015/cc15ap.sc stage015/cc15aq.sc stage015/cc15ar.sc \
+           stage015/cc15as.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
            stage015/ld16.sc stage015/ld17.sc stage015/ld18.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
