@@ -14,6 +14,7 @@
 #   gcc17.sh objects [lib]        単位を遠距離呼出しで .o にする (tmp/g17u/obj)
 #   gcc17.sh link                 cc1 を ld18 で組む (tmp/g17u/cc1)
 #   gcc17.sh run-cc1 <file> [opt...]  cc1 を kernel28 の上で走らせ，<file> を訳す
+#   gcc17.sh host-cc1             突き合わせの基準になる cc1 を host で組む (tmp/g17u/gcc-gen/gcc/cc1)
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 # unit / units はビルドチェーンで生成したバイナリ (tmp/build) と QEMU を要る。STONE_ENGINE と
@@ -330,7 +331,7 @@ pp16=tmp/build/pp16.bin
 # 8.10 / 8.11)。STONE_GCC17_PPOS で
 # 前の世代を測り直せる
 ppos=${STONE_GCC17_PPOS:-tmp/build/pp21}
-cc15=tmp/build/cc15aq.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+cc15=tmp/build/cc15ar.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
@@ -626,6 +627,15 @@ func_cache() {
 #      添字を作り，cc1 が起動してすぐ落ちた (docs/stage017-gcc.md 8.15)。
 #      この検査の答 (liberty_cv_uint64) も与える
 #
+#      **走らせて決める検査も host の答になる。** libiberty の
+#      「スタックの伸びる向き」(ac_cv_c_stack_direction) は host で 1
+#      (上向き) と答えた。我々の cc は __GNUC__ を定義しないので，
+#      libiberty.h が alloca を libiberty の C_alloca にする。C_alloca は
+#      向きを見て「既に戻った深い呼出しの領域」を返すので，向きを
+#      逆に持つと生きている領域を返す。cc1 が -O2 の PRE で，退避した
+#      式の写しを別の領域に上書きされて落ちた。RV32 の我々の
+#      スタックは下向き (-1) である
+#
 #   3. 関数の有無 (HAVE_STRERROR など) は我々の libc の記号表から与える
 #      (func_cache)。host の link 試験に任せると glibc の答になる。libiberty
 #      は「無い」と言われた関数の代わりを LIBOBJS に入れる (unit_list)
@@ -639,7 +649,7 @@ configure() {
          && env CPPFLAGS="-nostdinc -isystem $ours" \
             ac_cv_sizeof_short=2 ac_cv_sizeof_int=4 ac_cv_sizeof_long=4 \
             ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4 ac_cv_c_bigendian=no \
-            liberty_cv_uint64='unsigned long long' \
+            liberty_cv_uint64='unsigned long long' ac_cv_c_stack_direction=-1 \
             $(func_cache "$src/$lib/configure") \
             sh "$src/$lib/configure" --srcdir="$src/$lib" > configure.log 2>&1) \
             || die "$lib の configure が落ちた ($work/$lib/configure.log)"
@@ -1531,6 +1541,45 @@ run_cc1() {
         sh tools/env.sh qemu tmp/build/kernel28.bin < /dev/null
 }
 
+# 突き合わせの基準になる cc1 を host で組む (docs/stage017-gcc.md 8.15)。
+# 同じ GCC 4.7.4 の同じ構成 (target = $GCC17_TARGET，C だけ) を host の cc で
+# 組む。GCC は host に依らず同じ .s を出すことを目指しているので，我々の
+# cc1 の出力はこれとバイト単位で一致するはずである。食い違えば我々の側
+# (cc / libc / 構成) を疑う
+#
+# configure-gcc が作った gcc-gen (gen* の生成物・host の gmp / mpfr) に，
+# cc1 がリンクする libcpp / libdecnumber / zlib / mpc を足す。libiberty は
+# build = host なので build 用のものをそのまま使う
+host_cc1() {
+    [ -s "$work/gcc-gen/gcc/Makefile" ] \
+        || die "gcc/ が configure されていない (sh tools/gcc17.sh configure-gcc)"
+    build=$(sh "$src/config.guess")
+    g="$work/gcc-gen"
+    hostcflags='-O0 -std=gnu89 -fcommon -w'
+    [ -e "$g/libiberty" ] || ln -s "build-$build/libiberty" "$g/libiberty"
+    for lib in libcpp libdecnumber zlib; do
+        [ -s "$g/$lib/Makefile" ] && continue
+        mkdir -p "$g/$lib"
+        (cd "$g/$lib" && CFLAGS="$hostcflags" sh "$src/$lib/configure" \
+            --srcdir="$src/$lib" --target="$GCC17_TARGET" > configure.log 2>&1 \
+            && make > make.log 2>&1) \
+            || die "host の $lib が組めない ($g/$lib)"
+    done
+    if [ ! -s "$g/mpc/src/.libs/libmpc.a" ]; then
+        mkdir -p "$g/mpc"
+        (cd "$g/mpc" && sh "$ext/mpc/configure" --disable-shared \
+            --with-gmp-include="$g/gmp" --with-gmp-lib="$g/gmp/.libs" \
+            --with-mpfr-include="$ext/mpfr/src" --with-mpfr-lib="$g/mpfr/src/.libs" \
+            > configure.log 2>&1 && make > make.log 2>&1) \
+            || die "host の mpc が組めない ($g/mpc)"
+    fi
+    (cd "$g/gcc" && make GMPINC="-I$g/gmp -I$ext/mpfr/src -I$ext/mpc/src" \
+        GMPLIBS="-L$g/mpc/src/.libs -lmpc -L$g/mpfr/src/.libs -lmpfr -L$g/gmp/.libs -lgmp" \
+        cc1 > cc1.log 2>&1) \
+        || die "host の cc1 が組めない ($g/gcc/cc1.log)"
+    echo "host cc1: $g/gcc/cc1"
+}
+
 cmd=${1:-}
 case "$cmd" in
 measure) measure ;;
@@ -1549,12 +1598,13 @@ unit-row)
 units) units "${2:-}" ;;
 objects) objects "${2:-}" ;;
 link) link_cc1 ;;
+host-cc1) host_cc1 ;;
 run-cc1) [ -n "${2:-}" ] || die "run-cc1 <file> [opt...]"; shift; run_cc1 "$@" ;;
 list) [ -n "${2:-}" ] || die "list <lib>"; unit_list "$2" ;;
 object1) [ -n "${2:-}" ] || die "object1 <lib>/<unit>"; object1 "$2" ;;
 where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)
-    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...]}" >&2
+    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...] | host-cc1}" >&2
     exit 2
     ;;
 esac

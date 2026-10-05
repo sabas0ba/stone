@@ -88,7 +88,7 @@ libiberty の `mkstemps.c` は `O_EXCL` を，`pex-unix.c` は `fcntl (fd, F_SET
 
 ## 6. 測り方
 
-`tests/stage017` 第 12 部が `tests/stage017/user/l26x.c` を 最前線の cc (cc15aq) の遠距離呼出しで訳し，ld18 で libc26 をライブラリの部品として組んで kernel28 の上で走らせる。
+`tests/stage017` 第 12 部が `tests/stage017/user/l26x.c` を 最前線の cc (cc15ar) の遠距離呼出しで訳し，ld18 で libc26 をライブラリの部品として組んで kernel28 の上で走らせる。
 
 - `alloca`: 同じ深さで alloca を呼ぶ関数を 10 万回呼ぶ。1 回 4000 バイトなので，戻りで返さなければ 400 MB を取ろうとしてヒープ (プロセスの領域は 256 MiB) が尽きる。cc15an で訳すと `abort` で 134 になる。
 - `fstat`: 開いたファイルを unlink した後に `fstat` し，書いた長さが返ることを見る。

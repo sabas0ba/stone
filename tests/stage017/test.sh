@@ -1778,7 +1778,7 @@ sh tools/bundle.sh stage017/libc26/include/*.h \
         tests/stage017/user/l26x.c \
     | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/l26x.i" \
     && { printf '#pragma stone far_call\n'; cat "$out/l26x.i"; } \
-        | sh tools/env.sh qemu tmp/build/cc15aq.bin > "$out/l26x.o" \
+        | sh tools/env.sh qemu tmp/build/cc15ar.bin > "$out/l26x.o" \
     && sh tools/ld18.sh -o "$r/l26x" -L tmp/build/l26_*.o tmp/build/rt64.o \
         tmp/build/rtfp.o -N "$out/l26x.o" > "$out/l26x.ld" 2>&1 || ok=1
 [ "$ok" -eq 0 ]
@@ -1803,7 +1803,7 @@ L26EOF
 runroot6 "$r" "$out/l26.out" 4194304 128
 rc=$?
 [ "$rc" -eq 0 ] && diff -u "$out/l26.want" "$out/l26.out" > "$out/l26.diff"
-report $? "run: libc26 の関数が kernel28 の上で期待どおりに動く (ld18 / cc15aq の遠距離呼出しと alloca の返却)"
+report $? "run: libc26 の関数が kernel28 の上で期待どおりに動く (ld18 / cc15ar の遠距離呼出しと alloca の返却)"
 [ -s "$out/l26.diff" ] && sed -n '4,$p' "$out/l26.diff"
 
 want=$(grep -Eo '^SHA-256: [0-9a-f]{64}' stage017/pp21.md | cut -d' ' -f2)
