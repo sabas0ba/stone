@@ -1516,6 +1516,7 @@ link_cc1() {
 # cc1 を stone の OS (kernel28) の上で走らせる (docs/stage017-gcc.md 8.15)。
 # 根に cc1 / sh2 / 入力を置いて sfs4 に詰め，sh2 が go.sh を実行する。
 # 出力は「rc <終了コード>」の行と，訳した .s (あれば) である。
+# STONE_GCC17_KEEP=<dir> で走らせた後の根を取り出す (-fdump-* の突き合わせ)。
 #
 # 窓は 512 MiB (kernel27 以降)。cc1 は 100 MiB を超えるので，イメージは
 # 256 MiB 取る。RAM ファイルの組み方は tests/stage017 の runroot6 と同じ
@@ -1531,7 +1532,7 @@ run_cc1() {
     cp "$f" "$r/root/t.c"
     printf 'cc1 %s t.c -o t.s\necho "rc $?"\ncat t.s\n' "${*:--quiet}" > "$r/root/go.sh"
     printf 'sh2 go.sh\n' > "$r/root/boot"
-    sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 128 > /dev/null \
+    sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 4096 > /dev/null \
         || die "sfs4 に詰められない"
     dd if=/dev/null of="$work/run.ram" bs=1 seek=1073741824 2> /dev/null
     dd if="$work/run.img" of="$work/run.ram" bs=64K oflag=seek_bytes \
@@ -1540,6 +1541,15 @@ run_cc1() {
     # ホストの絶対経路を見られない (tools/env.sh はリポジトリだけを渡す)
     STONE_QEMU_RAMFILE="${work#"$repo_root"/}/run.ram" STONE_QEMU_RAM=1G \
         sh tools/env.sh qemu tmp/build/kernel28.bin < /dev/null
+    # STONE_GCC17_KEEP=<dir> なら，走らせた後の根 (cc1 が書いた -fdump-* の
+    # ファイルなど) を取り出す。RAM ファイルの窓の位置からイメージを切り出す
+    if [ -n "${STONE_GCC17_KEEP:-}" ]; then
+        dd if="$work/run.ram" of="$work/run.out.img" bs=64K iflag=skip_bytes,count_bytes \
+            skip=536870912 count=268435456 2> /dev/null
+        rm -rf "$STONE_GCC17_KEEP"
+        sh tools/sfs4.sh unpack "$work/run.out.img" "$STONE_GCC17_KEEP" > /dev/null \
+            || die "走らせた後の根を取り出せない"
+    fi
 }
 
 # 突き合わせの基準になる cc1 を host で組む (docs/stage017-gcc.md 8.15)。
@@ -1609,7 +1619,15 @@ cmp_cc1() {
     t0=$(date +%s)
     run_cc1 "$c/$n.c" -quiet -fpreprocessed "$@" > "$c/$n.out" 2>&1
     t1=$(date +%s)
-    (cd "$c/ref" && "$work/gcc-gen/gcc/cc1" -quiet -fpreprocessed "$@" t.c -o ref.s 2> ref.err)
+    # host の cc1 が拒む入力もある (我々の stdarg.h の __va_ptr は GCC に無い)。
+    # そのときは突き合わせられないので ref-error として行を出す
+    rrc=0
+    (cd "$c/ref" && "$work/gcc-gen/gcc/cc1" -quiet -fpreprocessed "$@" t.c -o ref.s 2> ref.err) || rrc=$?
+    if [ "$rrc" -ne 0 ]; then
+        printf '%s\t%s\tref-error (host rc %s; %s)\t-\t%ss\n' "$lu" "$*" "$rrc" \
+            "$(grep -E '^!|^rc' "$c/$n.out" | tr '\n' ' ')" "$((t1 - t0))"
+        return 0
+    fi
     awk 'f { print } /^rc / { f = 1 }' "$c/$n.out" > "$c/$n.raw.s"
     norm_long "$c/$n.raw.s" > "$c/$n.s"
     norm_long "$c/ref/ref.s" > "$c/ref/ref.norm.s"
