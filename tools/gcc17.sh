@@ -15,6 +15,7 @@
 #   gcc17.sh link                 cc1 を ld18 で組む (tmp/g17u/cc1)
 #   gcc17.sh run-cc1 <file> [opt...]  cc1 を kernel28 の上で走らせ，<file> を訳す
 #   gcc17.sh host-cc1             突き合わせの基準になる cc1 を host で組む (tmp/g17u/gcc-gen/gcc/cc1)
+#   gcc17.sh cmp-cc1 <lib>/<unit> [opt...]  単位の .i を stone の OS の cc1 と host の cc1 で訳し，.s を突き合わせる
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 # unit / units はビルドチェーンで生成したバイナリ (tmp/build) と QEMU を要る。STONE_ENGINE と
@@ -1580,6 +1581,36 @@ host_cc1() {
     echo "host cc1: $g/gcc/cc1"
 }
 
+# 単位の .i (我々の pp と libc の header で前処理したもの) を，stone の OS の
+# 上の cc1 と host の cc1 で訳し，.s を突き合わせる (docs/stage017-gcc.md 8.15)。
+# 結果を 1 行で出す: 単位名 / 選択肢 / identical か diff か / 行数 / OS の上の秒数。
+# 食い違いは $work/cmp/<単位>.diff に残す
+cmp_cc1() {
+    lu=$1; shift
+    [ -x "$work/gcc-gen/gcc/cc1" ] || die "host の cc1 が無い (sh tools/gcc17.sh host-cc1)"
+    i="$work/out/${lu%%/*}.${lu#*/}.i"
+    [ -s "$i" ] || die ".i が無い (sh tools/gcc17.sh unit $lu)"
+    c=$work/cmp
+    n=$(echo "$lu" | tr '/' '.')
+    mkdir -p "$c/ref"
+    # pp が末尾に置く終端記号 (0x04) は cc1 の入力ではない
+    tr -d '\004' < "$i" > "$c/$n.c"
+    cp "$c/$n.c" "$c/ref/t.c"
+    t0=$(date +%s)
+    run_cc1 "$c/$n.c" -quiet -fpreprocessed "$@" > "$c/$n.out" 2>&1
+    t1=$(date +%s)
+    (cd "$c/ref" && "$work/gcc-gen/gcc/cc1" -quiet -fpreprocessed "$@" t.c -o ref.s 2> ref.err)
+    awk 'f { print } /^rc / { f = 1 }' "$c/$n.out" > "$c/$n.s"
+    if cmp -s "$c/ref/ref.s" "$c/$n.s"; then
+        r=identical
+        rm -f "$c/$n.diff"
+    else
+        r="diff ($(grep -E '^!|^rc' "$c/$n.out" | tr '\n' ' '))"
+        diff "$c/ref/ref.s" "$c/$n.s" > "$c/$n.diff"
+    fi
+    printf '%s\t%s\t%s\t%s\t%ss\n' "$lu" "$*" "$r" "$(wc -l < "$c/ref/ref.s" | tr -d ' ')" "$((t1 - t0))"
+}
+
 cmd=${1:-}
 case "$cmd" in
 measure) measure ;;
@@ -1599,12 +1630,13 @@ units) units "${2:-}" ;;
 objects) objects "${2:-}" ;;
 link) link_cc1 ;;
 host-cc1) host_cc1 ;;
+cmp-cc1) [ -n "${2:-}" ] || die "cmp-cc1 <lib>/<unit> [opt...]"; shift; cmp_cc1 "$@" ;;
 run-cc1) [ -n "${2:-}" ] || die "run-cc1 <file> [opt...]"; shift; run_cc1 "$@" ;;
 list) [ -n "${2:-}" ] || die "list <lib>"; unit_list "$2" ;;
 object1) [ -n "${2:-}" ] || die "object1 <lib>/<unit>"; object1 "$2" ;;
 where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)
-    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...] | host-cc1}" >&2
+    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...] | host-cc1 | cmp-cc1 <lib>/<unit> [opt...]}" >&2
     exit 2
     ;;
 esac
