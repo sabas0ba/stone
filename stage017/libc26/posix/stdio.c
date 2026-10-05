@@ -371,9 +371,22 @@ static unsigned long long fpscale(double v, int k) {
     t = t / fpw10[m];
   }
   n = (unsigned long long)t;
-  frac = (t - (double)n) + err;
+  /* **誤差は半端の判定にだけ使う** (libc26)。t の小数部 (t - n) は正確に
+   * 求まるが，そこへ err を足すと err (t の半 ulp 以下) が消える。
+   * 0.005 は 2 進では 0.005 より僅かに大きいので `%.2f` は 0.01 になる
+   * べきだが，0.005 * 100 は丁度 0.5 に丸まり，0.5 + err が 0.5 に戻って
+   * 偶数丸めで 0.00 になっていた (host の printf と違い，GCC の cc1 の
+   * -fdump-* の確率の表示で表に出た)。
+   *
+   * 小数部が 0.5 より大きい・小さいなら，err を足しても 0.5 の向こうへは
+   * 越えない (err は t の半 ulp 以下，小数部と 0.5 の差は 1 ulp 以上)。
+   * 丁度 0.5 のときだけ err の符号で決め，0 なら偶数へ倒す */
+  frac = t - (double)n;
   if (frac > 0.5) n = n + 1;
-  else if (frac == 0.5) { if (n % 2 == 1) n = n + 1; }
+  else if (frac == 0.5) {
+    if (err > 0) n = n + 1;
+    else if (err == 0 && n % 2 == 1) n = n + 1;
+  }
   return n;
 }
 

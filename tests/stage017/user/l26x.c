@@ -24,6 +24,10 @@
  *            立てる依頼だけを受ける (spawn は子に fd 3 以上を渡さない)。
  *            fcntl を可変引数にしたので，ポインタを渡すロック (F_SETLK)
  *            が引き続き受かることも見る
+ *   qsort    鍵が等しい要素は元の並びを保つ (安定。glibc の qsort と同じ並び
+ *            にするため。libc26)
+ *   fmt      %.2f の半端の判定。0.005 は 2 進では僅かに大きいので 0.01，
+ *            0.125 は丁度なので偶数の 0.12 (glibc と同じ。libc26)
  *   freopen  stdout を開き直した先 (y.txt) に書かれる */
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +39,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+
+struct kv { int k; int v; };
+static int bykey(void *a, void *b) {
+  return ((struct kv *)a)->k - ((struct kv *)b)->k;
+}
 
 static int flat(int n) {
   char *p;
@@ -61,6 +70,7 @@ int main(void) {
   int fd;
   struct tm tm;
   struct flock fl;
+  struct kv kv[9];
   int i;
   int s;
   strcpy(buf, "a,b,,c");
@@ -110,6 +120,12 @@ int main(void) {
   close(fd);
   printf("misc %ld %ld %d %d %d %d\n", labs(-5), atol("123"), getpagesize(),
          environ[0] == 0, (int)(stpcpy(buf, "xyz") - buf), (int)strnlen("abcdef", 3));
+  for (i = 0; i < 9; i++) { kv[i].k = (i * 5) % 3; kv[i].v = i; }
+  qsort(kv, 9, sizeof(struct kv), bykey);
+  printf("qsort");
+  for (i = 0; i < 9; i++) printf(" %d", kv[i].v);
+  printf("\n");
+  printf("fmt %.2f %.2f %.1f %.0f\n", 0.005, 0.125, 2.45, 2.5);
   freopen("y.txt", "w", stdout);
   printf("freopen y\n");
   return 0;

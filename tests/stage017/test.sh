@@ -1797,6 +1797,8 @@ alloca 42000 50000
 unlink 0 8 -1
 excl -1 17 1 1 0 -1 0 0 1
 misc 5 123 4096 1 3 3
+qsort 0 3 6 2 5 8 1 4 7
+fmt 0.01 0.12 2.5 2
 rc 0
 freopen y
 L26EOF

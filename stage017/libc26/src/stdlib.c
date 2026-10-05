@@ -14,6 +14,7 @@
  */
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct hdr {
   struct hdr *next;             /* 次のフリーブロック (循環リスト) */
@@ -151,21 +152,72 @@ static void swapb(char *a, char *b, size_t size)
   for (i = 0; i < size; i++) { t = a[i]; a[i] = b[i]; b[i] = t; }
 }
 
-/* qsort の名前は API のものであり，実装は Shell ソートである
- * (非再帰・追加記憶域なし。8.1)。安定性は要求されない (C89 どおり) */
+/* 安定な併合ソートの 1 段 (glibc の msort と同じ分け方と併合)。
+ * b の n 個を t を作業域にして並べる */
+static void msort1(char *b, size_t n, size_t size, int (*cmp)(void *, void *),
+                   char *t)
+{
+  size_t n1;
+  size_t n2;
+  char *b1;
+  char *b2;
+  char *o;
+
+  if (n <= 1) return;
+  n1 = n / 2;
+  n2 = n - n1;
+  b1 = b;
+  b2 = b + n1 * size;
+  msort1(b1, n1, size, cmp, t);
+  msort1(b2, n2, size, cmp, t);
+  o = t;
+  while (n1 > 0 && n2 > 0) {
+    /* 等しければ前半を先に取る。これで安定になる */
+    if (cmp(b1, b2) <= 0) {
+      memcpy(o, b1, size);
+      b1 = b1 + size;
+      n1 = n1 - 1;
+    } else {
+      memcpy(o, b2, size);
+      b2 = b2 + size;
+      n2 = n2 - 1;
+    }
+    o = o + size;
+  }
+  if (n1 > 0) memcpy(o, b1, n1 * size);
+  memcpy(b, t, (n - n2) * size);
+}
+
+/* qsort の名前は API のものであり，実装は**安定な併合ソート**である
+ * (libc26)。C89 は安定性を要求しないが，比較関数が等しいと答えた要素の
+ * 並びは実装で決まる。GCC 4.7 の比較関数には同点を残すものがあり
+ * (tree-sra.c の compare_access_positions など)，host (glibc の msort。
+ * 安定) と並びが違うと cc1 の出力が host で組んだ cc1 と違った。glibc と
+ * 同じ分け方 (前半 n/2) と併合 (等しければ前半) にして並びを揃える。
+ *
+ * 作業域が取れないときは，同じく安定な挿入ソートで並べる (libc25 までは
+ * Shell ソートで，安定でなかった) */
 void qsort(void *b, size_t nmemb, size_t size, int (*cmp)(void *, void *))
 {
-  size_t gap;
+  char *p;
+  char *t;
+  char *x;
   size_t i;
   size_t j;
-  char *p;
 
   p = (char *)b;
-  for (gap = nmemb / 2; gap > 0; gap = gap / 2)
-    for (i = gap; i < nmemb; i++)
-      for (j = i; j >= gap && cmp(p + (j - gap) * size, p + j * size) > 0;
-           j = j - gap)
-        swapb(p + (j - gap) * size, p + j * size, size);
+  if (nmemb <= 1 || size == 0) return;
+  t = (char *)malloc(nmemb * size);
+  if (t != NULL) {
+    msort1(p, nmemb, size, cmp, t);
+    free(t);
+    return;
+  }
+  for (i = 1; i < nmemb; i++)
+    for (j = i; j > 0 && cmp(p + (j - 1) * size, p + j * size) > 0; j--) {
+      x = p + j * size;
+      swapb(x - size, x, size);
+    }
 }
 
 /* 比較関数の第 1 引数がキー，第 2 引数が配列要素 (C89 どおり) */

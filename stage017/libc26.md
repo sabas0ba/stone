@@ -12,6 +12,7 @@
 | `include/alloca.h` | 新規。`alloca` の宣言 (glibc と同じく stdlib.h には置かない) |
 | `include/stdlib.h` / `string.h` / `stdio.h` / `unistd.h` / `time.h` / `math.h` / `sys/stat.h` | 末尾に宣言を足した |
 | `include/fcntl.h` / `posix/sys.c` | `O_EXCL`，`F_GETFD` / `F_SETFD`。`fcntl` を可変引数にした (下の 5 章) |
+| `src/stdlib.c` / `posix/stdio.c` | `qsort` を安定にし，`%f` の半端の判定を直した (下の 6 章) |
 
 ## 1. 立場
 
@@ -86,10 +87,19 @@ libiberty の `mkstemps.c` は `O_EXCL` を，`pex-unix.c` は `fcntl (fd, F_SET
 
 **`fcntl` を可変引数にした。** 第 3 引数は命令によって整数 (`F_SETFD`) か `struct flock *` (ロック) である。`libc25` は `void *arg` で宣言していたので，整数を渡す呼出しが型で合わなかった。POSIX の宣言 `int fcntl(int, int, ...)` に合わせる。ロックの依頼は `va_arg` でポインタとして受ける。
 
-## 6. 測り方
+## 6. host の glibc と並びと字を揃える —— cc1 の出力の突き合わせ
+
+stone の OS の上の cc1 の出力を，host で組んだ同じ cc1 と突き合わせる (docs/stage017-gcc.md 8.15)。libc の振舞いが glibc と違うと，C として正しくても cc1 の出力が違う。2 つ直した。
+
+**`qsort` を安定な併合ソートにした。** C89 は安定性を要求しないが，比較関数が等しいと答えた要素の並びは実装で決まる。GCC 4.7 の比較関数には同点を残すものがある (tree-sra.c の `compare_access_positions` は同じ型の 2 つの参照に 0 を返す)。`libc25` までの Shell ソートと glibc の併合ソート (`msort`。安定) で並びが違い，SRA が別の参照を代表に選んで，libcpp の expr.c の `.s` が host の cc1 と違った。glibc と同じ分け方 (前半 n/2) と併合 (等しければ前半) にした。作業域が取れないときは安定な挿入ソートで並べる。
+
+**`%f` の半端の判定。** `v * 10^k` の丸め誤差を Dekker の方法で正確に求めていたが，それを小数部に足していた。0.005 は 2 進では 0.005 より僅かに大きいので `%.2f` は 0.01 になるべきだが，`0.005 * 100` は丁度 0.5 に丸まり，`0.5 + err` が 0.5 に戻って偶数丸めで 0.00 になっていた。小数部が丁度 0.5 のときだけ誤差の符号で決める。cc1 の `-fdump-*` の確率の表示で表に出た。
+
+## 7. 測り方
 
 `tests/stage017` 第 12 部が `tests/stage017/user/l26x.c` を 最前線の cc (cc15as) の遠距離呼出しで訳し，ld18 で libc26 をライブラリの部品として組んで kernel28 の上で走らせる。
 
 - `alloca`: 同じ深さで alloca を呼ぶ関数を 10 万回呼ぶ。1 回 4000 バイトなので，戻りで返さなければ 400 MB を取ろうとしてヒープ (プロセスの領域は 256 MiB) が尽きる。cc15an で訳すと `abort` で 134 になる。
 - `fstat`: 開いたファイルを unlink した後に `fstat` し，書いた長さが返ることを見る。
+- `qsort`: 鍵の等しい要素が元の並びを保つ。`%.2f` の 0.005 が 0.01，0.125 が 0.12 になる (glibc と同じ)。
 - `O_EXCL`: 在るファイルは `EEXIST` (17) で拒み，無いファイルは作る。`F_GETFD` は 1，`F_SETFD` は立てる依頼に 0，落とす依頼に -1 を返す。 ポインタを渡すロック (`F_SETLK` / `F_GETLK`) が可変引数の後も受かることも見る。
