@@ -1517,6 +1517,7 @@ link_cc1() {
 # 根に cc1 / sh2 / 入力を置いて sfs4 に詰め，sh2 が go.sh を実行する。
 # 出力は「rc <終了コード>」の行と，訳した .s (あれば) である。
 # STONE_GCC17_KEEP=<dir> で走らせた後の根を取り出す (-fdump-* の突き合わせ)。
+# 根の項目の上限は STONE_GCC17_MAXENT (既定 128。多いと sfs4 の引きが遅くなる)。
 #
 # 窓は 512 MiB (kernel27 以降)。cc1 は 100 MiB を超えるので，イメージは
 # 256 MiB 取る。RAM ファイルの組み方は tests/stage017 の runroot6 と同じ
@@ -1532,7 +1533,7 @@ run_cc1() {
     cp "$f" "$r/root/t.c"
     printf 'cc1 %s t.c -o t.s\necho "rc $?"\ncat t.s\n' "${*:--quiet}" > "$r/root/go.sh"
     printf 'sh2 go.sh\n' > "$r/root/boot"
-    sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 4096 > /dev/null \
+    sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 "${STONE_GCC17_MAXENT:-128}" > /dev/null \
         || die "sfs4 に詰められない"
     dd if=/dev/null of="$work/run.ram" bs=1 seek=1073741824 2> /dev/null
     dd if="$work/run.img" of="$work/run.ram" bs=64K oflag=seek_bytes \
