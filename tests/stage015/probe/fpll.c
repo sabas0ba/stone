@@ -11,7 +11,9 @@
  * 見るもの: 64 bit -> int / int -> 64 bit / int -> double / double -> float /
  * double -> int の変換，構造体のメンバ・局所・配列の関数へのポインタ，
  * 関数型の typedef，関数型の仮引数，(*f)(x)，可変長の関数をポインタで
- * 呼ぶ形 (可変部の積み方)。 */
+ * 呼ぶ形 (可変部の積み方)，仮引数に関数ポインタを持つ関数ポインタの
+ * typedef (GCC の tree.h の walk_tree_lh。内側の宣言子が外側の名前を
+ * 消していた)。 */
 #include <stdarg.h>
 int putc(int c);
 
@@ -49,6 +51,10 @@ static int sub2(int a, long long b) { return a - (int)b; }
 
 static int apply(binop_t f, int a, int b) { return f(a, b); }
 
+typedef int (*walk_fn) (int *, int (*) (int), long long);
+static int dbl(int x) { return 2 * x; }
+static int walk_impl(int *p, int (*g) (int), long long k) { return g(*p) + (int)k; }
+
 static int vsum(int n, ...) {
   va_list ap;
   int s;
@@ -66,11 +72,15 @@ int main(void) {
   binop_t *bp;
   int (*vp) (int, ...);
   int (*tab[2]) (char *, char *, int);
+  walk_fn w;
+  int four;
   big = 7;
   fp = pops_impl;
   tab[1] = pops_impl;
   bp = sub2;
   vp = vsum;
+  w = walk_impl;
+  four = 4;
   pn(h.pops("1", "2", big));          /* 64 bit -> int */
   pn(fp("3", "4", big + 1));
   pn(tab[1]("5", "6", 9));
@@ -82,6 +92,7 @@ int main(void) {
   pn((*sub2)(9, 4));
   pn(vp(3, 1, 2, 3));                  /* 可変部は逆順に積む */
   pn(vp(2, 4, 5));
+  pn(w(&four, dbl, 1));                /* int -> 64 bit (typedef の関数ポインタ) */
   putc('\n');
   return 0;
 }

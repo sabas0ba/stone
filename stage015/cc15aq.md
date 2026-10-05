@@ -32,7 +32,7 @@ targetm.calls.return_pops_args (fndecl, funtype, stack_size)
 関数型の表 (基底 `t_fn` 以降) に，返却型と並べて仮引数の語数・3 つの位置・可変長かを持たせる。組が同じなら同じ型番号である。表は 1024 から 8192 に広げた。
 
 - 空の括弧 `()` と K&R 形式の名前の並びは仮引数について何も言わない (C89 6.5.4.3)。語数を -1 にし，従来どおり変換しない
-- 関数へのポインタの宣言子・関数型の typedef・関数型の仮引数は，仮引数並びを読み飛ばさずに読む (`fnproto`)。局所記号は作らない
+- 関数へのポインタの宣言子・関数型の typedef・関数型の仮引数は，仮引数並びを読み飛ばさずに読む (`fnproto`)。局所記号は作らない。仮引数の中の関数ポインタを読むと宣言子の名前 (`fpnam`) が書き換わるので退避して戻す。戻さないと `typedef tree (*walk_tree_lh) (tree *, int *, tree (*) (tree *, int *, void *), ...)` (GCC の tree.h) の名前が消え，gcc/ の 307 単位が 1 で止まった
 - 関数名を値として使うと，その関数の宣言の情報を持つ型になる。`(*f)(x)` も変換して積む
 - 関数型の typedef で宣言した関数 (`static refmarker_fn f;`) は，型の情報を宣言として持つ
 - 名前つきの呼出しとポインタを通した呼出しは同じ変換 (`argconv`) と積み方 (`argpush`) を使う
@@ -47,7 +47,7 @@ targetm.calls.return_pops_args (fndecl, funtype, stack_size)
 
 ## 測り方
 
-`tests/stage015/probe/fpll.c` は構造体のメンバ・局所・配列の関数へのポインタ，関数型の typedef，関数型の仮引数，`(*f)(x)`，可変長の関数を通して，上の表の変換を値で見る。
+`tests/stage015/probe/fpll.c` は構造体のメンバ・局所・配列の関数へのポインタ，関数型の typedef，関数型の仮引数，`(*f)(x)`，可変長の関数，仮引数に関数ポインタを持つ関数ポインタの typedef を通して，上の表の変換を値で見る。
 
 | | `cc15ap` | `cc15aq` |
 |---|---|---|
@@ -62,7 +62,7 @@ sh tools/build.sh stage015
 # cc15aq0(cc15aq.sc) -> cc15aq    (2 段目。以降は固定点)
 ```
 
-SHA-256: f88de39ae3d2602c0f22f4b77021eee340783148558a4b6fb035df489e3e5f20
+SHA-256: 3fb5811dd9cc2ef1bedbb35ed81d277dcc44c041be03868c6de8e7120668929e
 
 - 対象: RV32IM，リトルエンディアン
 - ロードアドレス: 0x8000_0000 (QEMU virt, `-bios`)

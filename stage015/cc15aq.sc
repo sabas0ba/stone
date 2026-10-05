@@ -2980,10 +2980,16 @@ int pproto1() {
 /// @note 入口は '(' の次，出口は対応する ')' の次。解析中の関数の仮引数の
 ///       情報 (cna など) は退避して戻すので，関数の仮引数並びの中からも
 ///       呼べる。空の括弧と K&R 形式の名前の並びは仮引数について何も
-///       言わないので，語数 -1 の型を返す (C89 6.5.4.3)
+///       言わないので，語数 -1 の型を返す (C89 6.5.4.3)。
+///       宣言子の名前 (fpnam) も退避する。仮引数の中の関数ポインタ
+///       (`tree (*) (tree *, int *, void *)`) を読む fnpdec1 が書き換えるので，
+///       戻さないと外側の名前 (`typedef tree (*walk_tree_lh) (...)` の
+///       walk_tree_lh) が消える
 int fnproto(int r) {
   int sna; int sllm; int sdbm; int sflm; int svar;
   int n; int t;
+  char sfp[64];
+  copyn(sfp, fpnam);
   sna = cna; sllm = cllm; sdbm = cdbm; sflm = cflm; svar = cvarg;
   cna = 0; cllm = 0; cdbm = 0; cflm = 0; cvarg = 0;
   t = -1;
@@ -3019,6 +3025,7 @@ int fnproto(int r) {
     }
   }
   cna = sna; cllm = sllm; cdbm = sdbm; cflm = sflm; cvarg = svar;
+  copyn(fpnam, sfp);
   return t;
 }
 
