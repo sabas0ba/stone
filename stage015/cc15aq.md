@@ -1,6 +1,6 @@
 # cc15aq --- C コンパイラ 第 15 世代 その 43
 
-`cc15ap` との差は，関数へのポインタの型が仮引数の情報を持つことである (註を除く)。ソースは `stage015/cc15aq.sc`。
+`cc15ap` との差は，関数へのポインタの型が仮引数の情報を持つことと，64 bit の `++` / `--` である (註を除く)。ソースは `stage015/cc15aq.sc`。
 経緯は [docs/stage017-gcc.md](../docs/stage017-gcc.md) 8.15。
 
 GCC の cc1 を stone の OS の上で走らせて見つけた。`unsigned long long / 7` を -O0 で訳すと cc1 が NULL を引いて落ちた。
@@ -51,6 +51,19 @@ GCC は命令の生成関数を `GEN_FCN (icode) (op0, op1, op2)` で呼ぶ。�
 
 `static int apply(binop_t f, int a, int b)` (`binop_t` は関数型の typedef) の `f` は関数へのポインタになる (C89 6.7.1)。`cc15ap` までは関数型のまま登録したので，`f(a, b)` を 5 で拒んでいた。
 
+## 直したもの 3: 64 bit の ++ / --
+
+`incdec` は 64 bit の型でも下位語だけを読み書きしていた。下位語が 0xffffffff と 0 の間を回るときに上位語へ桁上がり (桁借り) せず，式の値の上位語 (`ehi`) は前の式の残りだった。
+
+cc1 は -O2 で記憶域を使い果たした (`out of memory allocating 33558527 bytes after a total of 89875152 bytes`)。gdb で `xmalloc_failed` に止めて枠を辿ると，ivopts の `multiplier_allowed_in_address_p` の
+
+```c
+for (i = -MAX_RATIO; i <= MAX_RATIO; i++)      /* i は HOST_WIDE_INT */
+  XEXP (addr, 1) = gen_int_mode (i, address_mode);
+```
+
+が -1 から 0 へ進めず，CONST_INT の表を広げ続けていた。2 語で読み，加減算の 64 bit の経路 (`ll_addsub`) で計算して 2 語書く。後置は前の 2 語を，前置は後の 2 語を式の値にする。
+
 ## ビルドチェーンは変わらない
 
 `sh` / `ed` / `mk` を訳した `.o` は `cc10l` のものと 1 バイトも変わらない。これらのソースは関数へのポインタを通して幅の違う実引数を渡さない。
@@ -62,6 +75,7 @@ GCC は命令の生成関数を `GEN_FCN (icode) (op0, op1, op2)` で呼ぶ。�
 | | `cc15ap` | `cc15aq` |
 |---|---|---|
 | `tools/diff17.sh fpll` | **我々だけが拒む** (5。関数型の typedef の仮引数) | 値が一致 |
+| `tools/diff17.sh llinc` | **値が違う** (ループが止まらない) | 値が一致 |
 | cc1 で `unsigned long long / 7` を -O0 で訳す | `ix86_get_callcvt` で NULL を引く | (8.15 の測定) |
 
 ## ビルド
@@ -72,7 +86,7 @@ sh tools/build.sh stage015
 # cc15aq0(cc15aq.sc) -> cc15aq    (2 段目。以降は固定点)
 ```
 
-SHA-256: 07fccac40db110fd699b6bd292d44b1b42906e3353b1f45fd1c04cac988333e0
+SHA-256: 759b2d353402090655fc44306eacfcc30ad0223d28c59fc0e1209e95c7720c37
 
 - 対象: RV32IM，リトルエンディアン
 - ロードアドレス: 0x8000_0000 (QEMU virt, `-bios`)

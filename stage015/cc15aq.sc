@@ -31,6 +31,13 @@
 ///   - 関数型の typedef で宣言した関数 (`static refmarker_fn f;`) も
 ///     型の情報を宣言として持つ
 ///
+/// ## 64 bit の ++ / --
+///
+/// incdec は下位語だけを読み書きしていた。下位語が回っても上位語へ
+/// 桁上がりせず，式の値の上位語は前の式の残りだった。GCC の ivopts の
+/// `for (i = -MAX_RATIO; i <= MAX_RATIO; i++)` (HOST_WIDE_INT) が止まらず，
+/// cc1 が -O2 で記憶域を使い果たした。2 語で読み書きする
+///
 /// 以下は cc15ap の註である。
 ///
 /// @brief (cc15ap) C コンパイラ 第 15 世代 その 42。cc15ao との差は整数の左辺への浮動小数点の複合代入と ELF の組立てバッファ (docs/stage017-gcc.md 8.15)。
@@ -4806,6 +4813,7 @@ int stval(int a, int r, int t) {
 int incdec(int a, int t, int isadd, int post) {
   int cur; int one; int nv; int sz;
   int bw; int bo; int msk; int w; int res; int bs;
+  int ch; int nh;
   // ビットフィールドは読み・修正・書きが要る。**代入の経路と同じ手で
   // 行う** (assign の bw の分岐)。cc15ac までは拒んでいた ——
   // 語ごと動かすと隣のフィールドを壊すからだが，代入は既に読み・修正・
@@ -4834,6 +4842,25 @@ int incdec(int a, int t, int isadd, int post) {
     ety = t; elv = 0; earr = 0;
     if (post) return cur;
     if (bs) return bfget(nv, 0, bw, 1);
+    return nv;
+  }
+  if (isll(t)) {
+    // **64 bit の ++ / --** (cc15aq)。cc15ap までは下位語だけを読み書き
+    // していたので，下位語が 0xffffffff から 0 へ回っても上位語へ
+    // 桁上がりせず，式の値の上位語 (ehi) も前の式の残りだった。GCC の
+    // ivopts の `for (i = -MAX_RATIO; i <= MAX_RATIO; i++)` (i は
+    // HOST_WIDE_INT) が -1 から 0 へ進めず，CONST_INT を作り続けて
+    // cc1 が -O2 で記憶域を使い果たした。2 語で読み，加減算の 64 bit の
+    // 経路で計算して 2 語書く
+    cur = emit(c_loadw, a, 0);
+    ch = emit(c_loadw, emit(c_bin + b_add, a, emit(c_const, 4, 0)), 0);
+    nv = ll_addsub(cur, ch, emit(c_const, 1, 0), emit(c_const, 0, 0), !isadd);
+    nh = ehi;
+    emit(c_stw, a, nv);
+    emit(c_stw, emit(c_bin + b_add, a, emit(c_const, 4, 0)), nh);
+    ety = t; elv = 0; earr = 0;
+    if (post) { ehi = ch; return cur; }
+    ehi = nh;
     return nv;
   }
   cur = ldval(a, t);
