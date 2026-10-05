@@ -2212,12 +2212,21 @@ QEMU の gdb stub に繋いだ gdb-multiarch で枠を辿って調べた。番�
 | -O2 で記憶域を使い果たす | 64 bit の`++`が桁上がりせず，ivopts のループが止まらない | cc15aq |
 | -O2 の PRE で落ちる | libiberty の「スタックの伸びる向き」の検査を host が上向きと答え，`C_alloca`が生きている領域を返した | `ac_cv_c_stack_direction=-1`を与える |
 | `.s`の 1 行が host の cc1 と違う | ポインタの大小を符号つきで比べていた (RAM は 0x8000_0000 から上) | [cc15ar](../stage015/cc15ar.md) |
+| 浮動小数点の定数の仮数が違う | `c ? 0 : u` の型を then 側 (int) にしていて，real.c の`>>`が算術シフトになった | [cc15as](../stage015/cc15as.md) |
+| libcpp の expr.c の SRA が別の参照を選ぶ | libc の`qsort`が安定でなく，同点の並びが glibc と違う | [libc26](../stage017/libc26.md) を併合ソートに |
+| `-fdump-*`の確率が 0.01 と 0.00 | libc の`%f`が半端の判定で丸め誤差を消していた | libc26 |
 
 configure の誤りは 2 つとも**host で走らせた検査の答**だった。cache 変数で
 語長を与えても，`sizeof`を使う翻訳試験と実行試験は host の答を出す。
 
 cc の誤りは，どれも probe を足して host の gcc と値で突き合わせている
-(`fpll`・`llinc`・`ptrcmp`・`fpopasn`。`tools/diff17.sh`)。
+(`fpll`・`llinc`・`ptrcmp`・`condty`・`fpopasn`。`tools/diff17.sh`)。
+
+浮動小数点の定数は，同じ値を GMP / MPFR で作るプログラムと，real.c の
+`real_from_string`を直に呼ぶプログラムを stone の OS で走らせ，host と
+比べて real.c の中に絞った。libc の 2 つは，両方の cc1 の`-fdump-tree-all`
+を番地を伏せて突き合わせ，最初に違う段 (`027t.esra`) から辿った
+(`STONE_GCC17_KEEP`で走らせた後の根を取り出す)。
 
 #### 突き合わせ
 
@@ -2226,3 +2235,28 @@ i686-pc-linux-gnu，C だけ) を host で組む。GCC は host に依らず同�
 出すことを目指しているので，stone の OS の上の cc1 の出力は**バイト単位で
 一致するはずである**。`sh tools/gcc17.sh cmp-cc1 <単位> [選択肢]`が単位の
 `.i`を両方で訳して比べる。
+
+**`.long`の値は 32 bit の符号なしに揃えてから比べる。** GCC は浮動小数点の
+定数を host の long の配列から出すので，host の long が 64 bit なら正で，
+32 bit なら同じビット列が負で出る (0x9999999a が 2576980378 と
+-1717986918)。GCC 自身の host 依存であり，アセンブラが作るバイト列は同じで
+ある。
+
+#### 測った結果
+
+表は[gcc47-cc1-cmp-O2.txt](../tests/stage017/expected/gcc47-cc1-cmp-O2.txt)にある。
+zlib・libiberty・libcpp の全単位と gcc/ の 12 単位を，それぞれの`.i`
+(我々の pp と libc の header で前処理したもの) から -O2 で訳した。
+
+| 結果 | 単位 | `.s`の行数 |
+|---|---|---|
+| `identical` | 119 | 185,674 |
+| `ref-error` | 5 | - |
+
+`ref-error`の 5 単位は可変長の実引数を読む。我々の`stdarg.h`の`va_arg`は
+我々の cc の`__va_ptr`を使うので，host の cc1 も stone の OS の上の cc1 も
+同じ誤りで拒む (突き合わせの対象にならない)。
+
+**突き合わせられた 119 単位すべてで，stone の OS の上の cc1 の出力は host で
+組んだ cc1 とバイト単位で一致した。** 1 単位の訳は 5〜74 秒 (QEMU の上)
+である。
