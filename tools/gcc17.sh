@@ -1517,7 +1517,10 @@ link_cc1() {
 # cc1 を stone の OS (kernel28) の上で走らせる (docs/stage017-gcc.md 8.15)。
 # 根に cc1 / sh2 / 入力を置いて sfs4 に詰め，sh2 が go.sh を実行する。
 # 出力は「rc <終了コード>」の行と，訳した .s (あれば) である。
-# STONE_GCC17_KEEP=<dir> で走らせた後の根を取り出す (-fdump-* の突き合わせ)。
+# .s は端末を通さず，走らせた後の根から取り出す。sh2 の cat は中身を文字列の
+# 置き場 (256 KiB) に読むので，gcc/c-decl の .s で「out of string space」に
+# なった。根は $work/run/out，STONE_GCC17_KEEP=<dir> ならそこへ取り出す
+# (-fdump-* の突き合わせ)。
 # 根の項目の上限は STONE_GCC17_MAXENT (既定 128。多いと sfs4 の引きが遅くなる)。
 #
 # 窓は 512 MiB (kernel27 以降)。cc1 は 100 MiB を超えるので，イメージは
@@ -1532,7 +1535,7 @@ run_cc1() {
     cp "$work/cc1" "$r/root/cc1"
     cp tmp/build/sh2.bin "$r/root/sh2"
     cp "$f" "$r/root/t.c"
-    printf 'cc1 %s t.c -o t.s\necho "rc $?"\ncat t.s\n' "${*:--quiet}" > "$r/root/go.sh"
+    printf 'cc1 %s t.c -o t.s\necho "rc $?"\n' "${*:--quiet}" > "$r/root/go.sh"
     printf 'sh2 go.sh\n' > "$r/root/boot"
     sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 "${STONE_GCC17_MAXENT:-128}" > /dev/null \
         || die "sfs4 に詰められない"
@@ -1543,15 +1546,16 @@ run_cc1() {
     # ホストの絶対経路を見られない (tools/env.sh はリポジトリだけを渡す)
     STONE_QEMU_RAMFILE="${work#"$repo_root"/}/run.ram" STONE_QEMU_RAM=1G \
         sh tools/env.sh qemu tmp/build/kernel28.bin < /dev/null
-    # STONE_GCC17_KEEP=<dir> なら，走らせた後の根 (cc1 が書いた -fdump-* の
-    # ファイルなど) を取り出す。RAM ファイルの窓の位置からイメージを切り出す
-    if [ -n "${STONE_GCC17_KEEP:-}" ]; then
-        dd if="$work/run.ram" of="$work/run.out.img" bs=64K iflag=skip_bytes,count_bytes \
-            skip=536870912 count=268435456 2> /dev/null
-        rm -rf "$STONE_GCC17_KEEP"
-        sh tools/sfs4.sh unpack "$work/run.out.img" "$STONE_GCC17_KEEP" > /dev/null \
-            || die "走らせた後の根を取り出せない"
-    fi
+    # 走らせた後の根 (t.s，cc1 が書いた -fdump-* のファイルなど) を取り出す。
+    # RAM ファイルの窓の位置からイメージを切り出す
+    o=${STONE_GCC17_KEEP:-$r/out}
+    dd if="$work/run.ram" of="$work/run.out.img" bs=64K iflag=skip_bytes,count_bytes \
+        skip=536870912 count=268435456 2> /dev/null
+    rm -rf "$o"
+    sh tools/sfs4.sh unpack "$work/run.out.img" "$o" > /dev/null \
+        || die "走らせた後の根を取り出せない"
+    rm -f "$work/run.out.img"
+    if [ -f "$o/t.s" ]; then cat "$o/t.s"; fi
 }
 
 # 突き合わせの基準になる cc1 を host で組む (docs/stage017-gcc.md 8.15)。
