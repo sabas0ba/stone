@@ -2294,18 +2294,23 @@ i686-pc-linux-gnu，C だけ) を host で組む。GCC は host に依らず同�
 #### 測った結果
 
 表は[gcc47-cc1-cmp-O2.txt](../tests/stage017/expected/gcc47-cc1-cmp-O2.txt)にある。
-zlib・libiberty・libcpp の全単位と gcc/ の 12 単位を，それぞれの`.i`
-(我々の pp と libc の header で前処理したもの) から -O2 で訳した。
+gcc/・libcpp・libiberty・zlib の全単位を，それぞれの`.i` (我々の pp と libc の header で前処理したもの) から -O2 で訳した (`sh tools/gcc17.sh cmp-all gcc libcpp libiberty zlib -- -O2`)。
 
-| 結果 | 単位 | `.s`の行数 |
-|---|---|---|
-| `identical` | 119 | 185,674 |
-| `ref-error` | 5 | - |
+| ライブラリ | 単位 | `identical` | その他 |
+|---|---|---|---|
+| gcc/ | 347 | 346 | 1 (insn-recog。記憶域が尽きる) |
+| libcpp | 15 | 15 | - |
+| libiberty | 85 | 85 | - |
+| zlib | 12 | 12 | - |
+| 計 | 459 | 458 | 1 |
 
-`ref-error`の 5 単位は可変長の実引数を読む。我々の`stdarg.h`の`va_arg`は
-我々の cc の`__va_ptr`を使うので，host の cc1 も stone の OS の上の cc1 も
-同じ誤りで拒む (突き合わせの対象にならない)。
+**訳し終えた 458 単位すべてで，stone の OS の上の cc1 の出力は host で組んだ cc1 とバイト単位で一致した。** 一致した`.s`は計 3,400,501 行である。1 単位の訳は 7〜4010 秒 (QEMU の上。最長は gcc/insn-attrtab の 251,347 行)，全単位で約 7 時間である。
 
-**突き合わせられた 119 単位すべてで，stone の OS の上の cc1 の出力は host で
-組んだ cc1 とバイト単位で一致した。** 1 単位の訳は 5〜74 秒 (QEMU の上)
-である。
+`cmp-all`は表に既にある単位を飛ばすので，止まっても同じ命令で続きから再開できる。
+
+測る途中で突き合わせの道具を 2 つ直した。
+
+- **`.s`は端末を通さず，走らせた後の根から取り出す。** 当初は stone の OS の上で`cat t.s`していた。sh2 の`cat`は中身を文字列の置き場 (256 KiB) に読むので，gcc/c-decl (31,873 行) で`sh2: out of string space`になった。sh2 は凍結済みなので，`run_cc1`が RAM ファイルの窓からイメージを切り出して`t.s`を取る
+- **`__va_ptr`を使う単位は宣言を 1 行足して訳す。** 我々の`stdarg.h`の`va_start`は我々の cc の組込みの`__va_ptr`を読むが，GCC には無い。可変長の関数を定義する単位 (gcc/ の 18 単位と libcpp・libiberty・zlib の 5 単位) は両方の cc1 が同じ誤りで拒み，突き合わせの対象にならなかった (以前の表の`ref-error`)。`extern char *__va_ptr;`を先頭に足し，行の目印 (`# 1 "t.c"`) で行番号を元に戻した入力は両方の cc1 が受け，23 単位すべてが一致した
+
+**gcc/insn-recog は OS の上の cc1 が記憶域を使い果たす** (`out of memory allocating 3709048 bytes after a total of 115527232 bytes`)。kernel28 のユーザ領域は 256 MiB (0x8600_0000〜0x9600_0000) で，cc1 のイメージが 142 MB (ほぼすべてコード。host の i686 の cc1 の text は 15 MB) あるので，ヒープは約 115 MB しか残らない。host の cc1 (x86-64) はこの単位の -O2 で最大 RSS が 373 MB だった。止まるまでに出した`.s`の先頭 11,481 行は host の出力と同じであり，訳し方の違いではない。ユーザ領域を広げる (RAM を 2 GiB にする新しいカーネル) か，cc の出すコードを詰めるまで残る。
