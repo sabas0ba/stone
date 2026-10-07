@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # occ 説明文書
 
 occ は現代化した sc コンパイラである: 構文解析は 3 番地コードの IR (φ なし SSA)

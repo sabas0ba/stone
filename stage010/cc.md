@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc 説明文書
 
 cc は C コンパイラである。C ソース 1 本を受け取り，ELF リロケータブル

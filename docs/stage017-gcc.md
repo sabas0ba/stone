@@ -1387,10 +1387,17 @@ int putc(int c, FILE *stream);
 
 `include/obstack.h` 193行の
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 extern int _obstack_begin (struct obstack *, int, int,
                            void *(*) (long), void (*) (void *));
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 をlibcppの全単位が`include/symtab.h` 22行経由で読む。`gcc17.sh where`が
 `charset` / `directives` / `directives-only` / `errors` / `expr` /
@@ -1439,6 +1446,11 @@ extern int _obstack_begin (struct obstack *, int, int,
 いずれもcc15wで測り直して初めて出た。最小の形はどれもhostの
 `gcc -std=c89 -pedantic-errors`が通す。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 /*  9  symtab.c 65行。仮引数並びではなく cast の型名の側である */
 _obstack_begin (&table->stack, 0, 0,
@@ -1456,17 +1468,26 @@ static unsigned char
 conversion_loop (int (*const one_conversion)(iconv_t, ...), ...)
 ```
 
+<!-- SPDX-SnippetEnd -->
+
 11は仮引数だけの話ではない。`int (*const f)(int) = 0;`という局所の宣言も
 同じく1で止まる。
 
 12は`include/line-map.h` 518行の
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 #define INCLUDED_FROM(SET, MAP)						\
   ((linemap_check_ordinary (MAP)->d.ordinary.included_from == -1)	\
    ? NULL								\
    : (&LINEMAPS_ORDINARY_MAPS (SET)[(MAP)->d.ordinary.included_from]))
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 を`line-map.c` 266行が`ORDINARY_MAP_INCLUDER_FILE_INDEX (INCLUDED_FROM
 (set, map - 1))`のように**そのまま`->`で辿る**形である。**我々は条件式の型を
@@ -1491,11 +1512,18 @@ conversion_loop (int (*const one_conversion)(iconv_t, ...), ...)
 
 **libcppの13単位すべてが同じ1つの形で止まる。** `system.h` 379行の
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 #define HAVE_DESIGNATED_INITIALIZERS \
   (!defined(__cplusplus) \
    && ((GCC_VERSION >= 2007) || (__STDC_VERSION__ >= 199901L)))
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 を`internal.h` 577行が`#if`で使う。**macro展開の結果に`defined`が現れる
 形はC89 6.8.1で未定義動作**であり、hostの`gcc -std=c89 -pedantic-errors`も
@@ -1614,9 +1642,16 @@ C89 7.9.7.5が`getc`を「関数ではなくmacroとして実装してよい」�
 
 `libcpp/identifiers.c` 113行が
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 extern char proxy_assertion_broken[offsetof (struct cpp_hashnode, ident) == 0 ? 1 : -1];
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 で翻訳時の表明を書く。我々の`offsetof`は`stddef.h` 22行の
 
@@ -1820,10 +1855,17 @@ A15                 /* pp18 は 6。14 段までは通る */
 5 も 61 箇所ある。同じ方法で`cc15ae.sc`3054 行 (非可変長の呼出しの個数の
 検査) と特定した。`regex.c`は`<stdlib.h>`の後で
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 char *malloc ();
 char *realloc ();
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 と宣言し直し、`realloc`を 2 引数で呼ぶ。**`cc15ae`までは`int f();`を仮引数
 0 個のプロトタイプとして控えていた。** C89 6.5.4.3 では、定義でない空の括弧
@@ -1934,9 +1976,16 @@ host の link 試験で決まり、我々の libc を反映していない (8.1)
 **4533 行 (75 単位) の原因はまだ切り分けていない** (8.12 で特定した。型番号の範囲の重なりである)。 `gcc/tree-mudflap`で止まる文を
 `.i`の行単位の二分探索で絞ると、`vec.h`の VEC マクロが展開した
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 ((*vec_) ? &(*vec_)->base : 0) ->prefix.num = size_;
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 だった (構造体の代入ではないのに、構造体の代入の検査で止まる)。`?:`の片方が空ポインタ
 定数の形、同じメンバ名を持つ別の構造体がある形を、それぞれ最小の入力にしても再現しない。

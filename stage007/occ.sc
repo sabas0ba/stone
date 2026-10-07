@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /// @file occ.sc
 /// @brief 現代化した sc コンパイラ (IR + 最適化 + レジスタ割付)。
 ///

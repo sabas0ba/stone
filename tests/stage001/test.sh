@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Stage 1 テスト: hex0 の検証 (docs/stage001-hex0.md 6 章)。
 #
 # 検証項目:

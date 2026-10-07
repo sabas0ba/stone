@@ -1,4 +1,8 @@
 8 bin.dat
+36 bin.dat.license
 10 dir/in.txt
+36 dir/in.txt.license
 0 empty.txt
+36 empty.txt.license
 4 top.txt
+36 top.txt.license

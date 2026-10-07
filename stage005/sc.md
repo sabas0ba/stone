@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # sc 説明文書
 
 sc は，C サブセット言語 sc のソーステキストをフラットバイナリへ変換する

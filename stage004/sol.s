@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # stage004/sol: スタック指向小言語 sol のコンパイラ (asm 言語，docs/stage004-sol.md)
 # ビルド: sh tools/build.sh stage004
 #

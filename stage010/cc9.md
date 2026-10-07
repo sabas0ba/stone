@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc9 説明文書
 
 cc9 は C コンパイラである。第 3 部の 2 の [cc8.sc](cc8.sc) を出発点に，

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Stage 13: ビルド道具立て 設計文書
 
 ## 1. 目的と位置づけ

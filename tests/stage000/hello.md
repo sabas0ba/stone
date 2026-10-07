@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # hello.bin 説明文書
 
 `tests/stage000/hello.bin` は人手で命令エンコードした生のバイナリであり，

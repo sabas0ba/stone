@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # stage003/asm のソース (hex1 言語，docs/stage003-asm.md)。
 # hex1 でビルドする: sh tools/build.sh stage003
 #

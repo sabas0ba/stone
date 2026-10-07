@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc7 説明文書
 
 cc7 は C コンパイラである。第 2 部の 5 の [cc6.sc](cc6.sc) を出発点に，

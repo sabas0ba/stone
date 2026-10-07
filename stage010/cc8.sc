@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /// @file cc8.sc
 /// @brief C コンパイラ。ELF リロケータブルオブジェクトを出力する。
 ///

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc5 説明文書
 
 cc5 は C コンパイラである。第 2 部の 3 の [cc4.sc](cc4.sc) を出発点に，

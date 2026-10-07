@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc3 説明文書
 
 cc3 は C コンパイラである。第 2 部の 1 の [cc2.sc](cc2.sc) を出発点に，

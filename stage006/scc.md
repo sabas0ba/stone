@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # scc 説明文書
 
 scc は sc コンパイラの sc 言語による再記述 (セルフホスト) である。

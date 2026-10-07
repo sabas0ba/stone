@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # cc6 説明文書
 
 cc6 は C コンパイラである。第 2 部の 4 の [cc5.sc](cc5.sc) を出発点に，

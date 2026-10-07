@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Stage 12: 簡易 OS と POSIX 風実行環境 設計文書
 
 ## 1. 目的と位置づけ
