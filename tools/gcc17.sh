@@ -1619,14 +1619,21 @@ cmp_cc1() {
     c=$work/cmp
     n=$(echo "$lu" | tr '/' '.')
     mkdir -p "$c/ref"
-    # pp が末尾に置く終端記号 (0x04) は cc1 の入力ではない
-    tr -d '\004' < "$i" > "$c/$n.c"
+    # pp が末尾に置く終端記号 (0x04) は cc1 の入力ではない。
+    # 我々の stdarg.h の va_start は cc の組込みの __va_ptr を読むが，GCC には
+    # 無いので，使う単位は両方の cc1 が 5 で拒んでいた (gcc/ の可変長の関数を
+    # 定義する単位)。突き合わせの入力として両方が受ける C にするため，宣言を
+    # 1 行足し，行番号を行の目印 (# 1) で元に戻す
+    if grep -q __va_ptr "$i"; then
+        { printf 'extern char *__va_ptr;\n# 1 "t.c"\n'; tr -d '\004' < "$i"; } > "$c/$n.c"
+    else
+        tr -d '\004' < "$i" > "$c/$n.c"
+    fi
     cp "$c/$n.c" "$c/ref/t.c"
     t0=$(date +%s)
     run_cc1 "$c/$n.c" -quiet -fpreprocessed "$@" > "$c/$n.out" 2>&1
     t1=$(date +%s)
-    # host の cc1 が拒む入力もある (我々の stdarg.h の __va_ptr は GCC に無い)。
-    # そのときは突き合わせられないので ref-error として行を出す
+    # host の cc1 が拒む入力は突き合わせられないので ref-error として行を出す
     rrc=0
     (cd "$c/ref" && "$work/gcc-gen/gcc/cc1" -quiet -fpreprocessed "$@" t.c -o ref.s 2> ref.err) || rrc=$?
     if [ "$rrc" -ne 0 ]; then
