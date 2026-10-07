@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # sol 説明文書
 
 sol は，スタック指向の小言語 sol のソーステキストをフラットバイナリへ変換する

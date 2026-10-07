@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # stage002/hex1 のソース (hex0 言語，docs/stage002-hex1.md)。
 # hex0 でビルドする: sh tools/env.sh qemu stage001/hex0.bin < 本ファイル > hex1.bin
 #

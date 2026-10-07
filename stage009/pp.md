@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # pp 説明文書
 
 pp は C プリプロセッサである。ソース群をバンドルしたものを受け取り，

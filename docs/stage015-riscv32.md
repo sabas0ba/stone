@@ -471,6 +471,11 @@ RV64 で既に検証された経路をそのまま通る。
 「上位語を比べ，等しければ下位語を比べる」と組み立てる。その「等しければ」
 の判定が，**直前の比較が立てたフラグを読み直す**形で書かれている。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 gen_op(op1);            /* 上位語を比べる */
 a = gvtst(1, 0);
@@ -478,6 +483,8 @@ vpushi(0);
 vset_VT_CMP(TOK_NE);    /* ← フラグをもう一度読む，のつもり */
 b = gvtst(0, 0);
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 i386 と arm にはフラグがあるのでこれで成り立つ。**RISC-V にフラグは無い。**
 比較は 2 つのレジスタを名指しする分岐そのものであり，「直前の比較の
@@ -569,9 +576,16 @@ tcc のアセンブラは CSR の名前を解さないので番地で書く。�
 
 `gfunc_prolog` は引数の置き場所を**レジスタの本数**で取っていた。
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 loc -= regcount * XLEN; // XXX could reserve only 'size' bytes
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 RV64 では 1 本 8 バイトなので常に足りる。RV32 では `double` が
 **f レジスタ 1 本だが 8 バイト**なので，4 バイトしか取らずに隣を上書きする。
@@ -685,9 +699,16 @@ libc が無いので，記憶域の割付けと `memcpy` の類は検査ドラ�
 
 第 6 部で tcc に tcc 自身を翻訳させたとき，`libtcc.c` の統計出力
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: TinyCC contributors
+SPDX-License-Identifier: LGPL-2.1-only
+-->
 ```c
 fprintf(stderr, "...", (double)total_bytes/1000/total_time);
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 で **「lvalue expected」** が出て止まった。ホストの gcc で作った
 riscv32-tcc でも同じところで止まるので，我々の処理系ではなく**この

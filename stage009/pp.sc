@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /// @file pp.sc
 /// @brief C プリプロセッサ。テキストを受け取り，前処理済みテキストを返す。
 ///

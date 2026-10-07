@@ -25,6 +25,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  license:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check SPDX coverage
+        run: bash tools/check-spdx.sh
+
   test:
     runs-on: ubuntu-24.04
     # draft の PR では走らせない。作業中の push でキャッシュと計算時間を

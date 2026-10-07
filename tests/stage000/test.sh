@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Stage 0 テスト: hello.bin による実行基盤の検証。
 #
 # 検証項目:
