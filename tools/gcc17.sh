@@ -16,6 +16,7 @@
 #   gcc17.sh run-cc1 <file> [opt...]  cc1 を kernel28 の上で走らせ，<file> を訳す
 #   gcc17.sh host-cc1             突き合わせの基準になる cc1 を host で組む (tmp/g17u/gcc-gen/gcc/cc1)
 #   gcc17.sh cmp-cc1 <lib>/<unit> [opt...]  単位の .i を stone の OS の cc1 と host の cc1 で訳し，.s を突き合わせる
+#   gcc17.sh cmp-all <lib...> -- [opt...]   ライブラリの全単位を cmp-cc1 し，表に足していく (途中から再開できる)
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 # unit / units はビルドチェーンで生成したバイナリ (tmp/build) と QEMU を要る。STONE_ENGINE と
@@ -1643,6 +1644,38 @@ cmp_cc1() {
     printf '%s\t%s\t%s\t%s\t%ss\n' "$lu" "$*" "$r" "$(wc -l < "$c/ref/ref.s" | tr -d ' ')" "$((t1 - t0))"
 }
 
+# ライブラリの全単位を cmp-cc1 する (docs/stage017-gcc.md 8.15)。
+#
+#   gcc17.sh cmp-all gcc libiberty -- -O2
+#
+# 結果は $work/cmp/all<選択肢>.tsv に 1 単位 1 行で足していく。gcc/ の全単位は
+# QEMU の上で十数時間かかるので，**表に既にある単位は飛ばす** —— 止まっても
+# 同じ命令で続きから再開できる。最初からやり直すときは表を消す。
+# cmp-cc1 は RAM ファイルを共有するので並列にはしない
+cmp_all() {
+    libs=""
+    while [ $# -gt 0 ] && [ "$1" != "--" ]; do libs="$libs $1"; shift; done
+    [ "${1:-}" = "--" ] && shift
+    [ -n "$libs" ] || die "cmp-all <lib...> -- [opt...]"
+    slug=$(printf '%s' "$*" | tr -c 'A-Za-z0-9' '_')
+    t="$work/cmp/all$slug.tsv"
+    mkdir -p "$work/cmp"
+    touch "$t"
+    total=0
+    for lib in $libs; do
+        for u in $(unit_list "$lib"); do
+            total=$((total + 1))
+            if awk -F '\t' -v u="$lib/$u" '$1 == u { f = 1 } END { exit !f }' "$t"; then
+                continue
+            fi
+            cmp_cc1 "$lib/$u" "$@" < /dev/null >> "$t"
+            printf '%s/%s 件目: %s\n' "$(wc -l < "$t" | tr -d ' ')" "$total" "$(tail -n 1 "$t")" >&2
+        done
+    done
+    echo "cmp-all: $(wc -l < "$t" | tr -d ' ') 単位 ($t)"
+    cut -f 3 "$t" | sed 's/ (.*//' | sort | uniq -c
+}
+
 cmd=${1:-}
 case "$cmd" in
 measure) measure ;;
@@ -1662,13 +1695,14 @@ units) units "${2:-}" ;;
 objects) objects "${2:-}" ;;
 link) link_cc1 ;;
 host-cc1) host_cc1 ;;
+cmp-all) shift; cmp_all "$@" ;;
 cmp-cc1) [ -n "${2:-}" ] || die "cmp-cc1 <lib>/<unit> [opt...]"; shift; cmp_cc1 "$@" ;;
 run-cc1) [ -n "${2:-}" ] || die "run-cc1 <file> [opt...]"; shift; run_cc1 "$@" ;;
 list) [ -n "${2:-}" ] || die "list <lib>"; unit_list "$2" ;;
 object1) [ -n "${2:-}" ] || die "object1 <lib>/<unit>"; object1 "$2" ;;
 where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)
-    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...] | host-cc1 | cmp-cc1 <lib>/<unit> [opt...]}" >&2
+    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...] | host-cc1 | cmp-cc1 <lib>/<unit> [opt...] | cmp-all <lib...> -- [opt...]}" >&2
     exit 2
     ;;
 esac
