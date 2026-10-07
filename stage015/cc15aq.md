@@ -13,9 +13,16 @@ GCC の cc1 を stone の OS の上で走らせて見つけた。`unsigned long 
 
 GCC の cc1 は target hook の表 (`targetm`) を関数へのポインタで呼ぶ。`emit_call_1` は
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 targetm.calls.return_pops_args (fndecl, funtype, stack_size)
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 と呼び，`stack_size` は `HOST_WIDE_INT` (64 bit)，仮引数は `int` である。2 語を積んだので，呼ばれた側 (`ix86_return_pops_args`) の `funtype` には別の語が入り，`ix86_get_callcvt` が NULL の型を引いて落ちた。libcall (`__udivdi3`) を作る経路で初めて表に出た。
 
@@ -57,10 +64,17 @@ GCC は命令の生成関数を `GEN_FCN (icode) (op0, op1, op2)` で呼ぶ。�
 
 cc1 は -O2 で記憶域を使い果たした (`out of memory allocating 33558527 bytes after a total of 89875152 bytes`)。gdb で `xmalloc_failed` に止めて枠を辿ると，ivopts の `multiplier_allowed_in_address_p` の
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 for (i = -MAX_RATIO; i <= MAX_RATIO; i++)      /* i は HOST_WIDE_INT */
   XEXP (addr, 1) = gen_int_mode (i, address_mode);
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 が -1 から 0 へ進めず，CONST_INT の表を広げ続けていた。2 語で読み，加減算の 64 bit の経路 (`ll_addsub`) で計算して 2 語書く。後置は前の 2 語を，前置は後の 2 語を式の値にする。
 

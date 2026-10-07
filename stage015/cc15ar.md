@@ -13,11 +13,18 @@ stone の OS の上で走らせた GCC の cc1 の `.s` を，host で組んだ�
 
 GCC の `default_elf_asm_output_ascii` (varasm.c) は
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 const char *last_null = NULL;
 ...
 if (s > last_null)
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 で分岐する。`s > NULL` が偽になり，`.eh_frame` の空の文字列を `.string ""` ではなく `.ascii "\000"` で出していた。アセンブラが作るバイト列は同じなので，`.s` を突き合わせるまで表に出なかった。
 

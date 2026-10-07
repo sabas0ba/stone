@@ -11,12 +11,19 @@ stone の OS の上の cc1 と host の cc1 の `.s` を突き合わせ，浮動
 
 GCC の real.c の `lshift_significand` は
 
+<!--
+SPDX-SnippetBegin
+SPDX-SnippetCopyrightText: Free Software Foundation, Inc.
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
 ```c
 r->sig[SIGSZ-1-i]
   = (((ofs + i >= SIGSZ ? 0 : a->sig[SIGSZ-1-i-ofs]) << n)
      | ((ofs + i + 1 >= SIGSZ ? 0 : a->sig[SIGSZ-1-i-ofs-1])
         >> (HOST_BITS_PER_LONG - n)));
 ```
+
+<!-- SPDX-SnippetEnd -->
 
 と書く。最上位が 1 の語を算術シフトすると上位が 1 で埋まり，仮数が壊れる。stone の OS の上の cc1 は `3.14159265358979` を `0x400fffff ffc42d11` (正しくは `0x400921fb 54442d11`) にしていた。
 

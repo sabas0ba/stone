@@ -15,6 +15,7 @@ while IFS= read -r -d '' path; do
     case "$path" in
         stage015/tcc/riscv32.patch) expected=LGPL-2.1-only ;;
         tests/stage017/fixtures/gcc47-defined.c) expected=GPL-3.0-or-later ;;
+        tests/stage015/probe/obstk.c) expected=GPL-3.0-or-later ;;
         *) expected=Apache-2.0 ;;
     esac
 
@@ -39,9 +40,10 @@ done < <(git ls-files -z '*.license')
 # 分析文書の自作部分と上流コードの抜粋を混同しない。
 for path in docs/stage015-riscv32.md docs/stage015-tcc.md docs/stage017-cc.md \
             stage015/cc15n.md stage015/cc15o.md \
-            docs/stage017-gcc.md stage017/pp18.md; do
+            docs/stage017-gcc.md stage017/pp18.md \
+            stage015/cc15aq.md stage015/cc15ar.md stage015/cc15as.md; do
     case "$path" in
-        docs/stage017-gcc.md|stage017/pp18.md) upstream=GPL-3.0-or-later ;;
+        docs/stage017-gcc.md|stage017/pp18.md|stage015/cc15a[qrs].md) upstream=GPL-3.0-or-later ;;
         *) upstream=LGPL-2.1-only ;;
     esac
     begin=$(grep -c '^SPDX-SnippetBegin$' "$path" || true)
