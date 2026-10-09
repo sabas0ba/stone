@@ -2198,7 +2198,7 @@ gcc/ の全単位は 4 並列で約 3 時間かかる。この間にクラウド
 
 8.14 で gcc/ の 347 単位が`.o`まで通った。cc1 はそれに libiberty・libcpp・
 libdecnumber・zlib・GMP・MPFR・MPC を加えて組む。ここでは残りの部品を
-通し、cc1 を組み、stone の OS (kernel28) の上で C を訳させ、host で組んだ
+通し、cc1 を組み、stone の OS (kernel28 / kernel29) の上で C を訳させ、host で組んだ
 同じ cc1 の出力と突き合わせた。
 
 #### 組むための道具
@@ -2299,13 +2299,13 @@ gcc/・libcpp・libiberty・zlib の全単位を，それぞれの`.i` (我々�
 
 | ライブラリ | 単位 | `identical` | その他 |
 |---|---|---|---|
-| gcc/ | 347 | 346 | 1 (insn-recog。記憶域が尽きる) |
+| gcc/ | 347 | 347 | - |
 | libcpp | 15 | 15 | - |
 | libiberty | 85 | 85 | - |
 | zlib | 12 | 12 | - |
-| 計 | 459 | 458 | 1 |
+| 計 | 459 | 459 | - |
 
-**訳し終えた 458 単位すべてで，stone の OS の上の cc1 の出力は host で組んだ cc1 とバイト単位で一致した。** 一致した`.s`は計 3,400,501 行である。1 単位の訳は 7〜4010 秒 (QEMU の上。最長は gcc/insn-attrtab の 251,347 行)，全単位で約 7 時間である。
+**459 単位すべてで，stone の OS の上の cc1 の出力は host で組んだ cc1 とバイト単位で一致した。** 一致した`.s`は計 3,536,650 行である。1 単位の訳は 7〜4010 秒 (QEMU の上。最長は gcc/insn-attrtab の 251,347 行)，全単位で約 8 時間である。gcc/insn-recog は kernel29 で，他は kernel28 で測った。
 
 `cmp-all`は表に既にある単位を飛ばすので，止まっても同じ命令で続きから再開できる。
 
@@ -2314,4 +2314,21 @@ gcc/・libcpp・libiberty・zlib の全単位を，それぞれの`.i` (我々�
 - **`.s`は端末を通さず，走らせた後の根から取り出す。** 当初は stone の OS の上で`cat t.s`していた。sh2 の`cat`は中身を文字列の置き場 (256 KiB) に読むので，gcc/c-decl (31,873 行) で`sh2: out of string space`になった。sh2 は凍結済みなので，`run_cc1`が RAM ファイルの窓からイメージを切り出して`t.s`を取る
 - **`__va_ptr`を使う単位は宣言を 1 行足して訳す。** 我々の`stdarg.h`の`va_start`は我々の cc の組込みの`__va_ptr`を読むが，GCC には無い。可変長の関数を定義する単位 (gcc/ の 18 単位と libcpp・libiberty・zlib の 5 単位) は両方の cc1 が同じ誤りで拒み，突き合わせの対象にならなかった (以前の表の`ref-error`)。`extern char *__va_ptr;`を先頭に足し，行の目印 (`# 1 "t.c"`) で行番号を元に戻した入力は両方の cc1 が受け，23 単位すべてが一致した
 
-**gcc/insn-recog は OS の上の cc1 が記憶域を使い果たす** (`out of memory allocating 3709048 bytes after a total of 115527232 bytes`)。kernel28 のユーザ領域は 256 MiB (0x8600_0000〜0x9600_0000) で，cc1 のイメージが 142 MB (ほぼすべてコード。host の i686 の cc1 の text は 15 MB) あるので，ヒープは約 115 MB しか残らない。host の cc1 (x86-64) はこの単位の -O2 で最大 RSS が 373 MB だった。止まるまでに出した`.s`の先頭 11,481 行は host の出力と同じであり，訳し方の違いではない。ユーザ領域を広げる (RAM を 2 GiB にする新しいカーネル) か，cc の出すコードを詰めるまで残る。
+**gcc/insn-recog は kernel28 では記憶域を使い果たした** (`out of memory allocating 3709048 bytes after a total of 115527232 bytes`)。kernel28 のユーザ領域は 256 MiB (0x8600_0000〜0x9600_0000) で，cc1 のイメージが 142 MB (ほぼすべてコード。host の i686 の cc1 の text は 15 MB) あるので，ヒープは約 115 MB しか残らない。host の cc1 (x86-64) はこの単位の -O2 で最大 RSS が 373 MB だった。止まるまでに出した`.s`の先頭 11,481 行は host の出力と同じであり，訳し方の違いではなかった。
+
+そこで `kernel29` を作った ([stage017/kernel29.c](../stage017/kernel29.c) の註)。
+
+| 番地 | kernel28 | kernel29 |
+|---|---|---|
+| RAM | 1 GiB (〜0xbfff_ffff) | 2 GiB (〜0xffff_ffff。M モードの RV32 が引ける上限) |
+| ユーザ領域 (`UBASE`〜`UBRKMAX`) | 0x8600_0000〜0x9600_0000 (256 MiB) | 0x8600_0000〜0xc600_0000 (1 GiB) |
+| フレームスタックの上端 (`USP`) | 0x9700_0000 | 0xc700_0000 |
+| spawn の退避領域 | 0x9700_0000〜0xa000_0000 (144 MiB) | 0xc700_0000〜0xe000_0000 (400 MiB) |
+| sfs の窓 | 0xa000_0000〜 (512 MiB) | 0xe000_0000〜 (512 MiB) |
+
+0x8600_0000 より下は ld16 の前置部に焼き込まれているので動かしていない。syscall も変えていない。広げたことで 2 つの検査の書き方が変わった。
+
+- 窓の上端は 2^32 で 32 bit に入らないので，起動時のイメージの大きさの検査は窓の大きさ (`SFSSZ`) と比べる
+- spawn の退避領域の検査 `savecur + 304 + imgsz + stksz > SAVETOP` は，ユーザ領域が 1 GiB になると左辺が 32 bit を回り込み，足りないのに通る。`imgsz + stksz + 304 > SAVETOP - savecur` に直した
+
+kernel29 の上では gcc/insn-recog も一致した (136,149 行，2577 秒)。tests/stage017 の第 13 部が，ヒープが 768 MiB 取れること (kernel28 では 240 MiB で止まる)，窓の最後の 16 バイト (RAM の上端) に書けてその先へは回り込まないこと，窓を超えるイメージを拒むことを見る。
