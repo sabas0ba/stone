@@ -22,7 +22,7 @@
 | gmp | GMP 6.3.0 (GCC の前提。gcc/ の単位が `gmp.h` を読む) | https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.bz2 | ac28211a7cfb609bae2e2c8d6058d66c8fe96434f740cf6fe2e47b000d1c20cb |
 | mpfr | MPFR 3.1.6 (GCC の前提。`real.h` が `mpfr.h` を読む) | https://ftp.gnu.org/gnu/mpfr/mpfr-3.1.6.tar.bz2 | cf4f4b2d80abb79e820e78c8077b6725bbbb4e8f41896783c899087be0e94068 |
 | mpc | MPC 1.0.3 (GCC の前提) | https://ftp.gnu.org/gnu/mpc/mpc-1.0.3.tar.gz | 617decc6ea09889fb08ede330917a00b16809b8db88c29c31bfbb49cbf88ecc3 |
-| linux54 | Linux 5.4.302 (Stage 18 の測定対象。RV32 のカーネルを我々のチェーンで組む)。stable の tag v5.4.302 を commit で固定 | https://github.com/gregkh/linux | commit 9e3157c56ec7917e6a80ea53a8bd752e0037f2cb |
+| linux54 | Linux 5.4.302 (Stage 18 / 19 の測定対象。RV32 のカーネルを我々のチェーンで組む)。stable の tag v5.4.302 を commit で固定 | https://github.com/gregkh/linux | commit 9e3157c56ec7917e6a80ea53a8bd752e0037f2cb |
 
 bzip2とzlibのSHA-256は公開済みの値を使用し、2026-08-10の取得時に照合した。GCC 4.7.4は事前に使用可能なSHA-256を記録していなかったため、GNU公式配布元をtrust bootstrapとして2026-08-31に初回取得し、そのSHA-256を固定した。以後、`fetch.sh`は記録値と一致しない取得物を削除して失敗する。
 
