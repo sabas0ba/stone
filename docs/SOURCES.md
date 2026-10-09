@@ -22,6 +22,7 @@
 | gmp | GMP 6.3.0 (GCC の前提。gcc/ の単位が `gmp.h` を読む) | https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.bz2 | ac28211a7cfb609bae2e2c8d6058d66c8fe96434f740cf6fe2e47b000d1c20cb |
 | mpfr | MPFR 3.1.6 (GCC の前提。`real.h` が `mpfr.h` を読む) | https://ftp.gnu.org/gnu/mpfr/mpfr-3.1.6.tar.bz2 | cf4f4b2d80abb79e820e78c8077b6725bbbb4e8f41896783c899087be0e94068 |
 | mpc | MPC 1.0.3 (GCC の前提) | https://ftp.gnu.org/gnu/mpc/mpc-1.0.3.tar.gz | 617decc6ea09889fb08ede330917a00b16809b8db88c29c31bfbb49cbf88ecc3 |
+| linux54 | Linux 5.4.302 (Stage 18 / 19 の測定対象。RV32 のカーネルを我々のチェーンで組む)。stable の tag v5.4.302 を commit で固定 | https://github.com/gregkh/linux | commit 9e3157c56ec7917e6a80ea53a8bd752e0037f2cb |
 
 bzip2とzlibのSHA-256は公開済みの値を使用し、2026-08-10の取得時に照合した。GCC 4.7.4は事前に使用可能なSHA-256を記録していなかったため、GNU公式配布元をtrust bootstrapとして2026-08-31に初回取得し、そのSHA-256を固定した。以後、`fetch.sh`は記録値と一致しない取得物を削除して失敗する。
 
@@ -39,6 +40,10 @@ GCC 4.7.4 の要求は「GMP 4.3.2・MPFR 2.4.2・MPC 0.8.1 **以降**」であ�
 取得元が 1 つに決まり，commit が tree の内容ハッシュとして照合値になる (git 自身が
 取得時に検証する)。ただし **git の commit は SHA-1** であり，書庫の
 SHA-256 より照合値としては弱い (docs/stage015-tcc.md 3 章)。
+
+**Linux も git で取る。** kernel.org (cdn / mirrors.edge / www / git) はこの作業環境の egress 制限で到達できないため，stable の保守者 Greg Kroah-Hartman が GitHub に置くミラー (gregkh/linux) から tag v5.4.302 の commit を取る (2026-10-09)。tag object は 8ffcca9e0f269ee86a682eaae7e49c5efae79fe9 である。**kernel.org の正規のリポジトリと同じ commit であることは未照合**であり，kernel.org に到達できるようになった時点で照合する。5.4 系は保守が終了しており，v5.4.302 が最終版である。
+
+**5.4 系には修正されない既知の脆弱性が残る。** 我々はこのカーネルを QEMU の中で起動して試験するだけで，網に晒す用途に使わない。
 
 zlib の取得元は当初 www.zlib.net/zlib-1.3.1.tar.gz だったが，zlib.net は
 新版が出ると旧版を fossils/ へ移す (404 になる) ため恒久 URL の方を
