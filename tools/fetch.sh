@@ -41,6 +41,7 @@ gcc47 https://ftp.gnu.org/gnu/gcc/gcc-4.7.4/gcc-4.7.4.tar.bz2 92e61c6dc3a0a449e6
 gmp https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.bz2 ac28211a7cfb609bae2e2c8d6058d66c8fe96434f740cf6fe2e47b000d1c20cb
 mpfr https://ftp.gnu.org/gnu/mpfr/mpfr-3.1.6.tar.bz2 cf4f4b2d80abb79e820e78c8077b6725bbbb4e8f41896783c899087be0e94068
 mpc https://ftp.gnu.org/gnu/mpc/mpc-1.0.3.tar.gz 617decc6ea09889fb08ede330917a00b16809b8db88c29c31bfbb49cbf88ecc3
+linux54 https://github.com/gregkh/linux v5.4.302:9e3157c56ec7917e6a80ea53a8bd752e0037f2cb
 EOF
 }
 
