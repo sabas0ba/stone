@@ -1,7 +1,7 @@
 # GCC 4.7.4 の cc1 (stone の OS の上) と host で組んだ同じ cc1 の .s の突き合わせ (-O2)
 # 生成: sh tools/gcc17.sh cmp-all gcc libcpp libiberty zlib -- -O2 (docs/stage017-gcc.md 8.15)
 # 列: 単位 / 選択肢 / 結果 / .s の行数 (host) / OS の上の秒数
-# gcc/insn-recog は OS の上の cc1 が記憶域を使い果たす (rc 1。kernel28 のユーザ領域は 256 MiB)
+# gcc/insn-recog は kernel29 (ユーザ領域 1 GiB) で測った。kernel28 (256 MiB) では記憶域が尽きた。他は kernel28
 gcc/alias	-O2	identical	8443	56s
 gcc/alloc-pool	-O2	identical	430	10s
 gcc/attribs	-O2	identical	1299	16s
@@ -142,7 +142,7 @@ gcc/insn-opinit	-O2	identical	4516	111s
 gcc/insn-output	-O2	identical	129480	159s
 gcc/insn-peep	-O2	identical	3	11s
 gcc/insn-preds	-O2	identical	7951	47s
-gcc/insn-recog	-O2	diff (rc 1 )	136149	481s
+gcc/insn-recog	-O2	identical	136149	2577s
 gcc/integrate	-O2	identical	1791	19s
 gcc/internal-fn	-O2	identical	493	15s
 gcc/intl	-O2	identical	126	9s
