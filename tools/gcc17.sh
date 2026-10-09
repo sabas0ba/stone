@@ -13,7 +13,7 @@
 #   gcc17.sh where <lib>/<unit>   gap の単位で，cc が落ちる最初の関数の塊を絞る
 #   gcc17.sh objects [lib]        単位を遠距離呼出しで .o にする (tmp/g17u/obj)
 #   gcc17.sh link                 cc1 を ld18 で組む (tmp/g17u/cc1)
-#   gcc17.sh run-cc1 <file> [opt...]  cc1 を kernel28 の上で走らせ，<file> を訳す
+#   gcc17.sh run-cc1 <file> [opt...]  cc1 を kernel29 の上で走らせ，<file> を訳す
 #   gcc17.sh host-cc1             突き合わせの基準になる cc1 を host で組む (tmp/g17u/gcc-gen/gcc/cc1)
 #   gcc17.sh cmp-cc1 <lib>/<unit> [opt...]  単位の .i を stone の OS の cc1 と host の cc1 で訳し，.s を突き合わせる
 #   gcc17.sh cmp-all <lib...> -- [opt...]   ライブラリの全単位を cmp-cc1 し，表に足していく (途中から再開できる)
@@ -1514,7 +1514,7 @@ link_cc1() {
     echo "cc1: $(wc -c < "$work/cc1" | tr -d ' ') バイト ($work/cc1)"
 }
 
-# cc1 を stone の OS (kernel28) の上で走らせる (docs/stage017-gcc.md 8.15)。
+# cc1 を stone の OS (kernel29) の上で走らせる (docs/stage017-gcc.md 8.15)。
 # 根に cc1 / sh2 / 入力を置いて sfs4 に詰め，sh2 が go.sh を実行する。
 # 出力は「rc <終了コード>」の行と，訳した .s (あれば) である。
 # .s は端末を通さず，走らせた後の根から取り出す。sh2 の cat は中身を文字列の
@@ -1524,7 +1524,13 @@ link_cc1() {
 # 根の項目の上限は STONE_GCC17_MAXENT (既定 128。多いと sfs4 の引きが遅くなる)。
 #
 # 窓は 512 MiB (kernel27 以降)。cc1 は 100 MiB を超えるので，イメージは
-# 256 MiB 取る。RAM ファイルの組み方は tests/stage017 の runroot6 と同じ
+# 256 MiB 取る。RAM ファイルの組み方は tests/stage017 の runroot7 と同じ。
+#
+# kernel29 は RAM 2 GiB を使い，sfs の窓は 0xe000_0000 にある (RAM ファイルの
+# 0x6000_0000 から先)。kernel28 のユーザ領域 256 MiB では cc1 (142 MB) の
+# ヒープが約 115 MB しか残らず，gcc/insn-recog の -O2 で記憶域が尽きた
+run_ram=2147483648
+run_win=1610612736
 run_cc1() {
     [ -s "$work/cc1" ] || die "cc1 が無い (sh tools/gcc17.sh link)"
     f=$1; shift
@@ -1539,18 +1545,18 @@ run_cc1() {
     printf 'sh2 go.sh\n' > "$r/root/boot"
     sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 "${STONE_GCC17_MAXENT:-128}" > /dev/null \
         || die "sfs4 に詰められない"
-    dd if=/dev/null of="$work/run.ram" bs=1 seek=1073741824 2> /dev/null
+    dd if=/dev/null of="$work/run.ram" bs=1 seek="$run_ram" 2> /dev/null
     dd if="$work/run.img" of="$work/run.ram" bs=64K oflag=seek_bytes \
-        seek=536870912 conv=notrunc 2> /dev/null
+        seek="$run_win" conv=notrunc 2> /dev/null
     # RAM ファイルはリポジトリからの相対で渡す。コンテナの中の QEMU は
     # ホストの絶対経路を見られない (tools/env.sh はリポジトリだけを渡す)
-    STONE_QEMU_RAMFILE="${work#"$repo_root"/}/run.ram" STONE_QEMU_RAM=1G \
-        sh tools/env.sh qemu tmp/build/kernel28.bin < /dev/null
+    STONE_QEMU_RAMFILE="${work#"$repo_root"/}/run.ram" STONE_QEMU_RAM=2G \
+        sh tools/env.sh qemu tmp/build/kernel29.bin < /dev/null
     # 走らせた後の根 (t.s，cc1 が書いた -fdump-* のファイルなど) を取り出す。
     # RAM ファイルの窓の位置からイメージを切り出す
     o=${STONE_GCC17_KEEP:-$r/out}
     dd if="$work/run.ram" of="$work/run.out.img" bs=64K iflag=skip_bytes,count_bytes \
-        skip=536870912 count=268435456 2> /dev/null
+        skip="$run_win" count=268435456 2> /dev/null
     rm -rf "$o"
     sh tools/sfs4.sh unpack "$work/run.out.img" "$o" > /dev/null \
         || die "走らせた後の根を取り出せない"

@@ -1803,6 +1803,96 @@ got=$(sha256sum tmp/build/pp21); got=${got%% *}
 [ "$want" = "$got" ]
 report $? "build: pp21 の SHA-256 が stage017/pp21.md の記載値と一致 (指令行の器を 64 KiB へ広げた)"
 
+section "第 13 部: RAM 2 GiB の配置 (kernel29。docs/stage017-gcc.md 8.15)"
+
+# GCC の cc1 (イメージ 142 MB) は kernel28 のユーザ領域 256 MiB ではヒープが
+# 約 115 MB しか残らず，gcc/insn-recog の -O2 で記憶域が尽きた。kernel29 は
+# RAM を 2 GiB (0x8000_0000〜0xffff_ffff) にし，ユーザ領域を 1 GiB に
+# 広げる。sfs の窓は 0xe000_0000 へ移り，RAM ファイルでは 0x6000_0000 から先
+
+# 根を sfs4 で詰めて kernel29 で走らせる。runroot6 と配置だけが違う。
+# $5 が空でなければ，詰めた後のイメージを書き換える関数として呼ぶ
+runroot7() {
+    sh tools/sfs4.sh pack "$1" "$out/i7" "${3:-4194304}" "${4:-128}" \
+            > /dev/null \
+        && { [ -z "${5:-}" ] || "$5" "$out/i7"; } \
+        && rm -f "$out/r7" \
+        && dd if=/dev/null of="$out/r7" bs=1 seek=2147483648 2> /dev/null \
+        && dd if="$out/i7" of="$out/r7" bs=64K oflag=seek_bytes \
+            seek=1610612736 conv=notrunc 2> /dev/null \
+        && STONE_QEMU_RAMFILE="$out/r7" STONE_QEMU_RAM=2G \
+            sh tools/env.sh qemu tmp/build/kernel29.bin < /dev/null \
+            > "$2" 2>&1
+}
+
+# 第 12 部と同じ根を kernel29 で走らせる。syscall は変えていないので
+# 期待値も同じである (spawn の退避領域も 0xc700_0000 から先へ移った)
+rc=0
+runroot7 "$out/l26root" "$out/l29.out" 4194304 128 \
+    && diff -u "$out/l26.want" "$out/l29.out" > "$out/l29.diff" || rc=1
+[ "$rc" -eq 0 ]
+report $? "run: 第 12 部の libc26 のプログラムが kernel29 の上でも同じ結果になる"
+[ -s "$out/l29.diff" ] && sed -n '4,$p' "$out/l29.diff"
+
+# ユーザ領域が 1 GiB あること。48 MiB を 16 回取る (tests/stage017/user/bigheap.c)
+r=$out/bhroot
+rm -rf "$r"; mkdir -p "$r"
+ok=0
+sh tools/bundle.sh stage017/libc26/include/*.h tests/stage017/user/bigheap.c \
+    | sh tools/env.sh qemu tmp/build/pp16.bin > "$out/bigheap.i" \
+    && { printf '#pragma stone far_call\n'; cat "$out/bigheap.i"; } \
+        | sh tools/env.sh qemu tmp/build/cc15as.bin > "$out/bigheap.o" \
+    && sh tools/ld18.sh -o "$r/bigheap" -L tmp/build/l26_*.o tmp/build/rt64.o \
+        tmp/build/rtfp.o -N "$out/bigheap.o" > "$out/bigheap.ld" 2>&1 || ok=1
+[ "$ok" -eq 0 ]
+report $? "build: bigheap を libc26 と組む"
+cp tmp/build/sh2.bin "$r/sh2"
+printf 'bigheap\n' > "$r/go.sh"
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot7 "$r" "$out/bh29.out" 4194304 128
+grep -qx 'heap 768 0 1' "$out/bh29.out"
+report $? "run: kernel29 のヒープは 768 MiB を取れ，0x9600_0000 (kernel28 の上限) を超える"
+# 同じプログラムを kernel28 で走らせると途中で malloc が NULL を返す
+runroot6 "$r" "$out/bh28.out" 4194304 128
+grep -Eq '^heap [0-9]+ 0 0$' "$out/bh28.out" && ! grep -qx 'heap 768 0 1' "$out/bh28.out"
+report $? "run: 同じプログラムは kernel28 では 256 MiB の内で止まる (比べる相手)"
+sed 's/^/   kernel28: /' "$out/bh28.out"
+
+# **窓の上端 (0xffff_fff0〜0xffff_ffff) が RAM であること。** 窓いっぱい
+# (512 MiB) のイメージを詰め，カーソル (頭の +16) を最後の 16 バイトへ
+# 置く。ゲストが作るファイルはカーソルの位置に置かれるので，16 バイト
+# 書けば RAM の最後の 16 バイトに入る。もう 1 バイト足すと ENOSPC になり，
+# 0 番地へ回り込まない
+topcur() {
+    # 0x1fff_fff0 (リトルエンディアン)
+    printf '\360\377\377\037' | dd of="$1" bs=1 seek=16 conv=notrunc 2> /dev/null
+}
+r=$out/toproot
+rm -rf "$r"; mkdir -p "$r"
+cp tmp/build/sh2.bin "$r/sh2"
+printf 'echo 0123456789abcde > top.txt\necho x >> top.txt\ncat top.txt\n' > "$r/go.sh"
+printf 'sh2 go.sh\n' > "$r/boot"
+runroot7 "$r" "$out/top29.out" 536870912 32 topcur
+top=$(dd if="$out/r7" bs=1 skip=2147483632 count=16 2> /dev/null)
+[ "$(cat "$out/top29.out")" = "0123456789abcde" ] && [ "$top" = "0123456789abcde" ]
+report $? "run: kernel29 は窓の最後の 16 バイト (RAM の上端) に書き，その先へは伸ばさない"
+rm -f "$out/r7" "$out/i7"
+
+# 窓 (512 MiB) より 1 バイト大きいイメージは kernel29 も 'S' で拒む。
+# 上端の番地は 2^32 で定数にできないので，大きさ (SFSSZ) と比べる
+sh tools/sfs4.sh pack "$out/s4rt" "$out/big7.img" 262144 32 > /dev/null 2>&1
+printf '\001\000\000\040' | dd of="$out/big7.img" bs=1 seek=4 conv=notrunc 2> /dev/null
+rm -f "$out/rbig7"
+dd if=/dev/null of="$out/rbig7" bs=1 seek=2147483648 2> /dev/null
+dd if="$out/big7.img" of="$out/rbig7" bs=64K oflag=seek_bytes \
+    seek=1610612736 conv=notrunc 2> /dev/null
+STONE_QEMU_RAMFILE="$out/rbig7" STONE_QEMU_RAM=2G \
+    sh tools/env.sh qemu tmp/build/kernel29.bin < /dev/null \
+    > "$out/big7.out" 2>&1 || true
+grep -qx 'S' "$out/big7.out"
+report $? "run: 窓を超える大きさのイメージは kernel29 も 'S' で拒む"
+rm -f "$out/rbig7"
+
 section "差分試験の OS 側 (libc を我々の OS の上でホストと突き合わせる)"
 
 # **libc の不足は，我々が書いた期待値では出ない。** 我々は自分が使う

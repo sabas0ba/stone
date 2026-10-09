@@ -2209,6 +2209,7 @@ libdecnumber・zlib・GMP・MPFR・MPC を加えて組む。ここでは残り�
 | [ld18](../stage015/ld18.md) | 8192 個の部品と 262144 個の大域記号を受けるリンカ。入出力は QEMU の RAM で渡す。ライブラリの部品は再配置が使う名前でだけ引き込む |
 | [libc26](../stage017/libc26.md) | cc1 をリンクして名指しされた不足 (alloca・fstat・O_EXCL など) |
 | `kernel28` | 記述子で stat する`fstat2` (503)。想定外のトラップで ra も出す |
+| `kernel29` | RAM 2 GiB の配置。ユーザ領域を 256 MiB から 1 GiB へ広げた (下の「測った結果」) |
 | [pp21](../stage017/pp21.md) | 1 行の展開の器を 64 KiB にした pp (MPFR の 1 単位) |
 
 `tools/run-qemu.sh`は出力をいったんファイルへ書いてから出す。QEMU の
