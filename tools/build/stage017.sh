@@ -239,6 +239,25 @@ build_stage017() {
             -- libc25_run "$f" "$n"
     done
 
+    # libc の第 26 世代 (docs/stage017-gcc.md 8.15)。GCC 4.7.4 の cc1 を
+    # リンクして名指しされた不足を足した (src/misc26.c / posix/sys26.c と
+    # 各 header の末尾)。cc1 の単位と同じく最前線の cc (cc15am) で訳す
+    for f in src/string src/ctype src/stdlib src/morecore src/misc15 \
+             src/misc26 \
+             posix/sys posix/morecore posix/stdio posix/assert posix/dir \
+             posix/signal posix/sys26; do
+        n=$(echo "$f" | tr / _)
+        step "l26_$n" "l26_$n.o" \
+            -- "stage017/libc26/$f.c" \
+               stage017/libc26/include/*.h \
+               stage017/libc26/include/sys/time.h \
+               stage017/libc26/include/sys/times.h \
+               stage017/libc26/include/sys/stat.h \
+               stage017/libc26/include/sys/types.h \
+               tmp/build/cc15am.bin tmp/build/pp.bin \
+            -- libc26_run "$f" "$n"
+    done
+
     # 第 25 世代の検査用のプログラム (tests/stage017 第 9 部)。子の時間が
     # cutime へ入ることと，255 バイトの経路が stat を通ることを見る。
     # **libc25 とリンクする**ので kernel27 の上でしか動かない
@@ -347,6 +366,12 @@ build_stage017() {
         -- stage017/pp20.sc tmp/build/cc15p.bin tmp/build/ld16.bin \
         -- pp20_run
 
+    # 前処理器の第 21 世代 (docs/stage017-gcc.md 8.15 / stage017/pp21.sc)。
+    # 指令行の器を 64 KiB へ広げた (MPFR の 9 KB のマクロ)
+    step pp21 pp21 \
+        -- stage017/pp21.sc tmp/build/cc15p.bin tmp/build/ld16.bin \
+        -- pp21_run
+
     # cc の第 19 世代 (第 3 部の 3 の 2)。-I をバンドルせず pp17 へ渡す
     step cc19 cc19 \
         -- stage017/cc19.c tmp/build/cc15p.bin tmp/build/pp16.bin \
@@ -399,6 +424,21 @@ build_stage017() {
         -- stage017/kernel27.c tmp/build/cc15p.bin tmp/build/pp16.bin \
            tmp/build/ld16.bin \
         -- kern17 kernel27 stage017/kernel27.c
+
+    # カーネルの第 28 世代。kernel27 との差は fstat2 (503) の 1 本だけ
+    # (記述子で stat する。libc26 の fstat が使う。docs/stage017-gcc.md 8.15)
+    step kernel28 kernel28.bin \
+        -- stage017/kernel28.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin \
+        -- kern17 kernel28 stage017/kernel28.c
+
+    # カーネルの第 29 世代。kernel28 との差は配置だけ (RAM 2 GiB。ユーザ
+    # 領域 256 MiB -> 1 GiB) と，それで回り込む spawn の検査の書き方
+    # (docs/stage017-gcc.md 8.15)。syscall は変えていない
+    step kernel29 kernel29.bin \
+        -- stage017/kernel29.c tmp/build/cc15p.bin tmp/build/pp16.bin \
+           tmp/build/ld16.bin \
+        -- kern17 kernel29 stage017/kernel29.c
 }
 
 # カーネルを 1 つ作る (前置部は 'K')。stage016.sh の kern と同じ方法だが，
@@ -460,6 +500,19 @@ libc25_run() {
     sh tools/env.sh qemu tmp/build/cc15ag.bin < "tmp/build/l25_$2.i" \
         > "tmp/build/l25_$2.o"
     echo "built tmp/build/l25_$2.o" >&2
+}
+
+libc26_run() {
+    sh tools/bundle.sh stage017/libc26/include/*.h \
+        "sys/time.h=stage017/libc26/include/sys/time.h" \
+        "sys/times.h=stage017/libc26/include/sys/times.h" \
+        "sys/stat.h=stage017/libc26/include/sys/stat.h" \
+        "sys/types.h=stage017/libc26/include/sys/types.h" \
+        "stage017/libc26/$1.c" \
+        | sh tools/env.sh qemu tmp/build/pp.bin > "tmp/build/l26_$2.i"
+    sh tools/env.sh qemu tmp/build/cc15am.bin < "tmp/build/l26_$2.i" \
+        > "tmp/build/l26_$2.o"
+    echo "built tmp/build/l26_$2.o" >&2
 }
 
 # libc23 と最前線のコンパイラ (cc15ab) で組む OS プログラム。
@@ -606,6 +659,14 @@ pp19_run() {
     echo "built tmp/build/pp19" >&2
 }
 
+pp21_run() {
+    { cat stage017/pp21.sc; printf '\004'; } \
+        | sh tools/env.sh qemu tmp/build/cc15p.bin > tmp/build/pp21.o
+    { printf 'E'; cat tmp/build/pp21.o; printf '\0'; } \
+        | sh tools/env.sh qemu tmp/build/ld16.bin > tmp/build/pp21
+    echo "built tmp/build/pp21" >&2
+}
+
 pp20_run() {
     { cat stage017/pp20.sc; printf '\004'; } \
         | sh tools/env.sh qemu tmp/build/cc15p.bin > tmp/build/pp20.o
@@ -666,8 +727,8 @@ cc17_run() {
 }
 
 do_stage017() {
-    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd cc15abcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 pp18 pp19 pp20 mk17 mk18 mk19 mk20 stamp \
-        kernel23.bin kernel24.bin kernel25.bin kernel26.bin kernel27.bin \
+    run_stage stage017 pp16cmd cc15pcmd cc15qcmd cc15rcmd cc15scmd cc15tcmd cc15ucmd cc15vcmd cc15abcmd ld16cmd ld17cmd cc17 cc18 cc19 ar17 pp17 pp18 pp19 pp20 pp21 mk17 mk18 mk19 mk20 stamp \
+        kernel23.bin kernel24.bin kernel25.bin kernel26.bin kernel27.bin kernel28.bin kernel29.bin \
         l19_src_string.o l19_src_ctype.o l19_src_stdlib.o \
         l19_src_morecore.o l19_src_misc15.o \
         l19_posix_sys.o l19_posix_morecore.o l19_posix_stdio.o \
@@ -695,15 +756,21 @@ do_stage017() {
         l25_src_string.o l25_src_ctype.o l25_src_stdlib.o \
         l25_src_morecore.o l25_src_misc15.o \
         l25_posix_sys.o l25_posix_morecore.o l25_posix_stdio.o \
-        l25_posix_assert.o l25_posix_dir.o l25_posix_signal.o tmx \
+        l25_posix_assert.o l25_posix_dir.o l25_posix_signal.o \
+        l26_src_string.o l26_src_ctype.o l26_src_stdlib.o \
+        l26_src_morecore.o l26_src_misc15.o l26_src_misc26.o \
+        l26_posix_sys.o l26_posix_morecore.o l26_posix_stdio.o \
+        l26_posix_assert.o l26_posix_dir.o l26_posix_signal.o \
+        l26_posix_sys26.o tmx \
         sed1 sed2 sed3 re1.o re2.o sh3 sh4 sh5 awkfmt1.o awk1 \
         -- stage017/cc17.c stage017/cc18.c stage017/cc19.c stage017/ar17.c \
            stage017/pp17.sc stage017/pp18.sc stage017/pp19.sc \
-           stage017/pp20.sc \
+           stage017/pp20.sc stage017/pp21.sc \
            stage017/mk17.c stage017/mk18.c stage017/mk19.c \
            stage017/mk20.c \
            stage017/kernel23.c stage017/kernel24.c stage017/kernel25.c \
-           stage017/kernel26.c stage017/kernel27.c \
+           stage017/kernel26.c stage017/kernel27.c stage017/kernel28.c \
+           stage017/kernel29.c \
            tests/stage017/user/stamp.c tests/stage017/user/tmx.c \
            stage017/libc19/include/*.h stage017/libc19/include/sys/*.h \
            stage017/libc19/src/*.c stage017/libc19/posix/*.c \
@@ -719,6 +786,8 @@ do_stage017() {
            stage017/libc24/src/*.c stage017/libc24/posix/*.c \
            stage017/libc25/include/*.h stage017/libc25/include/sys/*.h \
            stage017/libc25/src/*.c stage017/libc25/posix/*.c \
+           stage017/libc26/include/*.h stage017/libc26/include/sys/*.h \
+           stage017/libc26/src/*.c stage017/libc26/posix/*.c \
            stage017/sed1.c stage017/sed2.c stage017/sed3.c \
            stage017/re1.c stage017/re1.h stage017/re2.c stage017/re2.h \
            stage017/sh3.c stage017/sh4.c stage017/sh5.c \

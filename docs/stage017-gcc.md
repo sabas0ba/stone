@@ -2193,3 +2193,125 @@ gcc/ の全単位は 4 並列で約 3 時間かかる。この間にクラウド
 **cc1 を作る gcc/ の 347 単位すべてが、我々の前処理器とコンパイラで`.o`まで
 通った。** 翻訳が通ることと正しく動くことは別であり、次はリンクと実行で
 確かめる。
+
+### 8.15 cc1 を組んで stone の OS の上で走らせる
+
+8.14 で gcc/ の 347 単位が`.o`まで通った。cc1 はそれに libiberty・libcpp・
+libdecnumber・zlib・GMP・MPFR・MPC を加えて組む。ここでは残りの部品を
+通し、cc1 を組み、stone の OS (kernel28) の上で C を訳させ、host で組んだ
+同じ cc1 の出力と突き合わせた。
+
+#### 組むための道具
+
+| 部品 | 内容 |
+|---|---|
+| [cc15am](../stage015/cc15am.md) | `#pragma stone far_call`で呼出しを`lui x31`+`jalr`にする。cc1 のコードは 142 MB あり，`jal`の 1 MiB に届かない |
+| [ld18](../stage015/ld18.md) | 8192 個の部品と 262144 個の大域記号を受けるリンカ。入出力は QEMU の RAM で渡す。ライブラリの部品は再配置が使う名前でだけ引き込む |
+| [libc26](../stage017/libc26.md) | cc1 をリンクして名指しされた不足 (alloca・fstat・O_EXCL など) |
+| `kernel28` | 記述子で stat する`fstat2` (503)。想定外のトラップで ra も出す |
+| `kernel29` | RAM 2 GiB の配置。ユーザ領域を 256 MiB から 1 GiB へ広げた (下の「測った結果」) |
+| [pp21](../stage017/pp21.md) | 1 行の展開の器を 64 KiB にした pp (MPFR の 1 単位) |
+
+`tools/run-qemu.sh`は出力をいったんファイルへ書いてから出す。QEMU の
+16550 UART は host 側のパイプが詰まるとバイトを捨て，大きな`.o`の途中が
+欠けていた (再現は狙って起こせなかった。`insn-attrtab`・`tree-ssa-dce`・
+`loop-init`で見た)。
+
+#### 残りのライブラリを通す
+
+GMP 6.3.0・MPFR 3.1.6・MPC 1.0.3・libdecnumber・zlib は，gcc/ と同じく
+我々の libc の header だけで configure し (`-nostdinc`)，関数の有無は
+libc の記号表から与える (`func_cache`)。通すために要った形は各世代の
+文書にある。
+
+| 世代 | 受けた形 |
+|---|---|
+| [cc15an](../stage015/cc15an.md) | 符号なしの単項`-`/`~`の型，単項`+`，幅 32 のビットフィールド |
+| [cc15ao](../stage015/cc15ao.md) | alloca を呼んだ関数の戻りで返す，C99 の宣言の置き場 2 つ，記憶域クラスの前の型修飾子 |
+| [cc15ap](../stage015/cc15ap.md) | 整数の左辺への浮動小数点の複合代入 (`prec += -d`) |
+
+全 1281 単位 (gcc/ 347・GMP・MPFR・MPC・libdecnumber・zlib・libiberty・
+libcpp) が`ok`になった。
+
+#### 組む
+
+`sh tools/gcc17.sh link`が全単位を遠距離呼出しで`.o`にし，ld18 で組む。
+並びは libc26 と実行時ルーチンが先で (前置部の syscall スタブを`jal`で
+呼ぶため)，C の前処理系 (`C_OBJS`)・`main`・`cc1-checksum`を必ず組み，
+残りはライブラリの部品にする。本物の build でも`OBJS`は`libbackend.a`で
+ある。全部を必ず組むと，C 以外の前処理系のための`tree-nomudflap`が
+`tree-mudflap`と名前で重なる。`cc1-checksum.c`は PCH の照合にだけ使う
+値なので 0 に固定した。
+
+組めた cc1 は 761 部品・コード 142 MB・記憶域 152 MB である。
+
+#### 走らせて見つけたもの
+
+`sh tools/gcc17.sh run-cc1 <file>`が cc1 と sh2 と入力を sfs4 に詰め，
+kernel28 の上で訳させる。落ちた箇所は，kernel28 が出す PC と ra，
+`STONE_QEMU_INTLOG` (例外だけを記録する) の mtval，同じコンテナの中で
+QEMU の gdb stub に繋いだ gdb-multiarch で枠を辿って調べた。番地は ld18 の
+並びと各`.o`の記号表から関数名に直した。
+
+| 症状 | 原因 | 直し |
+|---|---|---|
+| 1 行の関数を訳す前に落ちる | libiberty の「64 bit の型」の検査を host が`unsigned long`と答え，hashtab の添字が不定 | `liberty_cv_uint64`を与える |
+| `.o`の節表がずれる (終了コード 0) | cc の ELF の組立てバッファ 8 MiB に上限の検査が無い | [cc15ap](../stage015/cc15ap.md) で 32 MiB と検査 |
+| `unsigned long long / 7`を -O0 で訳すと落ちる | 関数へのポインタを通した呼出しの実引数を仮引数の型へ変換していない | [cc15aq](../stage015/cc15aq.md) |
+| すべての関数で`gcc_assert`に止まる | 上の直しの第 1 版が，可変長の型のポインタ (GEN_FCN) で固定個の`gen_*`の実引数を逆に積んだ | cc15aq で順に積む |
+| -O2 で記憶域を使い果たす | 64 bit の`++`が桁上がりせず，ivopts のループが止まらない | cc15aq |
+| -O2 の PRE で落ちる | libiberty の「スタックの伸びる向き」の検査を host が上向きと答え，`C_alloca`が生きている領域を返した | `ac_cv_c_stack_direction=-1`を与える |
+| `.s`の 1 行が host の cc1 と違う | ポインタの大小を符号つきで比べていた (RAM は 0x8000_0000 から上) | [cc15ar](../stage015/cc15ar.md) |
+| 浮動小数点の定数の仮数が違う | `c ? 0 : u` の型を then 側 (int) にしていて，real.c の`>>`が算術シフトになった | [cc15as](../stage015/cc15as.md) |
+| libcpp の expr.c の SRA が別の参照を選ぶ | libc の`qsort`が安定でなく，同点の並びが glibc と違う | [libc26](../stage017/libc26.md) を併合ソートに |
+| `-fdump-*`の確率が 0.01 と 0.00 | libc の`%f`が半端の判定で丸め誤差を消していた | libc26 |
+
+configure の誤りは 2 つとも**host で走らせた検査の答**だった。cache 変数で
+語長を与えても，`sizeof`を使う翻訳試験と実行試験は host の答を出す。
+
+cc の誤りは，どれも probe を足して host の gcc と値で突き合わせている
+(`fpll`・`llinc`・`ptrcmp`・`condty`・`fpopasn`。`tools/diff17.sh`)。
+
+浮動小数点の定数は，同じ値を GMP / MPFR で作るプログラムと，real.c の
+`real_from_string`を直に呼ぶプログラムを stone の OS で走らせ，host と
+比べて real.c の中に絞った。libc の 2 つは，両方の cc1 の`-fdump-tree-all`
+を番地を伏せて突き合わせ，最初に違う段 (`027t.esra`) から辿った
+(`STONE_GCC17_KEEP`で走らせた後の根を取り出す)。
+
+#### 突き合わせ
+
+`sh tools/gcc17.sh host-cc1`が，同じ GCC 4.7.4 の同じ構成 (target は
+i686-pc-linux-gnu，C だけ) を host で組む。GCC は host に依らず同じ`.s`を
+出すことを目指しているので，stone の OS の上の cc1 の出力は**バイト単位で
+一致するはずである**。`sh tools/gcc17.sh cmp-cc1 <単位> [選択肢]`が単位の
+`.i`を両方で訳して比べる。
+
+**`.long`の値は 32 bit の符号なしに揃えてから比べる。** GCC は浮動小数点の
+定数を host の long の配列から出すので，host の long が 64 bit なら正で，
+32 bit なら同じビット列が負で出る (0x9999999a が 2576980378 と
+-1717986918)。GCC 自身の host 依存であり，アセンブラが作るバイト列は同じで
+ある。
+
+#### 測った結果
+
+表は[gcc47-cc1-cmp-O2.txt](../tests/stage017/expected/gcc47-cc1-cmp-O2.txt)にある。
+gcc/・libcpp・libiberty・zlib の全単位を，それぞれの`.i` (我々の pp と libc の header で前処理したもの) から -O2 で訳した (`sh tools/gcc17.sh cmp-all gcc libcpp libiberty zlib -- -O2`)。
+
+| ライブラリ | 単位 | `identical` | その他 |
+|---|---|---|---|
+| gcc/ | 347 | 346 | 1 (insn-recog。記憶域が尽きる) |
+| libcpp | 15 | 15 | - |
+| libiberty | 85 | 85 | - |
+| zlib | 12 | 12 | - |
+| 計 | 459 | 458 | 1 |
+
+**訳し終えた 458 単位すべてで，stone の OS の上の cc1 の出力は host で組んだ cc1 とバイト単位で一致した。** 一致した`.s`は計 3,400,501 行である。1 単位の訳は 7〜4010 秒 (QEMU の上。最長は gcc/insn-attrtab の 251,347 行)，全単位で約 7 時間である。
+
+`cmp-all`は表に既にある単位を飛ばすので，止まっても同じ命令で続きから再開できる。
+
+測る途中で突き合わせの道具を 2 つ直した。
+
+- **`.s`は端末を通さず，走らせた後の根から取り出す。** 当初は stone の OS の上で`cat t.s`していた。sh2 の`cat`は中身を文字列の置き場 (256 KiB) に読むので，gcc/c-decl (31,873 行) で`sh2: out of string space`になった。sh2 は凍結済みなので，`run_cc1`が RAM ファイルの窓からイメージを切り出して`t.s`を取る
+- **`__va_ptr`を使う単位は宣言を 1 行足して訳す。** 我々の`stdarg.h`の`va_start`は我々の cc の組込みの`__va_ptr`を読むが，GCC には無い。可変長の関数を定義する単位 (gcc/ の 18 単位と libcpp・libiberty・zlib の 5 単位) は両方の cc1 が同じ誤りで拒み，突き合わせの対象にならなかった (以前の表の`ref-error`)。`extern char *__va_ptr;`を先頭に足し，行の目印 (`# 1 "t.c"`) で行番号を元に戻した入力は両方の cc1 が受け，23 単位すべてが一致した
+
+**gcc/insn-recog は OS の上の cc1 が記憶域を使い果たす** (`out of memory allocating 3709048 bytes after a total of 115527232 bytes`)。kernel28 のユーザ領域は 256 MiB (0x8600_0000〜0x9600_0000) で，cc1 のイメージが 142 MB (ほぼすべてコード。host の i686 の cc1 の text は 15 MB) あるので，ヒープは約 115 MB しか残らない。host の cc1 (x86-64) はこの単位の -O2 で最大 RSS が 373 MB だった。止まるまでに出した`.s`の先頭 11,481 行は host の出力と同じであり，訳し方の違いではない。ユーザ領域を広げる (RAM を 2 GiB にする新しいカーネル) か，cc の出すコードを詰めるまで残る。

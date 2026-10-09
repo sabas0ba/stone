@@ -160,6 +160,29 @@ build_stage015b() {
     # 仮引数・64 bit の定数式など) と容量をまとめて受ける
     # (docs/stage017-gcc.md 8.14)。**ビルドチェーンの成果物は変わらない**
     ccgen cc15al cc15ak stage015/cc15al.sc
+    # 第 39 世代。`#pragma stone far_call` で呼出しを lui x31 + jalr にする
+    # (GCC の cc1 は 1 MiB を超えて呼ぶ。docs/stage017-gcc.md 8.15)。
+    # **ビルドチェーンの成果物は変わらない**
+    ccgen cc15am cc15al stage015/cc15am.sc
+    # 第 40 世代。単項の + と，符号なしの - / ~ の型 (`~0U >> 1` が算術
+    # シフトになっていた)。幅 32 のビットフィールド (docs/stage017-gcc.md 8.15)
+    ccgen cc15an cc15am stage015/cc15an.sc
+    # 第 41 世代。alloca を __alloca2(n, fp) に書き換え，呼んだ関数の戻りで
+    # __alloca_release(fp) を呼ぶ (docs/stage017-gcc.md 8.15)
+    ccgen cc15ao cc15an stage015/cc15ao.sc
+    # 第 42 世代。整数の左辺と浮動小数点の右辺の複合代入 (MPFR の eint.c の
+    # `prec += -d;`。docs/stage017-gcc.md 8.15)
+    ccgen cc15ap cc15ao stage015/cc15ap.sc
+    # 第 43 世代。関数へのポインタの型に仮引数の情報を持たせ，ポインタを
+    # 通した呼出しの実引数を仮引数の型へ揃える (GCC の cc1 の targetm の
+    # 呼出し。docs/stage017-gcc.md 8.15)
+    ccgen cc15aq cc15ap stage015/cc15aq.sc
+    # 第 44 世代。ポインタの大小を符号なしで比べる (RAM は 0x8000_0000 から上。
+    # docs/stage017-gcc.md 8.15)
+    ccgen cc15ar cc15aq stage015/cc15ar.sc
+    # 第 45 世代。?: の結果の型を通常の算術変換の型にする (GCC の real.c。
+    # docs/stage017-gcc.md 8.15)
+    ccgen cc15as cc15ar stage015/cc15as.sc
     # 容量の世代の pp (マクロ表とアリーナ。12.1)
     tool1 pp15 cc15p stage015/pp15.sc
     # 再帰抑止を直した pp (12.7)
@@ -172,6 +195,9 @@ build_stage015b() {
     # ld16 は exit(2) で拒むだけなので、呼ぶ側に出るのは
     # "cc: link failed" だけだった。通る経路のバイト列は変わらない
     tool1 ld17 cc15p stage015/ld17.sc
+    # GCC の cc1 (128 MB を超えるコード) を組むリンカ (docs/stage017-gcc.md 8.15)。
+    # 入出力は QEMU の RAM で受け渡す (tools/ld18.sh)。ld17 は変えない
+    tool1 ld18 cc15am stage015/ld18.sc
 }
 
 do_stage015b() {
@@ -188,7 +214,11 @@ do_stage015b() {
         cc15ag0.bin cc15ag.bin cc15ah0.bin cc15ah.bin \
         cc15ai0.bin cc15ai.bin cc15aj0.bin cc15aj.bin \
         cc15ak0.bin cc15ak.bin cc15al0.bin cc15al.bin \
-        pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin \
+        cc15am0.bin cc15am.bin cc15an0.bin cc15an.bin \
+        cc15ao0.bin cc15ao.bin cc15ap0.bin cc15ap.bin \
+        cc15aq0.bin cc15aq.bin cc15ar0.bin cc15ar.bin \
+        cc15as0.bin cc15as.bin \
+        pp15.bin pp16.bin ld15.bin ld16.bin ld17.bin ld18.bin \
         -- stage015/cc15l.sc stage015/cc15m.sc stage015/cc15n.sc \
            stage015/cc15o.sc stage015/cc15p.sc stage015/cc15q.sc \
            stage015/cc15r.sc stage015/cc15s.sc stage015/cc15t.sc \
@@ -198,7 +228,10 @@ do_stage015b() {
            stage015/cc15ad.sc stage015/cc15ae.sc stage015/cc15af.sc \
            stage015/cc15ag.sc stage015/cc15ah.sc stage015/cc15ai.sc \
            stage015/cc15aj.sc stage015/cc15ak.sc stage015/cc15al.sc \
+           stage015/cc15am.sc stage015/cc15an.sc stage015/cc15ao.sc \
+           stage015/cc15ap.sc stage015/cc15aq.sc stage015/cc15ar.sc \
+           stage015/cc15as.sc \
            stage015/pp15.sc stage015/pp16.sc stage015/ld15.sc \
-           stage015/ld16.sc stage015/ld17.sc \
+           stage015/ld16.sc stage015/ld17.sc stage015/ld18.sc \
            tmp/build/stage015a.stamp tools/build/stage015b.sh
 }

@@ -11,6 +11,12 @@
 #   gcc17.sh unit <lib>/<unit>    1 単位を bundle -> pp -> cc15v に通し，結果を 1 行で出す
 #   gcc17.sh units [lib]          全単位を通し，tmp/g17u/units.txt に表を出す (6.1 の 4)
 #   gcc17.sh where <lib>/<unit>   gap の単位で，cc が落ちる最初の関数の塊を絞る
+#   gcc17.sh objects [lib]        単位を遠距離呼出しで .o にする (tmp/g17u/obj)
+#   gcc17.sh link                 cc1 を ld18 で組む (tmp/g17u/cc1)
+#   gcc17.sh run-cc1 <file> [opt...]  cc1 を kernel29 の上で走らせ，<file> を訳す
+#   gcc17.sh host-cc1             突き合わせの基準になる cc1 を host で組む (tmp/g17u/gcc-gen/gcc/cc1)
+#   gcc17.sh cmp-cc1 <lib>/<unit> [opt...]  単位の .i を stone の OS の cc1 と host の cc1 で訳し，.s を突き合わせる
+#   gcc17.sh cmp-all <lib...> -- [opt...]   ライブラリの全単位を cmp-cc1 し，表に足していく (途中から再開できる)
 #
 # ソースは tools/fetch.sh gcc47 で docs/external/gcc47 に取得する。
 # unit / units はビルドチェーンで生成したバイナリ (tmp/build) と QEMU を要る。STONE_ENGINE と
@@ -317,14 +323,17 @@ work="$repo_root/tmp/g17u"
 # STONE_GCC17_LIBC で差し替えられる。stage015/libc はベアメタル実行側 ——
 # tools/diff17.sh の bare が測る対象で，sys/ の下は time.h しか無い。
 # **どちらで測ったかで header の不足数が変わる**ので明示する
-ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc25/include}
+ours=${STONE_GCC17_LIBC:-$repo_root/stage017/libc26/include}
+# その libc の .o (関数の有無を configure に教えるために記号表を読む)。
+# cc1 を組むときにリンクするのもこれである (docs/stage017-gcc.md 8.15)
+libc_objs=${STONE_GCC17_LIBC_OBJS:-tmp/build/l26_*.o}
 pp16=tmp/build/pp16.bin
 # OS 側の前処理器。**最前線の pp20 で測る** (pp18 は入れ子 15 段の展開で
 # 押し戻しの器が尽き，pp19 は gcc/ のマクロ表に収まらない。docs/stage017-gcc.md
 # 8.10 / 8.11)。STONE_GCC17_PPOS で
 # 前の世代を測り直せる
-ppos=${STONE_GCC17_PPOS:-tmp/build/pp20}
-cc15=tmp/build/cc15al.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
+ppos=${STONE_GCC17_PPOS:-tmp/build/pp21}
+cc15=tmp/build/cc15as.bin        # 最前線の世代で測る (tools/diff17.sh と同じ)
 shim="$repo_root/tests/hostshim/shim-gcc.h"
 HOSTCC=${CC:-gcc}
 
@@ -428,7 +437,19 @@ lib_dirs() {
              "-I$work/gmp -I$ext/mpfr/src -I$ext/mpc/src" \
              "-I$src/libdecnumber -I$src/libdecnumber/bid -I$work/libdecnumber"
         ;;
-    *) die "未知の書庫: $1 (libiberty | libcpp | gcc)" ;;
+    # libdecnumber は configure_gcc が configure した階層に config.h と
+    # gstdint.h がある (Makefile の INCLUDES = -I$(srcdir) -I.)。bid の単位は
+    # ../dpd/ の実装を取り込むので bid/ の中から相対で引ける
+    libdecnumber) echo "-I$src/libdecnumber -I$work/libdecnumber" ;;
+    # zlib は configure を要らない (zconf.h が既定で足りる)
+    zlib) echo "-I$src/zlib" ;;
+    # GMP は configure した階層 (config.h / gmp.h / 生成した表) を先に，
+    # ソースの階層 (gmp-impl.h / longlong.h) を後に探す。mpn/ の単位は
+    # mpn/ の生成物 (perfsqr.h / jacobitab.h) も読む
+    gmp) echo "-I$work/gmp -I$work/gmp/mpn -I$ext/gmp -I$ext/gmp/mpn" ;;
+    mpfr) echo "-I$work/mpfr/src -I$ext/mpfr/src -I$work/gmp" ;;
+    mpc) echo "-I$work/mpc -I$ext/mpc/src -I$ext/mpfr/src -I$work/gmp" ;;
+    *) die "未知の書庫: $1 (libiberty | libcpp | gcc | libdecnumber | zlib | gmp | mpfr | mpc)" ;;
     esac
 }
 
@@ -448,6 +469,24 @@ unit_src() {
         done
         die "gcc/$2 のソースが見つからない"
         ;;
+    libdecnumber)
+        # 10 進浮動小数点は bid で configure してある (enable_decimal_float)。
+        # decimal32/64/128 と bid の変換は bid/ に，decNumber と decContext は直下にある
+        for _c in "$src/libdecnumber/$2.c" "$src/libdecnumber/bid/$2.c"; do
+            [ -f "$_c" ] && { echo "$_c"; return 0; }
+        done
+        die "libdecnumber/$2 のソースが見つからない"
+        ;;
+    gmp)
+        # mpn/ は configure が置いた繋ぎ (generic/ の実装への記号リンク) と
+        # 生成した表 (fib_table / mp_bases) である
+        case $2 in
+        mpn/*) echo "$work/gmp/$2.c" ;;
+        *) echo "$ext/gmp/$2.c" ;;
+        esac
+        ;;
+    mpfr) echo "$ext/mpfr/src/$2.c" ;;
+    mpc) echo "$ext/mpc/src/$2.c" ;;
     *) echo "$src/$1/$2.c" ;;
     esac
 }
@@ -458,6 +497,27 @@ unit_src() {
 # lto-compress.o の zlib の -I など)。**Makefile から読む** —— 自分で書くと，
 # 何を与えたかが我々の記憶だけになる
 unit_flags() {
+    case $1 in
+    gmp)
+        # GMP の Makefile の AM_CPPFLAGS。mpn/ の単位は 1 つのソースから
+        # 複数の関数を作るので，どれを作るかを OPERATION_<名前> で選ぶ
+        # (mpn/Makefile の -DOPERATION_$*)
+        echo "-DHAVE_CONFIG_H"
+        echo "-D__GMP_WITHIN_GMP"
+        case $2 in mpn/*) echo "-DOPERATION_${2#mpn/}" ;; esac
+        return 0
+        ;;
+    mpfr)
+        # MPFR は config.h を持たず，configure の結果を DEFS で渡す
+        _raw=$(make -s -C "$work/mpfr/src" -f Makefile -f "$work/print.mk" \
+                   print-DEFS 2> /dev/null) || _raw=""
+        eval "set -- $_raw"
+        for _a in "$@"; do
+            case $_a in -D*) printf '%s\n' "$_a" ;; esac
+        done
+        return 0
+        ;;
+    esac
     echo "-DHAVE_CONFIG_H"
     [ "$1" = gcc ] || return 0
     echo "-DIN_GCC"
@@ -492,6 +552,62 @@ unit_defs_file() {
           done > "$3"
 }
 
+# **我々の libc が定義する関数** の名前を $work/libc.funcs に 1 行ずつ置く。
+# libc の .o の記号表から取り，リンカの前置部が持つもの (getc / putc / exit) を足す
+libc_funcs() {
+    # shellcheck disable=SC2086
+    set -- $libc_objs
+    [ -s "$1" ] || die "libc の .o が無い ($libc_objs。sh tools/build.sh stage017)"
+    { sh tools/env.sh run riscv64-unknown-elf-nm --defined-only "$@" < /dev/null \
+          | awk '$2 == "T" { print $3 }'
+      printf '%s\n' getc putc exit
+    } | sort -u > "$work/libc.funcs"
+    [ -s "$work/libc.funcs" ] || die "libc の関数の一覧が作れない"
+}
+
+# configure スクリプト $1 が調べる関数について，**我々の libc の答**を
+# cache 変数 (ac_cv_func_<名前>=yes|no) で 1 行ずつ出す。
+#
+# autoconf の AC_CHECK_FUNCS は host の cc で試験を**リンク**して決めるので，
+# host の libc (glibc) にある関数は全部「有る」になる。我々の libc に無い
+# 関数を有ると書いた config.h で訳すと，リンクで名前が足りなくなる
+# (docs/stage017-gcc.md 8.15)。答を我々の libc の記号表から与える。
+#
+# 関数そのものではなく振舞いを調べる変数 (alloca_works / mmap_fixed_mapped /
+# malloc_0_nonnull など) は与えない。名前で引いても意味が無い
+func_cache() {
+    [ -s "$work/libc.funcs" ] || libc_funcs
+    # 名前は 4 通りの書き方で現れる。cache 変数の名前そのもの，
+    # ac_fn_c_check_func の第 2 引数，`for ac_func in ...` の並び (行を
+    # 継いで do まで)，libiberty の funcs= / checkfuncs= の並びである。
+    # 調べない名前に cache 変数を与えても使われないだけなので，多めに拾ってよい
+    awk '
+        function words(t,   n, i, a) {
+            n = split(t, a, /[ \t"\\]+/)
+            for (i = 1; i <= n; i++)
+                if (a[i] ~ /^[A-Za-z_][A-Za-z0-9_]*$/) print a[i]
+        }
+        inlist { t = $0; if (sub(/(^|[ ;])do( .*)?$/, "", t)) inlist = 0; words(t); next }
+        /for ac_func in / { t = $0; sub(/.*for ac_func in /, "", t)
+                            if (!sub(/(^|[ ;])do( .*)?$/, "", t)) inlist = 1; words(t); next }
+        /^ *(funcs|checkfuncs)="/ { t = $0; sub(/^[^"]*"/, "", t); sub(/".*$/, "", t)
+                                    gsub(/\$[a-z]+/, "", t); words(t) }
+        { while (match($0, /ac_cv_func_[A-Za-z0-9_]+/)) {
+              print substr($0, RSTART + 11, RLENGTH - 11)
+              $0 = substr($0, RSTART + RLENGTH) } }
+        /ac_fn_c_check_func "\$LINENO" "[A-Za-z_]/ {
+              t = $0; sub(/.*ac_fn_c_check_func "\$LINENO" "/, "", t); sub(/".*$/, "", t); print t }
+    ' "$1" | sort -u \
+        | grep -vE '_(works|working|nonnull|fixed_mapped|broken|dev_zero|anon|file|decl|r)$|^(ac_func|as_ac_var|do|done)$' \
+        | while IFS= read -r fn; do
+            if grep -qxF "$fn" "$work/libc.funcs"; then
+                echo "ac_cv_func_$fn=yes"
+            else
+                echo "ac_cv_func_$fn=no"
+            fi
+        done
+}
+
 # config.h を host で作る。
 #
 # **configure を stone の OS で実行するのは 4.2 の別件である。** ここで要るのは
@@ -505,17 +621,38 @@ unit_defs_file() {
 #   2. 語長は autoconf の cache 変数で RV32 の値を与える。host は 64 bit
 #      なので，放っておくと SIZEOF_LONG が 8 になる
 #
-# **関数の有無 (HAVE_STRERROR など) は host の link 試験で決まる。** ここは
-# 対策していない。影響するのは代替実装を選ぶ分岐だけで，読ませる単位の一覧
-# (REQUIRED_OFILES / libcpp_a_OBJS) には影響しない。
+#      **sizeof を使う翻訳試験は cache 変数を通らない。** host の cc で
+#      訳すので host の語長で答える。libiberty の「64 bit の型」の検査は
+#      stdint.h が無いと `sizeof(long) * CHAR_BIT >= 64` を訳せるかで決め，
+#      host では unsigned long になる。RV32 の long は 32 bit なので，
+#      hashtab.c の `((unsigned long) x * inv) >> 32` が 0 にならず不定の
+#      添字を作り，cc1 が起動してすぐ落ちた (docs/stage017-gcc.md 8.15)。
+#      この検査の答 (liberty_cv_uint64) も与える
+#
+#      **走らせて決める検査も host の答になる。** libiberty の
+#      「スタックの伸びる向き」(ac_cv_c_stack_direction) は host で 1
+#      (上向き) と答えた。我々の cc は __GNUC__ を定義しないので，
+#      libiberty.h が alloca を libiberty の C_alloca にする。C_alloca は
+#      向きを見て「既に戻った深い呼出しの領域」を返すので，向きを
+#      逆に持つと生きている領域を返す。cc1 が -O2 の PRE で，退避した
+#      式の写しを別の領域に上書きされて落ちた。RV32 の我々の
+#      スタックは下向き (-1) である
+#
+#   3. 関数の有無 (HAVE_STRERROR など) は我々の libc の記号表から与える
+#      (func_cache)。host の link 試験に任せると glibc の答になる。libiberty
+#      は「無い」と言われた関数の代わりを LIBOBJS に入れる (unit_list)
 configure() {
     [ -d "$src" ] || die "GCC 4.7.4 が無い: $src (sh tools/fetch.sh gcc47)"
+    libc_funcs
     for lib in libiberty libcpp; do
         mkdir -p "$work/$lib"
+        # shellcheck disable=SC2046
         (cd "$work/$lib" \
-         && CPPFLAGS="-nostdinc -isystem $ours" \
+         && env CPPFLAGS="-nostdinc -isystem $ours" \
             ac_cv_sizeof_short=2 ac_cv_sizeof_int=4 ac_cv_sizeof_long=4 \
             ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4 ac_cv_c_bigendian=no \
+            liberty_cv_uint64='unsigned long long' ac_cv_c_stack_direction=-1 \
+            $(func_cache "$src/$lib/configure") \
             sh "$src/$lib/configure" --srcdir="$src/$lib" > configure.log 2>&1) \
             || die "$lib の configure が落ちた ($work/$lib/configure.log)"
         [ -s "$work/$lib/config.h" ] || die "$lib の config.h ができていない"
@@ -600,18 +737,23 @@ configure_gcc() {
     # libc へリンクして決まるので，我々の libc に無い getrlimit / setrlimit /
     # mmap も「有る」になり，ggc-common が struct rlimit を使う形になっていた
     # (docs/stage017-gcc.md 8.11 の decl)。無いものは cache 変数で無いと言う
+    # (8.15 から全関数を func_cache で与える。getrlimit / setrlimit / mmap も
+    # その中で no になる)
+    libc_funcs
     rv32='ac_cv_sizeof_short=2 ac_cv_sizeof_int=4 ac_cv_sizeof_long=4
           ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4 ac_cv_c_bigendian=no
           ac_cv_func_getrlimit=no ac_cv_func_setrlimit=no ac_cv_func_mmap=no'
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2046,SC2086
     (cd "$work/gcc-cfg" && env CPPFLAGS="-nostdinc -isystem $ours" $rv32 \
+        $(func_cache "$src/gcc/configure") \
         CFLAGS='-O0 -w' sh "$src/gcc/configure" --srcdir="$src/gcc" \
         --build="$build" --host="$build" --target="$GCC17_TARGET" \
         --enable-languages=c --disable-plugin > configure.log 2>&1) \
         || die "gcc/ の configure (我々の libc) が落ちた ($work/gcc-cfg/configure.log)"
     # 2-b. libdecnumber (gcc/ の単位が config.h と gstdint.h を読む)
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2046,SC2086
     (cd "$work/libdecnumber" && env CPPFLAGS="-nostdinc -isystem $ours" $rv32 \
+        $(func_cache "$src/libdecnumber/configure") \
         sh "$src/libdecnumber/configure" --srcdir="$src/libdecnumber" \
         --target="$GCC17_TARGET" > configure.log 2>&1) \
         || die "libdecnumber の configure が落ちた ($work/libdecnumber/configure.log)"
@@ -619,15 +761,70 @@ configure_gcc() {
     # 決める (GMP_LIMB_BITS)。host を "none" にすると GMP は機械語の実装を
     # 使わず C だけで書かれた実装を選ぶ (我々が将来組むのもこちらになる)。
     # host と build が違うので試験プログラムは走らず，語長は cache 変数で与える
-    (cd "$work/gmp" && env ac_cv_sizeof_unsigned_long=4 ac_cv_sizeof_mp_limb_t=4 \
+    #
+    # **GMP の本体も我々が訳す** (cc1 は GMP / MPFR / MPC にリンクする。8.15)。
+    # そのため header は我々の libc から探させ，関数の有無は func_cache で与え，
+    # 試験の cc (host の gcc) の __attribute__ を「無い」と言う —— 我々の cc は
+    # __attribute__ を読まない。一時領域は malloc で取る (alloca を使わない)
+    rm -rf "$work/gmp"
+    mkdir -p "$work/gmp"
+    # shellcheck disable=SC2046
+    (cd "$work/gmp" && env CPPFLAGS="-nostdinc -isystem $ours" \
+        ac_cv_sizeof_unsigned_long=4 ac_cv_sizeof_mp_limb_t=4 \
         ac_cv_sizeof_unsigned=4 ac_cv_sizeof_unsigned_short=2 \
         ac_cv_sizeof_void_p=4 \
+        gmp_cv_c_attribute_const=no gmp_cv_c_attribute_malloc=no \
+        gmp_cv_c_attribute_mode=no gmp_cv_c_attribute_noreturn=no \
+        gmp_cv_c_hidden_alias=no \
+        $(func_cache "$ext/gmp/configure") \
         sh "$ext/gmp/configure" --host=none-unknown-elf --build="$build" \
-        --disable-assembly --disable-shared CC="$HOSTCC" CC_FOR_BUILD="$HOSTCC" \
+        --disable-assembly --disable-shared --enable-alloca=malloc-reentrant \
+        CC="$HOSTCC" CC_FOR_BUILD="$HOSTCC" \
         > configure.log 2>&1) \
         || die "gmp の configure (32 bit limb) が落ちた ($work/gmp/configure.log)"
     grep -q 'define GMP_LIMB_BITS *32$' "$work/gmp/gmp.h" \
         || die "gmp.h の limb が 32 bit になっていない ($work/gmp/gmp.h)"
+    # 表の生成物。gen-* を host (CC_FOR_BUILD) で組んで走らせる。limb の
+    # 幅は Makefile が configure の値 (32) を渡す
+    make -C "$work/gmp" fac_table.h sieve_table.h fib_table.h mpn/fib_table.c \
+        mp_bases.h mpn/mp_bases.c trialdivtab.h mpn/jacobitab.h mpn/perfsqr.h \
+        > "$work/gmp/gen.log" 2>&1 \
+        || die "gmp の表が作れない ($work/gmp/gen.log)"
+
+    # 2-e. MPFR と MPC。configure は GMP (MPC は MPFR も) に**リンクできるか**を
+    # 試すので，host の語長で組んだ GMP / MPFR を $g に置いて試験だけに使う。
+    # 訳すときの gmp.h は 2-c の 32 bit のものである。host を none にするので
+    # 試験プログラムは走らず，結果は header と関数の有無だけで決まる
+    (cd "$g/gmp" && make > make.log 2>&1) \
+        || die "host 向けの gmp が組めない ($g/gmp/make.log)"
+    mkdir -p "$g/mpfr" "$work/mpfr" "$work/mpc"
+    (cd "$g/mpfr" && sh "$ext/mpfr/configure" --disable-shared \
+        --with-gmp-include="$g/gmp" --with-gmp-lib="$g/gmp/.libs" \
+        > configure.log 2>&1 && make > make.log 2>&1) \
+        || die "host 向けの mpfr が組めない ($g/mpfr)"
+    # shellcheck disable=SC2046
+    (cd "$work/mpfr" && env CPPFLAGS="-nostdinc -isystem $ours -I$work/gmp" \
+        LDFLAGS="-L$g/gmp/.libs" ac_cv_sizeof_long=4 ac_cv_sizeof_int=4 \
+        $(func_cache "$ext/mpfr/configure") \
+        sh "$ext/mpfr/configure" --host=none-unknown-elf --build="$build" \
+        --disable-shared --with-gmp-include="$work/gmp" \
+        --with-gmp-lib="$g/gmp/.libs" CC="$HOSTCC" \
+        > configure.log 2>&1) \
+        || die "mpfr の configure が落ちた ($work/mpfr/configure.log)"
+    # mparam.h は configure が選んだ機種の値への繋ぎである (get_patches.c は
+    # 配布物に含まれている)
+    make -C "$work/mpfr/src" mparam.h > "$work/mpfr/gen.log" 2>&1 \
+        || die "mpfr の生成物が作れない ($work/mpfr/gen.log)"
+    # shellcheck disable=SC2046
+    (cd "$work/mpc" && env CPPFLAGS="-nostdinc -isystem $ours -I$work/gmp -I$ext/mpfr/src" \
+        LDFLAGS="-L$g/gmp/.libs -L$g/mpfr/src/.libs" \
+        $(func_cache "$ext/mpc/configure") \
+        sh "$ext/mpc/configure" --host=none-unknown-elf --build="$build" \
+        --disable-shared --with-gmp-include="$work/gmp" \
+        --with-gmp-lib="$g/gmp/.libs" --with-mpfr-include="$ext/mpfr/src" \
+        --with-mpfr-lib="$g/mpfr/src/.libs" CC="$HOSTCC" \
+        > configure.log 2>&1) \
+        || die "mpc の configure が落ちた ($work/mpc/configure.log)"
 
     # 2-d. 測る階層を組む。1 の header と生成した .c を写し，auto-host.h を
     # 2-a のものに差し替える。**差し替えるのはこの 1 本だけ**である ——
@@ -647,20 +844,88 @@ configure_gcc() {
 }
 
 # 書庫が -c する翻訳単位の一覧。Makefile.in の変数から取る (自分で選ばない)
+# gcc/ の Makefile の変数 ($1。空白区切り) に並ぶ単位と，$2 以降の単位を
+# 重ねずに出す (unit_list gcc と link が使う)
+gcc_units() {
+    _vars=$1; shift
+    {
+        for v in $_vars; do
+            make -s -C "$work/gcc-gen/gcc" -f Makefile -f "$work/print.mk" \
+                "print-$v" 2> /dev/null
+        done
+        for u in "$@"; do echo "$u.o"; done
+    } | tr -s ' ' '\n' | grep -E '\.o$' | sed 's|\.o$||' \
+        | sed 's|^host-linux$|host-default|' | awk '!seen[$0]++'
+}
+
 unit_list() {
     case $1 in
     libiberty)
-        # @pexecute@ は configure が OS ごとの実装 (pex-unix など) に置き換える
-        pex=$(sed -n 's/^pexecute *= *//p' "$work/libiberty/Makefile")
-        awk '/^REQUIRED_OFILES *=/ { f = 1 } f { print } f && !/\\$/ { exit }' \
-            "$src/libiberty/Makefile.in" \
-            | tr -s ' \t\\' '\n' | grep -E '\.\$\(objext\)$' \
-            | sed 's|^\./||; s|\.\$(objext)$||' | sed "s|^@pexecute@\$|$pex|"
+        # **configure 済みの Makefile から読む。** Makefile.in の
+        # REQUIRED_OFILES は @pexecute@ を含み，configure が OS ごとの実装
+        # (pex-unix など) に置き換える。以前は Makefile.in から読んで
+        # 置き換え先を探しており，見つからずに空の単位になっていた
+        # (pex-unix が抜けていた)。LIBOBJS は configure が「host に無い」と
+        # 判じた関数の代わり (setproctitle など) である
+        for v in REQUIRED_OFILES LIBOBJS; do
+            awk -v v="$v" '$1 == v && $2 == "=" { f = 1 } f { print } f && !/\\$/ { exit }' \
+                "$work/libiberty/Makefile"
+        done | tr -s ' \t\\' '\n' | grep -E '\.(\$\(objext\)|o)$' \
+            | sed 's|^\${LIBOBJDIR}||; s|^\./||; s|\$U||; s|\.\$(objext)$||; s|\.o$||' \
+            | awk '!seen[$0]++'
         ;;
     libcpp)
         awk '/^libcpp_a_OBJS *=/ { f = 1 } f { print } f && !/\\$/ { exit }' \
             "$src/libcpp/Makefile.in" \
             | tr -s ' \t\\' '\n' | grep -E '\.o$' | sed 's|\.o$||'
+        ;;
+    libdecnumber)
+        # configure 済みの Makefile から (ADDITIONAL_OBJS が bid の単位を足す)
+        [ -s "$work/libdecnumber/Makefile" ] \
+            || die "libdecnumber が configure されていない (sh tools/gcc17.sh configure-gcc)"
+        for v in libdecnumber_a_OBJS bid_OBJS; do
+            awk -v v="$v" '$1 == v && $2 == "=" { f = 1 } f { print } f && !/\\$/ { exit }' \
+                "$work/libdecnumber/Makefile"
+        done | tr -s ' \t\\' '\n' | grep -E '\.\$\(objext\)$' \
+            | sed 's|\.\$(objext)$||' | awk '!seen[$0]++'
+        ;;
+    gmp)
+        # libgmp を作る単位 (Makefile の libgmp_la_SOURCES と *_OBJECTS，
+        # mpn/Makefile の OFILES)。tal-reent は一時領域を malloc で取る実装
+        # (--enable-alloca=malloc-reentrant)
+        [ -s "$work/gmp/Makefile" ] \
+            || die "gmp が configure されていない (sh tools/gcc17.sh configure-gcc)"
+        {
+            for v in libgmp_la_SOURCES MPF_OBJECTS MPZ_OBJECTS MPQ_OBJECTS \
+                     MPN_OBJECTS PRINTF_OBJECTS SCANF_OBJECTS RANDOM_OBJECTS; do
+                awk -v v="$v" '$1 == v && $2 == "=" { f = 1 } f { print } f && !/\\$/ { exit }' \
+                    "$work/gmp/Makefile"
+            done | tr -s ' \t\\' '\n' | grep -E '\.(c|lo)$' \
+                | sed 's|\$U||; s|\.lo$||; s|\.c$||'
+            echo tal-reent
+            awk '$1 == "OFILES" && $2 == "=" { f = 1 } f { print } f && !/\\$/ { exit }' \
+                "$work/gmp/mpn/Makefile" | tr -s ' \t\\' '\n' | grep -E '\.lo$' \
+                | sed 's|\$U||; s|\.lo$||; s|^|mpn/|'
+        } | awk '!seen[$0]++'
+        ;;
+    mpfr)
+        [ -s "$work/mpfr/src/Makefile" ] \
+            || die "mpfr が configure されていない (sh tools/gcc17.sh configure-gcc)"
+        awk '$1 == "libmpfr_la_SOURCES" && $2 == "=" { f = 1 } f { print } f && !/\\$/ { exit }' \
+            "$work/mpfr/src/Makefile" | tr -s ' \t\\' '\n' | grep -E '\.c$' \
+            | sed 's|\.c$||' | awk '!seen[$0]++'
+        ;;
+    mpc)
+        [ -s "$work/mpc/src/Makefile" ] \
+            || die "mpc が configure されていない (sh tools/gcc17.sh configure-gcc)"
+        awk '$1 == "libmpc_la_SOURCES" && $2 == "=" { f = 1 } f { print } f && !/\\$/ { exit }' \
+            "$work/mpc/src/Makefile" | tr -s ' \t\\' '\n' | grep -E '\.c$' \
+            | sed 's|\.c$||' | awk '!seen[$0]++'
+        ;;
+    zlib)
+        awk '/^ZLIB_SOURCES *=/ { f = 1 } f { print } f && !/\\$/ { exit }' \
+            "$src/zlib/Makefile.in" \
+            | tr -s ' \t\\' '\n' | grep -E '\.c$' | sed 's|\.c$||'
         ;;
     gcc)
         # **C コンパイラ (cc1) を作る単位。** cc1 は C_OBJS と BACKEND
@@ -674,14 +939,7 @@ unit_list() {
         # 同じ単位が 2 つの変数に入ることがある (i386-c.o) ので 1 つにする
         [ -s "$work/gcc-gen/gcc/Makefile" ] \
             || die "gcc/ が configure されていない (sh tools/gcc17.sh configure-gcc)"
-        {
-            for v in C_OBJS C_TARGET_OBJS OBJS OBJS-libcommon-target OBJS-libcommon; do
-                make -s -C "$work/gcc-gen/gcc" -f Makefile -f "$work/print.mk" \
-                    "print-$v" 2> /dev/null
-            done
-            echo main.o
-        } | tr -s ' ' '\n' | grep -E '\.o$' | sed 's|\.o$||' \
-            | sed 's|^host-linux$|host-default|' | awk '!seen[$0]++'
+        gcc_units "C_OBJS C_TARGET_OBJS OBJS OBJS-libcommon-target OBJS-libcommon" main
         # **host hook は host-default にする。** config.host は host の 3 つ組が
         # *-linux* のとき host-linux.o を選ぶ。configure は build と同じ
         # host (x86_64-linux) で走らせているのでそちらになるが，cc1 が走るのは
@@ -704,7 +962,10 @@ unit_list() {
 #          __STDC_VERSION__ を消す。我々の pp は定義しない
 closure() {
     lib=${1%%/*}; u=${1#*/}
-    [ -s "$work/$lib/config.h" ] || die "config.h が無い (sh tools/gcc17.sh configure)"
+    # zlib は configure しない。MPFR は config.h を作らず DEFS で渡す
+    case $lib in zlib|mpfr) ;; *)
+        [ -s "$work/$lib/config.h" ] || die "config.h が無い (sh tools/gcc17.sh configure)" ;;
+    esac
     mkdir -p "$(dirname "$work/out/$lib.$u")"   # c-family/ の単位は階層を持つ
     m="$work/out/$lib.$u.M"
     # STONE_GCC17_STUB は headers が置く空の代役の階層。我々の libc の後ろ
@@ -724,7 +985,10 @@ closure() {
             | sed 's/fatal error: //; s/: No such file//' >&2
         return 1
     fi
-    tr -s ' \\\n' '\n' < "$m" | grep -vE ':$|^$' | grep -v "/$u\.c$" | sort -u
+    # 単位自身のソースは除く。**経路で比べる** —— 名前の末尾で比べると，
+    # libdecnumber の bid/decimal32.c が取り込む dpd/decimal32.c まで除いていた
+    tr -s ' \\\n' '\n' < "$m" | grep -vE ':$|^$' \
+        | grep -vxF "$(unit_src "$lib" "$u")" | sort -u
 }
 
 # 閉包を，無い header を埋めながら閉じさせる。
@@ -883,7 +1147,9 @@ unit_run() {
         # そのまま比べるので，綴りの数だけ名前が要る。綴りは探索パス
         # (-I) から見た相対経路である。同じ階層からの "c-common.def" の
         # ような綴りは basename の方が受ける
-        [ "$lib" = gcc ] || continue
+        # libdecnumber の bid/ の単位も "dpd/decimal32.c" の綴りで取り込む
+        # GMP の mpn/generic/hgcd2.c は "mpn/generic/hgcd2-div.h" と書く
+        case $lib in gcc|libdecnumber|gmp|mpfr|mpc) ;; *) continue ;; esac
         for _i in $(lib_dirs "$lib" "$u"); do
             _dir=${_i#-I}
             case $h in
@@ -1126,6 +1392,307 @@ units() {
         || die "表が途中で切れている (単位 $want / 表 $got 行。$t を見る)"
 }
 
+# ---- cc1 をリンクする材料 (docs/stage017-gcc.md 8.15) ----
+#
+# units が作った .i を，**遠距離呼出し** (`#pragma stone far_call`。cc15am) で
+# 訳し直して $work/obj に置く。units の .o は分類のためのもので，呼出しが
+# jal (前後 1 MiB) なので 128 MB を超える cc1 には組めない。
+#
+# 出来た .o は ELF の大きさの整合を見る。節表は cc15am の .o の末尾にあり，
+# 「節表の位置 + 個数 × 大きさ」がファイルの長さに一致しなければ壊れている
+# (QEMU の UART が出力の途中を捨てたことがある。tools/run-qemu.sh)
+
+# ELF の 32 bit 語 / 16 bit 語を読む (リトルエンディアン)
+elf_u32() {
+    od -An -tu4 -j "$2" -N 4 "$1" | tr -d ' '
+}
+elf_u16() {
+    od -An -tu2 -j "$2" -N 2 "$1" | tr -d ' '
+}
+
+# $1 の .o が節表で終わっているか
+elf_whole() {
+    [ -s "$1" ] || return 1
+    [ "$(od -An -c -N 4 "$1" | tr -d ' ')" = '177ELF' ] || return 1
+    _shoff=$(elf_u32 "$1" 32)
+    _shes=$(elf_u16 "$1" 46)
+    _shn=$(elf_u16 "$1" 48)
+    [ $((_shoff + _shes * _shn)) -eq "$(wc -c < "$1" | tr -d ' ')" ]
+}
+
+# .o を作った入力の鍵。cc と .i のどちらが変わっても違う値になる
+obj_key() {
+    { sha256sum < "$cc15"; sha256sum < "$1"; } | sha256sum | cut -d' ' -f1
+}
+
+# 1 単位を遠距離呼出しで訳す。結果を 1 行で出す
+object1() {
+    lu=$1
+    i="$work/out/${lu%%/*}.${lu#*/}.i"
+    o="$work/obj/${lu%%/*}.${lu#*/}.o"
+    [ -s "$i" ] || { printf '%s\tnoi\n' "$lu"; return 0; }
+    mkdir -p "$(dirname "$o")"
+    if { printf '#pragma stone far_call\n'; cat "$i"; } \
+            | sh tools/env.sh qemu "$cc15" > "$o.tmp" 2> /dev/null; then
+        if elf_whole "$o.tmp"; then
+            mv "$o.tmp" "$o"
+            obj_key "$i" > "$o.key"
+            printf '%s\tok\t%s\n' "$lu" "$(wc -c < "$o" | tr -d ' ')"
+        else
+            printf '%s\tbroken\n' "$lu"
+        fi
+    else
+        printf '%s\tcc\t%s\n' "$lu" "$?"
+    fi
+}
+
+objects() {
+    [ -s "$cc15" ] || die "ビルドチェーンのイメージが無い: $cc15 (sh tools/build.sh all)"
+    mkdir -p "$work/obj"
+    jobs=${STONE_GCC17_JOBS:-1}
+    # 既に出来ていて壊れておらず，**鍵 (cc と .i の SHA-256) が今と同じ** .o は
+    # 飛ばす。cc だけで判じると，configure や header を変えて units を通し
+    # 直した後も古い .o を使い続ける (自動レビューの指摘)
+    for lib in ${1:-libiberty libcpp gcc}; do
+        unit_list "$lib" | grep . | sed "s|^|$lib/|"
+    done | while IFS= read -r lu; do
+        _o="$work/obj/${lu%%/*}.${lu#*/}.o"
+        _i="$work/out/${lu%%/*}.${lu#*/}.i"
+        if elf_whole "$_o" && [ -s "$_i" ] && [ -f "$_o.key" ] \
+                && [ "$(cat "$_o.key")" = "$(obj_key "$_i")" ]; then
+            continue
+        fi
+        echo "$lu"
+    done > "$work/obj.todo"
+    echo "objects: $(wc -l < "$work/obj.todo" | tr -d ' ') 単位を訳す"
+    # -r: 訳すものが無ければ object1 を呼ばない (GNU xargs は空の入力でも
+    # 1 度は呼ぶので，単位名の無い行が誤りとして残っていた)
+    xargs -r -P "$jobs" -n 1 sh "$0" object1 < "$work/obj.todo" | tee "$work/obj.log"
+    bad=$(awk -F '\t' '$2 != "ok"' "$work/obj.log" | wc -l | tr -d ' ')
+    [ "$bad" -eq 0 ] || die "$bad 単位が .o にならなかった ($work/obj.log)"
+}
+
+# cc1 を組む (docs/stage017-gcc.md 8.15)。本物の build と同じく，C の
+# 前処理系 (C_OBJS / C_TARGET_OBJS) と main と cc1-checksum を必ず組み，
+# 残り (OBJS = libbackend.a，libcommon-target.a，libcommon.a，libiberty /
+# libcpp / libdecnumber / zlib / GMP / MPFR / MPC) は**ライブラリの部品**
+# として未定義の名前を定義するものだけを組む。OBJS には tree-mudflap と
+# 同じ名前を定義する tree-nomudflap (C 以外の前処理系のための代役) が
+# あり，全部を必ず組むと名前が重なる。
+#
+# 並びは libc26 と実行時ルーチンが先である。libc の部品は前置部の syscall
+# スタブを jal で呼ぶので，前置部から 1 MiB 以内に要る (stage015/ld18.md)。
+#
+# cc1-checksum.c は本物の build では genchecksum が実行ファイルの MD5 を
+# 書く。cc1 はこれを PCH の照合にだけ使う。我々は PCH を使わないので
+# 0 の 16 バイトに固定する (同じ入力から同じ cc1 ができる)
+link_libs="libiberty libcpp libdecnumber zlib gmp mpfr mpc"
+link_cc1() {
+    objects "gcc $link_libs"
+    c=$work/obj/cc1-checksum
+    { printf '%s\n' '#pragma stone far_call' \
+        'const unsigned char executable_checksum[16] = { 0 };'; printf '\004'; } \
+        | sh tools/env.sh qemu "$cc15" > "$c.o" \
+        || die "cc1-checksum.c を訳せない"
+    set -- -L tmp/build/l26_*.o tmp/build/rt64.o tmp/build/rtfp.o -N
+    forced=$(gcc_units "C_OBJS C_TARGET_OBJS" main)
+    for u in $forced; do
+        set -- "$@" "$work/obj/gcc.$u.o"
+    done
+    set -- "$@" "$c.o" -L
+    for u in $(gcc_units "OBJS OBJS-libcommon-target OBJS-libcommon"); do
+        case " $(echo $forced) " in *" $u "*) continue ;; esac
+        set -- "$@" "$work/obj/gcc.$u.o"
+    done
+    for lib in $link_libs; do
+        for u in $(unit_list "$lib"); do
+            set -- "$@" "$work/obj/$lib.$u.o"
+        done
+    done
+    # データスタックは 8 MiB。cc1 は木を再帰で辿る (fold / expand / gimplify)
+    sh tools/ld18.sh -s "${STONE_GCC17_DSTK:-8388608}" -o "$work/cc1" "$@"
+    echo "cc1: $(wc -c < "$work/cc1" | tr -d ' ') バイト ($work/cc1)"
+}
+
+# cc1 を stone の OS (kernel29) の上で走らせる (docs/stage017-gcc.md 8.15)。
+# 根に cc1 / sh2 / 入力を置いて sfs4 に詰め，sh2 が go.sh を実行する。
+# 出力は「rc <終了コード>」の行と，訳した .s (あれば) である。
+# .s は端末を通さず，走らせた後の根から取り出す。sh2 の cat は中身を文字列の
+# 置き場 (256 KiB) に読むので，gcc/c-decl の .s で「out of string space」に
+# なった。根は $work/run/out，STONE_GCC17_KEEP=<dir> ならそこへ取り出す
+# (-fdump-* の突き合わせ)。
+# 根の項目の上限は STONE_GCC17_MAXENT (既定 128。多いと sfs4 の引きが遅くなる)。
+#
+# 窓は 512 MiB (kernel27 以降)。cc1 は 100 MiB を超えるので，イメージは
+# 256 MiB 取る。RAM ファイルの組み方は tests/stage017 の runroot7 と同じ。
+#
+# kernel29 は RAM 2 GiB を使い，sfs の窓は 0xe000_0000 にある (RAM ファイルの
+# 0x6000_0000 から先)。kernel28 のユーザ領域 256 MiB では cc1 (142 MB) の
+# ヒープが約 115 MB しか残らず，gcc/insn-recog の -O2 で記憶域が尽きた
+run_ram=2147483648
+run_win=1610612736
+run_cc1() {
+    [ -s "$work/cc1" ] || die "cc1 が無い (sh tools/gcc17.sh link)"
+    f=$1; shift
+    [ -s "$f" ] || die "入力が無い: $f"
+    r=$work/run
+    rm -rf "$r" "$work/run.img" "$work/run.ram"
+    mkdir -p "$r/root"
+    cp "$work/cc1" "$r/root/cc1"
+    cp tmp/build/sh2.bin "$r/root/sh2"
+    cp "$f" "$r/root/t.c"
+    printf 'cc1 %s t.c -o t.s\necho "rc $?"\n' "${*:--quiet}" > "$r/root/go.sh"
+    printf 'sh2 go.sh\n' > "$r/root/boot"
+    sh tools/sfs4.sh pack "$r/root" "$work/run.img" 268435456 "${STONE_GCC17_MAXENT:-128}" > /dev/null \
+        || die "sfs4 に詰められない"
+    dd if=/dev/null of="$work/run.ram" bs=1 seek="$run_ram" 2> /dev/null
+    dd if="$work/run.img" of="$work/run.ram" bs=64K oflag=seek_bytes \
+        seek="$run_win" conv=notrunc 2> /dev/null
+    # RAM ファイルはリポジトリからの相対で渡す。コンテナの中の QEMU は
+    # ホストの絶対経路を見られない (tools/env.sh はリポジトリだけを渡す)
+    STONE_QEMU_RAMFILE="${work#"$repo_root"/}/run.ram" STONE_QEMU_RAM=2G \
+        sh tools/env.sh qemu tmp/build/kernel29.bin < /dev/null
+    # 走らせた後の根 (t.s，cc1 が書いた -fdump-* のファイルなど) を取り出す。
+    # RAM ファイルの窓の位置からイメージを切り出す
+    o=${STONE_GCC17_KEEP:-$r/out}
+    dd if="$work/run.ram" of="$work/run.out.img" bs=64K iflag=skip_bytes,count_bytes \
+        skip="$run_win" count=268435456 2> /dev/null
+    rm -rf "$o"
+    sh tools/sfs4.sh unpack "$work/run.out.img" "$o" > /dev/null \
+        || die "走らせた後の根を取り出せない"
+    rm -f "$work/run.out.img"
+    if [ -f "$o/t.s" ]; then cat "$o/t.s"; fi
+}
+
+# 突き合わせの基準になる cc1 を host で組む (docs/stage017-gcc.md 8.15)。
+# 同じ GCC 4.7.4 の同じ構成 (target = $GCC17_TARGET，C だけ) を host の cc で
+# 組む。GCC は host に依らず同じ .s を出すことを目指しているので，我々の
+# cc1 の出力はこれとバイト単位で一致するはずである。食い違えば我々の側
+# (cc / libc / 構成) を疑う
+#
+# configure-gcc が作った gcc-gen (gen* の生成物・host の gmp / mpfr) に，
+# cc1 がリンクする libcpp / libdecnumber / zlib / mpc を足す。libiberty は
+# build = host なので build 用のものをそのまま使う
+host_cc1() {
+    [ -s "$work/gcc-gen/gcc/Makefile" ] \
+        || die "gcc/ が configure されていない (sh tools/gcc17.sh configure-gcc)"
+    build=$(sh "$src/config.guess")
+    g="$work/gcc-gen"
+    hostcflags='-O0 -std=gnu89 -fcommon -w'
+    [ -e "$g/libiberty" ] || ln -s "build-$build/libiberty" "$g/libiberty"
+    for lib in libcpp libdecnumber zlib; do
+        [ -s "$g/$lib/Makefile" ] && continue
+        mkdir -p "$g/$lib"
+        (cd "$g/$lib" && CFLAGS="$hostcflags" sh "$src/$lib/configure" \
+            --srcdir="$src/$lib" --target="$GCC17_TARGET" > configure.log 2>&1 \
+            && make > make.log 2>&1) \
+            || die "host の $lib が組めない ($g/$lib)"
+    done
+    if [ ! -s "$g/mpc/src/.libs/libmpc.a" ]; then
+        mkdir -p "$g/mpc"
+        (cd "$g/mpc" && sh "$ext/mpc/configure" --disable-shared \
+            --with-gmp-include="$g/gmp" --with-gmp-lib="$g/gmp/.libs" \
+            --with-mpfr-include="$ext/mpfr/src" --with-mpfr-lib="$g/mpfr/src/.libs" \
+            > configure.log 2>&1 && make > make.log 2>&1) \
+            || die "host の mpc が組めない ($g/mpc)"
+    fi
+    (cd "$g/gcc" && make GMPINC="-I$g/gmp -I$ext/mpfr/src -I$ext/mpc/src" \
+        GMPLIBS="-L$g/mpc/src/.libs -lmpc -L$g/mpfr/src/.libs -lmpfr -L$g/gmp/.libs -lgmp" \
+        cc1 > cc1.log 2>&1) \
+        || die "host の cc1 が組めない ($g/gcc/cc1.log)"
+    echo "host cc1: $g/gcc/cc1"
+}
+
+# 単位の .i (我々の pp と libc の header で前処理したもの) を，stone の OS の
+# 上の cc1 と host の cc1 で訳し，.s を突き合わせる (docs/stage017-gcc.md 8.15)。
+# 結果を 1 行で出す: 単位名 / 選択肢 / identical か diff か / 行数 / OS の上の秒数。
+# 食い違いは $work/cmp/<単位>.diff に残す。
+#
+# **`.long` の値は 32 bit の符号なしに揃えてから比べる。** GCC は浮動小数点の
+# 定数を host の long の配列 (real_to_target) から出す。host の long が
+# 64 bit なら 0..2^32-1 の値が CONST_INT になって正で出，32 bit なら同じ
+# ビット列が負で出る (0x9999999a が 2576980378 と -1717986918)。GCC 自身の
+# host 依存で，アセンブラが作るバイト列は同じである
+norm_long() {
+    awk '$1 == ".long" && $2 ~ /^-[0-9]+$/ { printf "\t.long\t%.0f\n", $2 + 4294967296; next } { print }' "$1"
+}
+
+cmp_cc1() {
+    lu=$1; shift
+    [ -x "$work/gcc-gen/gcc/cc1" ] || die "host の cc1 が無い (sh tools/gcc17.sh host-cc1)"
+    i="$work/out/${lu%%/*}.${lu#*/}.i"
+    [ -s "$i" ] || die ".i が無い (sh tools/gcc17.sh unit $lu)"
+    c=$work/cmp
+    n=$(echo "$lu" | tr '/' '.')
+    mkdir -p "$c/ref"
+    # pp が末尾に置く終端記号 (0x04) は cc1 の入力ではない。
+    # 我々の stdarg.h の va_start は cc の組込みの __va_ptr を読むが，GCC には
+    # 無いので，使う単位は両方の cc1 が 5 で拒んでいた (gcc/ の可変長の関数を
+    # 定義する単位)。突き合わせの入力として両方が受ける C にするため，宣言を
+    # 1 行足し，行番号を行の目印 (# 1) で元に戻す
+    if grep -q __va_ptr "$i"; then
+        { printf 'extern char *__va_ptr;\n# 1 "t.c"\n'; tr -d '\004' < "$i"; } > "$c/$n.c"
+    else
+        tr -d '\004' < "$i" > "$c/$n.c"
+    fi
+    cp "$c/$n.c" "$c/ref/t.c"
+    t0=$(date +%s)
+    run_cc1 "$c/$n.c" -quiet -fpreprocessed "$@" > "$c/$n.out" 2>&1
+    t1=$(date +%s)
+    # host の cc1 が拒む入力は突き合わせられないので ref-error として行を出す
+    rrc=0
+    (cd "$c/ref" && "$work/gcc-gen/gcc/cc1" -quiet -fpreprocessed "$@" t.c -o ref.s 2> ref.err) || rrc=$?
+    if [ "$rrc" -ne 0 ]; then
+        printf '%s\t%s\tref-error (host rc %s; %s)\t-\t%ss\n' "$lu" "$*" "$rrc" \
+            "$(grep -E '^!|^rc' "$c/$n.out" | tr '\n' ' ')" "$((t1 - t0))"
+        return 0
+    fi
+    awk 'f { print } /^rc / { f = 1 }' "$c/$n.out" > "$c/$n.raw.s"
+    norm_long "$c/$n.raw.s" > "$c/$n.s"
+    norm_long "$c/ref/ref.s" > "$c/ref/ref.norm.s"
+    mv "$c/ref/ref.norm.s" "$c/ref/ref.s"
+    if cmp -s "$c/ref/ref.s" "$c/$n.s"; then
+        r=identical
+        rm -f "$c/$n.diff"
+    else
+        r="diff ($(grep -E '^!|^rc' "$c/$n.out" | tr '\n' ' '))"
+        diff "$c/ref/ref.s" "$c/$n.s" > "$c/$n.diff" || true
+    fi
+    printf '%s\t%s\t%s\t%s\t%ss\n' "$lu" "$*" "$r" "$(wc -l < "$c/ref/ref.s" | tr -d ' ')" "$((t1 - t0))"
+}
+
+# ライブラリの全単位を cmp-cc1 する (docs/stage017-gcc.md 8.15)。
+#
+#   gcc17.sh cmp-all gcc libiberty -- -O2
+#
+# 結果は $work/cmp/all<選択肢>.tsv に 1 単位 1 行で足していく。gcc/ の全単位は
+# QEMU の上で十数時間かかるので，**表に既にある単位は飛ばす** —— 止まっても
+# 同じ命令で続きから再開できる。最初からやり直すときは表を消す。
+# cmp-cc1 は RAM ファイルを共有するので並列にはしない
+cmp_all() {
+    libs=""
+    while [ $# -gt 0 ] && [ "$1" != "--" ]; do libs="$libs $1"; shift; done
+    [ "${1:-}" = "--" ] && shift
+    [ -n "$libs" ] || die "cmp-all <lib...> -- [opt...]"
+    slug=$(printf '%s' "$*" | tr -c 'A-Za-z0-9' '_')
+    t="$work/cmp/all$slug.tsv"
+    mkdir -p "$work/cmp"
+    touch "$t"
+    total=0
+    for lib in $libs; do
+        for u in $(unit_list "$lib"); do
+            total=$((total + 1))
+            if awk -F '\t' -v u="$lib/$u" '$1 == u { f = 1 } END { exit !f }' "$t"; then
+                continue
+            fi
+            cmp_cc1 "$lib/$u" "$@" < /dev/null >> "$t"
+            printf '%s/%s 件目: %s\n' "$(wc -l < "$t" | tr -d ' ')" "$total" "$(tail -n 1 "$t")" >&2
+        done
+    done
+    echo "cmp-all: $(wc -l < "$t" | tr -d ' ') 単位 ($t)"
+    cut -f 3 "$t" | sed 's/ (.*//' | sort | uniq -c
+}
+
 cmd=${1:-}
 case "$cmd" in
 measure) measure ;;
@@ -1142,9 +1709,17 @@ unit-row)
     unit "$2" > "$work/out/${2%%/*}.${2#*/}.row"
     ;;
 units) units "${2:-}" ;;
+objects) objects "${2:-}" ;;
+link) link_cc1 ;;
+host-cc1) host_cc1 ;;
+cmp-all) shift; cmp_all "$@" ;;
+cmp-cc1) [ -n "${2:-}" ] || die "cmp-cc1 <lib>/<unit> [opt...]"; shift; cmp_cc1 "$@" ;;
+run-cc1) [ -n "${2:-}" ] || die "run-cc1 <file> [opt...]"; shift; run_cc1 "$@" ;;
+list) [ -n "${2:-}" ] || die "list <lib>"; unit_list "$2" ;;
+object1) [ -n "${2:-}" ] || die "object1 <lib>/<unit>"; object1 "$2" ;;
 where) [ -n "${2:-}" ] || die "where <lib>/<unit>"; where "$2" ;;
 *)
-    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit>}" >&2
+    echo "usage: gcc17.sh {measure | pack | configure | configure-gcc | headers [lib] | closure <lib>/<unit> | unit <lib>/<unit> | units [lib] | where <lib>/<unit> | objects [lib] | link | run-cc1 <file> [opt...] | host-cc1 | cmp-cc1 <lib>/<unit> [opt...] | cmp-all <lib...> -- [opt...]}" >&2
     exit 2
     ;;
 esac

@@ -12,6 +12,7 @@
 #   STONE_ENGINE      コンテナエンジン (podman | docker)。未指定時は podman, docker の順に自動検出
 #   STONE_IMAGE       イメージ名 (default: stone-env)
 #   STONE_QEMU_TRACE      qemu: 実行トレースの記録先ファイル (tools/run-qemu.sh 参照)
+#   STONE_QEMU_INTLOG     qemu: 例外と割込みだけの記録先ファイル (tools/run-qemu.sh 参照)
 #   STONE_QEMU_RAM        qemu: RAM 量 (既定 128M)。RAMFILE を使うときだけ有効
 #   STONE_QEMU_TIMEOUT    qemu: 打ち切りまでの秒数 (既定 900。0 で無効)。
 #                         **コンテナへ渡すこと** —— 渡し忘れると，呼ぶ側で
@@ -104,7 +105,7 @@ qemu)
     exec "$engine" run --rm -i -v "$host_root:/work" \
         ${STONE_CONTAINER_NAME:+--name "$STONE_CONTAINER_NAME"} \
         ${STONE_QEMU_GDB:+-p "127.0.0.1:$STONE_QEMU_GDB:$STONE_QEMU_GDB" -e STONE_QEMU_GDB} \
-        -e STONE_QEMU_TRACE -e STONE_QEMU_RAMFILE -e STONE_QEMU_RAM \
+        -e STONE_QEMU_TRACE -e STONE_QEMU_INTLOG -e STONE_QEMU_RAMFILE -e STONE_QEMU_RAM \
         -e STONE_QEMU_TIMEOUT \
         "$image" sh tools/run-qemu.sh "$@"
     ;;
