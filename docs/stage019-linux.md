@@ -55,4 +55,38 @@ C99 と GNU 拡張 (roadmap の Stage 18) は，Linux のソースを入力と�
 - `include/generated/autoconf.h`
 - `include/config/` の下の記号ごとのファイル (fixdep が依存として使う)
 
-照合する相手が要る。本物の `conf` は flex が無いと組めず，flex はこの作業環境に無い。照合の方法は別途決める。
+### 4.1 照合の方法
+
+上流の `conf` を照合の相手にする。`conf` は字句解析器を flex で作るので，flex 2.6.4 を取得して `tmp/` の中で組む (`tools/kconfref.sh flex`。[SOURCES.md](SOURCES.md))。flex は照合の相手を組むためだけに使い，stone のビルドチェーンにもカーネルにも入らない。
+
+`sh tools/kconfref.sh cmp <kconf> <目標>` が突き合わせる。Kbuild が `conf` を呼ぶ形 (環境変数・作業ディレクトリ・引数) のまま kconf を走らせるため，一度上流の `conf` で目標を作った後，`scripts/kconfig/conf` を kconf で置き換え，生成物を消して同じ目標をもう一度作る。比べるのは `.config`・`include/config/auto.conf`・`auto.conf.cmd`・`tristate.conf`・`include/generated/autoconf.h` と，`include/config/` の下の記号ごとのファイルの一覧である。
+
+### 4.2 上流に合わせた点
+
+値は必要になった時に計算して記号ごとに覚えるので，依存が循環すると計算を始めた記号によって答が変わる。上流と同じ答を出すため次を合わせた。
+
+- 計算を始める順。記号のハッシュ表の順 (表の大きさ 9973，FNV-1 32 bit，鎖の先頭へ足す) と menu の順
+- 覚えた値を捨てる時点 (`sym_clear_all_valid` と，`auto.conf` を読み直す時)
+- menu の木。自動の副 menu は式の簡約の結果で決まり，`.config` の `# end of ...` の位置を左右するので，式の簡約 (同じ項の除去・比較への書換え) も同じ規則で行う
+
+### 4.3 結果 (stage019/kconf1.c，ホストの gcc で組んだもの)
+
+| 目標 | 結果 |
+|---|---|
+| `allnoconfig` | 一致 (記号ごとのファイル 166 個を含む) |
+| `tinyconfig` (`allnoconfig` + `merge_config.sh` + `olddefconfig`) | 一致 |
+| `defconfig`・`rv32_defconfig` | 一致 |
+| `alldefconfig`・`allyesconfig`・`allmodconfig` | 一致 |
+| `savedefconfig` | 一致 |
+| `.config` を書き換えた後の `olddefconfig` | 一致 |
+| `syncconfig` (ビルドの途中で Kbuild が呼ぶ) | 一致 (記号ごとのファイル 679 個) |
+
+上流と違う点は次のとおりである。対話の入力 (`oldconfig` など) を持たず，`syncconfig` で値の無い新しい記号が見つかれば止まる (先に `olddefconfig` を回す)。依存の循環の検査を持たない。式の木を解放しない (`allyesconfig` で最大 RSS 44 MB)。
+
+### 4.4 stone の OS の上で走らせるために要るもの
+
+kconf1 は C89 で書いてあり，我々の cc で訳す。libc26 には次が無い。
+
+- `getenv`。Kbuild は `srctree`・`SRCARCH`・`CC` などを環境変数で渡すが，stone の OS はプロセスに環境変数を渡していない (`environ[0] == 0`)
+- `$(shell,...)` を実行する手段 (上流は `popen`)
+- `rename`
