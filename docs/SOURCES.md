@@ -23,6 +23,7 @@
 | mpfr | MPFR 3.1.6 (GCC の前提。`real.h` が `mpfr.h` を読む) | https://ftp.gnu.org/gnu/mpfr/mpfr-3.1.6.tar.bz2 | cf4f4b2d80abb79e820e78c8077b6725bbbb4e8f41896783c899087be0e94068 |
 | mpc | MPC 1.0.3 (GCC の前提) | https://ftp.gnu.org/gnu/mpc/mpc-1.0.3.tar.gz | 617decc6ea09889fb08ede330917a00b16809b8db88c29c31bfbb49cbf88ecc3 |
 | linux54 | Linux 5.4.302 (Stage 18 / 19 の測定対象。RV32 のカーネルを我々のチェーンで組む)。stable の tag v5.4.302 を commit で固定 | https://github.com/gregkh/linux | commit 9e3157c56ec7917e6a80ea53a8bd752e0037f2cb |
+| flex | flex 2.6.4。照合用の上流 kconfig (`conf`) を組むためだけに使う (`tools/kconfref.sh`)。stone のビルドチェーンにもカーネルにも入らない | https://github.com/westes/flex/releases/download/v2.6.4/flex-2.6.4.tar.gz | e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995 |
 
 bzip2とzlibのSHA-256は公開済みの値を使用し、2026-08-10の取得時に照合した。GCC 4.7.4は事前に使用可能なSHA-256を記録していなかったため、GNU公式配布元をtrust bootstrapとして2026-08-31に初回取得し、そのSHA-256を固定した。以後、`fetch.sh`は記録値と一致しない取得物を削除して失敗する。
 
@@ -44,6 +45,8 @@ SHA-256 より照合値としては弱い (docs/stage015-tcc.md 3 章)。
 **Linux も git で取る。** kernel.org (cdn / mirrors.edge / www / git) はこの作業環境の egress 制限で到達できないため，stable の保守者 Greg Kroah-Hartman が GitHub に置くミラー (gregkh/linux) から tag v5.4.302 の commit を取る (2026-10-09)。tag object は 8ffcca9e0f269ee86a682eaae7e49c5efae79fe9 である。**kernel.org の正規のリポジトリと同じ commit であることは未照合**であり，kernel.org に到達できるようになった時点で照合する。5.4 系は保守が終了しており，v5.4.302 が最終版である。
 
 **5.4 系には修正されない既知の脆弱性が残る。** 我々はこのカーネルを QEMU の中で起動して試験するだけで，網に晒す用途に使わない。
+
+**flex は照合の相手を組むためだけに取る** (2026-10-12)。Linux の kconfig は字句解析器を flex で作り，生成済みのものを同梱しないので，我々の kconf と突き合わせる上流の `conf` を組むのに要る。release の署名 (`.sig`) を Will Estes の鍵 (fingerprint 56C6 7868 E933 90AA 1039 AD1C E4B2 9C8D 6488 5307) で検証した。鍵は keyserver.ubuntu.com から取った (GitHub と keys.openpgp.org はこの作業環境の egress 制限で到達できない)。**この fingerprint を別経路の資料と突き合わせてはいない。** OSV で既知の脆弱性は CVE-2019-6293 の 1 件で，flex が細工された `.l` を処理すると再帰で stack を使い果たすものである (2.6.4 で未修正)。入力は Linux の `scripts/kconfig/lexer.l` だけなので該当しないと判断した。生成される字句解析器の CVE-2016-6354 は 2.6.1 で修正済みである。NVD はこの作業環境から到達できず照会していない。保守者の侵害や悪意ある publish の報告は見つからなかった。
 
 zlib の取得元は当初 www.zlib.net/zlib-1.3.1.tar.gz だったが，zlib.net は
 新版が出ると旧版を fossils/ へ移す (404 になる) ため恒久 URL の方を
