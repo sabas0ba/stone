@@ -16,7 +16,7 @@
 # 突き合わせる両者には同じ CC / LD を渡すこと。
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 work="$repo_root/tmp/kconfref"
 linux="$repo_root/docs/external/linux54"
 flexsrc="$repo_root/docs/external/flex"
@@ -42,6 +42,9 @@ run_target() {
     [ -x "$flexbin" ] || die "flex が無い (sh tools/kconfref.sh flex)"
     [ -f "$linux/Makefile" ] || die "Linux のソースが無い (sh tools/fetch.sh linux54)"
     mkdir -p "$out"
+    # make -C は先に $linux へ移るので，相対の出力先はそこからの相対に
+    # 化ける。絶対経路にしてから渡す
+    out=$(CDPATH='' cd -- "$out" && pwd)
     make -s -C "$linux" O="$out" ARCH=riscv LEX="$flexbin" YACC=bison "$@" "$target"
 }
 
