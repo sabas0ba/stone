@@ -90,3 +90,33 @@ kconf1 は C89 で書いてあり，我々の cc で訳す。libc26 には次が
 - `getenv`。Kbuild は `srctree`・`SRCARCH`・`CC` などを環境変数で渡すが，stone の OS はプロセスに環境変数を渡していない (`environ[0] == 0`)
 - `$(shell,...)` を実行する手段 (上流は `popen`)
 - `rename`
+
+## 5. Kbuild が呼ぶもの (実測)
+
+`sh tools/kbuildlog.sh run <出力> <設定の目標>` が，ホストの make で Kbuild を回し，呼ばれた命令を記録する。本物の RISC-V のツールチェインは使わず，引数を記録して空の出力を作るだけの代役 (GCC 4.6.4 と名乗る) を置く。make の SHELL も記録用の台本に替え，レシピと `$(shell ...)` を残す。生成物の中身は空なので，最後のリンクの後 (`mksysmap`) で止まるが，そこまでの命令はすべて記録に出る。
+
+### 5.1 最初の対象の設定
+
+[stage019/rv32-stone.config](../stage019/rv32-stone.config) を `KCONFIG_ALLCONFIG` に渡して `allnoconfig` で作る。`tiny.config` の中身に，RV32I・1 hart・浮動小数点なし・圧縮命令なし・printk・SBI 経由の console・initramfs・ELF の実行を足したものである。`MODULES` と `KALLSYMS` は無い。code model は `medlow` (`lui` による絶対番地) になる。
+
+### 5.2 規模
+
+| | `rv32_defconfig` (参考) | rv32-stone |
+|---|---|---|
+| C の単位 (`-c`) | 1461 | 445 |
+| `.S` の単位 | 16 | 15 |
+| `-E` (リンカ台本など) | 11 | 11 |
+| `-S` (asm-offsets などの定数の見出し) | 14 | 14 |
+| `ar` | 362 | 205 |
+
+### 5.3 rv32-stone で呼ばれるもの
+
+| 区分 | 中身 |
+|---|---|
+| Linux 自身の補助プログラム | fixdep，conf (kconf で置き換える)，mk_elfconfig，modpost，gen_init_cpio，gen_crc32table，dtc |
+| 外部の道具 | make，sh，echo，rm，mkdir，printf，cat，sed，head，mv，cmp，ln，grep，expr，wc，getconf (`LFS_CFLAGS`)，bc (`kernel/time/timeconst.bc`)，flex と bison (dtc の字句解析器と構文解析器) |
+| ツールチェイン | gcc (`-c`・`-S`・`-E`，`--version` などの問合せ，cc-option の試験)，ld，ar，objcopy，objdump，nm |
+
+sh は Kbuild のすべてのレシピで `trap '...; kill -s HUP $$' HUP` の形を使う (割込みで出力を消す)。`scripts/link-vmlinux.sh` は関数と `local` を使う。
+
+**dtc。** riscv は QEMU が渡す device tree を読むために `OF_FLATTREE` を要し，それが `DTC` を選ぶ。そのため `scripts/dtc` が組まれるが，この設定では `.dts` を 1 つも訳さないので dtc は使われない。dtc の字句解析器と構文解析器は flex / bison で生成するので，stone の中で組むには我々の側に生成の手段が要る。扱いは別途決める。
