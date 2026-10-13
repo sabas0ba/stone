@@ -119,4 +119,41 @@ kconf1 は C89 で書いてあり，我々の cc で訳す。libc26 には次が
 
 sh は Kbuild のすべてのレシピで `trap '...; kill -s HUP $$' HUP` の形を使う (割込みで出力を消す)。`scripts/link-vmlinux.sh` は関数と `local` を使う。
 
-**dtc。** riscv は QEMU が渡す device tree を読むために `OF_FLATTREE` を要し，それが `DTC` を選ぶ。そのため `scripts/dtc` が組まれるが，この設定では `.dts` を 1 つも訳さないので dtc は使われない。dtc の字句解析器と構文解析器は flex / bison で生成するので，stone の中で組むには我々の側に生成の手段が要る。扱いは別途決める。
+**dtc。** riscv は QEMU が渡す device tree を読むために `OF_FLATTREE` を要し，それが `DTC` を選ぶ。そのため `scripts/dtc` が組まれるが，この設定では `.dts` を 1 つも訳さないので dtc は使われない。dtc の字句解析器と構文解析器は flex / bison で生成するので，stone の中で組むには我々の側に生成の手段が要る。
+
+**dtc は stone の中では組まない (2026-10-13 決定)。** この設定で使われないものを組むために字句解析器と構文解析器の生成器を書くのは釣り合わないからである。scripts の段だけ `CONFIG_DTC` を空にして渡し，`scripts/dtc` を飛ばす。これは上流の Kbuild からの逸脱である。`.dts` を訳す設定が要るようになった時点で，dtc の字句解析器と構文解析器を手で書くか，lex / yacc に当たる生成器を書くかを決め直す。
+
+## 6. 我々の cc に要る拡張 (実測)
+
+`sh tools/linux19.sh pre <kbout>` が，rv32-stone の C の単位 374 個を前処理する。前処理はホストの cpp に任せ，ホストの定義を `-undef -nostdinc` で消して，処理系が前もって定義するもの ([stage019/predef-rv32-gcc46.h](../stage019/predef-rv32-gcc46.h)。GCC 4.6.4 / riscv32 / -Os に合わせる) と処理系の `stdarg.h` ([stage019/include](../stage019/include)) を与える。我々の pp はまだ `-I` の探索順を持たないので，ここでは cc に要るものだけを測る。
+
+374 単位すべてが前処理できた。`arch/riscv/mm/init.o` だけは Makefile が `-mcmodel=medany` を指定し，`__riscv_cmodel_medany` が無ければ `#error` で止まる (MMU を有効にする前に走る `setup_vm()` は PC 相対で番地を求める必要がある)。**我々の cc は，少なくともこの単位について `auipc` による PC 相対の番地を生成する必要がある。**
+
+### 6.1 拡張の使われ方
+
+`sh tools/linux19.sh scan` が，字面で数えた目安を出す。共通の header (`linux/kernel.h` など) が使うので，ほぼすべての単位にほぼすべての形が現れる。**1 つでも欠ければどの単位も通らない**ので，単位ごとの優先順位は意味を持たない。
+
+| 形 | 単位 (374 中) |
+|---|---|
+| `__attribute__`・`__extension__`・`inline`・`long long` | 372 |
+| inline asm | 369 |
+| 文式 `({ ... })` | 368 |
+| `__builtin_constant_p` | 365 |
+| `__builtin_va_*` | 363 |
+| `case a ... b` | 363 |
+| `__alignof__` | 362 |
+| `typeof` | 350 |
+| `__builtin_expect` | 346 |
+| 指定付き初期化子 `.x =` | 341 |
+| `__builtin_choose_expr` / `__builtin_types_compatible_p`・`__label__` | 334 |
+| `__builtin_offsetof`・`__builtin_unreachable` | 327 |
+| 長さ 0 の配列 | 323 |
+| `_Static_assert` | 228 |
+| asm goto・計算した goto | 0 |
+
+### 6.2 中身
+
+- **組込み関数**: `__builtin_constant_p`・`expect`・`types_compatible_p`・`choose_expr`・`offsetof`・`unreachable`・`memcpy`・`object_size`・`va_list` / `va_start` / `va_arg` / `va_end` / `va_copy`・`return_address`・`prefetch`・`extract_return_addr`・`clzll`
+- **属性**: `no_instrument_function`・`unused`・`gnu_inline`・`always_inline`・`error`・`format`・`cold`・`aligned`・`section`・`designated_init`・`const`・`malloc`・`noreturn`・`pure`・`assume_aligned`・`nonnull`・`packed`・`noinline`・`externally_visible`・`alias`・`used`・`weak`・`mode` (`__attribute__((` の直後の名前だけを数えた)
+- **inline asm の制約**: `r`・`=r`・`=&r`・`+r`・`rJ`・`rK`・`i`・`m`・`=m`・`+A` (不可分操作の番地)・`+rm`。asm 文は字面で 82,735 個ある
+- **レジスタを指定した変数**: `register uintptr_t a0 asm ("a0")` (SBI の呼出しで a0〜a7)，`gp`，`sp`
