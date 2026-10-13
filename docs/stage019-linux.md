@@ -55,4 +55,68 @@ C99 と GNU 拡張 (roadmap の Stage 18) は，Linux のソースを入力と�
 - `include/generated/autoconf.h`
 - `include/config/` の下の記号ごとのファイル (fixdep が依存として使う)
 
-照合する相手が要る。本物の `conf` は flex が無いと組めず，flex はこの作業環境に無い。照合の方法は別途決める。
+### 4.1 照合の方法
+
+上流の `conf` を照合の相手にする。`conf` は字句解析器を flex で作るので，flex 2.6.4 を取得して `tmp/` の中で組む (`tools/kconfref.sh flex`。[SOURCES.md](SOURCES.md))。flex は照合の相手を組むためだけに使い，stone のビルドチェーンにもカーネルにも入らない。
+
+`sh tools/kconfref.sh cmp <kconf> <目標>` が突き合わせる。Kbuild が `conf` を呼ぶ形 (環境変数・作業ディレクトリ・引数) のまま kconf を走らせるため，一度上流の `conf` で目標を作った後，`scripts/kconfig/conf` を kconf で置き換え，生成物を消して同じ目標をもう一度作る。比べるのは `.config`・`include/config/auto.conf`・`auto.conf.cmd`・`tristate.conf`・`include/generated/autoconf.h` と，`include/config/` の下の記号ごとのファイルの一覧である。
+
+### 4.2 上流に合わせた点
+
+値は必要になった時に計算して記号ごとに覚えるので，依存が循環すると計算を始めた記号によって答が変わる。上流と同じ答を出すため次を合わせた。
+
+- 計算を始める順。記号のハッシュ表の順 (表の大きさ 9973，FNV-1 32 bit，鎖の先頭へ足す) と menu の順
+- 覚えた値を捨てる時点 (`sym_clear_all_valid` と，`auto.conf` を読み直す時)
+- menu の木。自動の副 menu は式の簡約の結果で決まり，`.config` の `# end of ...` の位置を左右するので，式の簡約 (同じ項の除去・比較への書換え) も同じ規則で行う
+
+### 4.3 結果 (stage019/kconf1.c，ホストの gcc で組んだもの)
+
+| 目標 | 結果 |
+|---|---|
+| `allnoconfig` | 一致 (記号ごとのファイル 166 個を含む) |
+| `tinyconfig` (`allnoconfig` + `merge_config.sh` + `olddefconfig`) | 一致 |
+| `defconfig`・`rv32_defconfig` | 一致 |
+| `alldefconfig`・`allyesconfig`・`allmodconfig` | 一致 |
+| `savedefconfig` | 一致 |
+| `.config` を書き換えた後の `olddefconfig` | 一致 |
+| `syncconfig` (ビルドの途中で Kbuild が呼ぶ) | 一致 (記号ごとのファイル 679 個) |
+
+上流と違う点は次のとおりである。対話の入力 (`oldconfig` など) を持たず，`syncconfig` で値の無い新しい記号が見つかれば止まる (先に `olddefconfig` を回す)。依存の循環の検査を持たない。式の木を解放しない (`allyesconfig` で最大 RSS 44 MB)。
+
+### 4.4 stone の OS の上で走らせるために要るもの
+
+kconf1 は C89 で書いてあり，我々の cc で訳す。libc26 には次が無い。
+
+- `getenv`。Kbuild は `srctree`・`SRCARCH`・`CC` などを環境変数で渡すが，stone の OS はプロセスに環境変数を渡していない (`environ[0] == 0`)
+- `$(shell,...)` を実行する手段 (上流は `popen`)
+- `rename`
+
+## 5. Kbuild が呼ぶもの (実測)
+
+`sh tools/kbuildlog.sh run <出力> <設定の目標>` が，ホストの make で Kbuild を回し，呼ばれた命令を記録する。本物の RISC-V のツールチェインは使わず，引数を記録して空の出力を作るだけの代役 (GCC 4.6.4 と名乗る) を置く。make の SHELL も記録用の台本に替え，レシピと `$(shell ...)` を残す。生成物の中身は空なので，最後のリンクの後 (`mksysmap`) で止まるが，そこまでの命令はすべて記録に出る。
+
+### 5.1 最初の対象の設定
+
+[stage019/rv32-stone.config](../stage019/rv32-stone.config) を `KCONFIG_ALLCONFIG` に渡して `allnoconfig` で作る。`tiny.config` の中身に，RV32I・1 hart・浮動小数点なし・圧縮命令なし・printk・SBI 経由の console・initramfs・ELF の実行を足したものである。`MODULES` と `KALLSYMS` は無い。code model は `medlow` (`lui` による絶対番地) になる。
+
+### 5.2 規模
+
+| | `rv32_defconfig` (参考) | rv32-stone |
+|---|---|---|
+| C の単位 (`-c`) | 1461 | 445 |
+| `.S` の単位 | 16 | 15 |
+| `-E` (リンカ台本など) | 11 | 11 |
+| `-S` (asm-offsets などの定数の見出し) | 14 | 14 |
+| `ar` | 362 | 205 |
+
+### 5.3 rv32-stone で呼ばれるもの
+
+| 区分 | 中身 |
+|---|---|
+| Linux 自身の補助プログラム | fixdep，conf (kconf で置き換える)，mk_elfconfig，modpost，gen_init_cpio，gen_crc32table，dtc |
+| 外部の道具 | make，sh，echo，rm，mkdir，printf，cat，sed，head，mv，cmp，ln，grep，expr，wc，getconf (`LFS_CFLAGS`)，bc (`kernel/time/timeconst.bc`)，flex と bison (dtc の字句解析器と構文解析器) |
+| ツールチェイン | gcc (`-c`・`-S`・`-E`，`--version` などの問合せ，cc-option の試験)，ld，ar，objcopy，objdump，nm |
+
+sh は Kbuild のすべてのレシピで `trap '...; kill -s HUP $$' HUP` の形を使う (割込みで出力を消す)。`scripts/link-vmlinux.sh` は関数と `local` を使う。
+
+**dtc。** riscv は QEMU が渡す device tree を読むために `OF_FLATTREE` を要し，それが `DTC` を選ぶ。そのため `scripts/dtc` が組まれるが，この設定では `.dts` を 1 つも訳さないので dtc は使われない。dtc の字句解析器と構文解析器は flex / bison で生成するので，stone の中で組むには我々の側に生成の手段が要る。扱いは別途決める。

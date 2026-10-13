@@ -42,6 +42,7 @@ gmp https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.bz2 ac28211a7cfb609bae2e2c8d6058d6
 mpfr https://ftp.gnu.org/gnu/mpfr/mpfr-3.1.6.tar.bz2 cf4f4b2d80abb79e820e78c8077b6725bbbb4e8f41896783c899087be0e94068
 mpc https://ftp.gnu.org/gnu/mpc/mpc-1.0.3.tar.gz 617decc6ea09889fb08ede330917a00b16809b8db88c29c31bfbb49cbf88ecc3
 linux54 https://github.com/gregkh/linux v5.4.302:9e3157c56ec7917e6a80ea53a8bd752e0037f2cb
+flex https://github.com/westes/flex/releases/download/v2.6.4/flex-2.6.4.tar.gz e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995
 EOF
 }
 
