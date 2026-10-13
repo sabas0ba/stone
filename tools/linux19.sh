@@ -5,7 +5,7 @@
 #   linux19.sh pre <kbout>          全単位を前処理だけする (scan の材料。cc は通さない)
 #   linux19.sh one <kbout> <obj>    1 単位を前処理して cc に通し，表の 1 行を出す
 #   linux19.sh all <kbout>          全単位を通して表に足していく (途中から再開できる)
-#   linux19.sh scan                 前処理した単位の中の拡張の使われ方を数える
+#   linux19.sh scan <kbout>         前処理した単位の中の拡張の使われ方を数える
 #
 # <kbout> は tools/kbuildlog.sh run の出力先 (Kbuild の objtree) である。
 # 単位ごとの命令行はそこの kblog/tools.log にある。
@@ -18,10 +18,14 @@
 # 単位の -I / -D / -U / -include はそのまま渡す。
 #
 # 表の列: 単位 (.o) / 前処理 (ok か失敗) / cc の終了コード / .i の大きさ / cc の秒数
+#
+# 作業の置き場は <kbout> ごとに分ける (tmp/linux19/<kbout の名前>)。別の
+# objtree の命令行や .i が混ざると，測定が黙って誤る
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-work="$repo_root/tmp/linux19"
+base="$repo_root/tmp/linux19"
+work=""
 predef="$repo_root/stage019/predef-rv32-gcc46.h"
 ccinc="$repo_root/stage019/include"
 cc15="tmp/build/cc15as.bin"
@@ -145,10 +149,12 @@ all() {
 }
 
 # 全単位を前処理だけする。cc は QEMU の上で 1 単位に数分かかるので，
-# 拡張の使われ方 (scan) を先に数えるための材料を作る
+# 拡張の使われ方 (scan) を先に数えるための材料を作る。単位の一覧も .i も
+# 毎回作り直す (前の回の .i が残ると scan が数えてしまう)
 pre_all() {
     kb=$1
-    [ -s "$work/units.tsv" ] || units "$kb"
+    units "$kb"
+    rm -rf "$work/out"
     mkdir -p "$work/out"
     ok=0; ng=0
     while IFS="$(printf '\t')" read -r obj key; do
@@ -165,7 +171,7 @@ pre_all() {
 # 前処理した単位の中で，C89 の外の形がいくつの単位に現れるかを数える。
 # 字面で数える目安であり，構文として確かめてはいない
 scan() {
-    [ -d "$work/out" ] || die "前処理した単位が無い (sh tools/linux19.sh all)"
+    [ -d "$work/out" ] || die "前処理した単位が無い (sh tools/linux19.sh pre)"
     total=$(find "$work/out" -name '*.i' | wc -l | tr -d ' ')
     echo "前処理した単位: $total"
     while IFS='|' read -r label pattern; do
@@ -199,15 +205,23 @@ __label__|__label__
 EOF
 }
 
+# <kbout> を絶対経路にし，作業の置き場をそれに結び付ける
+use_tree() {
+    [ -d "$1" ] || die "objtree が無い: $1"
+    kbabs=$(CDPATH='' cd -- "$1" && pwd)
+    work="$base/$(basename "$kbabs")"
+}
+
 cmd=${1:-}
+[ $# -ge 2 ] && use_tree "$2"
 case "$cmd" in
-units) [ $# -ge 2 ] || die "units <kbout>"; units "$(CDPATH='' cd -- "$2" && pwd)" ;;
-pre) [ $# -ge 2 ] || die "pre <kbout>"; pre_all "$(CDPATH='' cd -- "$2" && pwd)" ;;
-one) [ $# -ge 3 ] || die "one <kbout> <obj>"; one "$(CDPATH='' cd -- "$2" && pwd)" "$3" ;;
-all) [ $# -ge 2 ] || die "all <kbout>"; all "$(CDPATH='' cd -- "$2" && pwd)" ;;
-scan) scan ;;
+units) [ $# -ge 2 ] || die "units <kbout>"; units "$kbabs" ;;
+pre) [ $# -ge 2 ] || die "pre <kbout>"; pre_all "$kbabs" ;;
+one) [ $# -ge 3 ] || die "one <kbout> <obj>"; one "$kbabs" "$3" ;;
+all) [ $# -ge 2 ] || die "all <kbout>"; all "$kbabs" ;;
+scan) [ $# -ge 2 ] || die "scan <kbout>"; scan ;;
 *)
-    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan}" >&2
+    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan <kbout>}" >&2
     exit 2
     ;;
 esac
