@@ -8,8 +8,8 @@ C99 と GNU 拡張 (roadmap の Stage 18) は，Linux のソースを入力と�
 
 ## 1. 完了条件
 
-1. RV32 の Linux カーネルを，**stone の OS の上で**，stone 製のツールだけで組む。カーネル内のコードはすべて我々の cc が訳す
-2. 組んだカーネルを QEMU virt (rv32) で起動し，最小の initramfs の上の init (我々の cc で組んだ静的 ELF) が syscall を確かめて電源を切る
+1. RV32 の Linux カーネルを，**stone の OS の上で**，stone 製のツールだけで組む。カーネル内のコードはすべて stone の cc が訳す
+2. 組んだカーネルを QEMU virt (rv32) で起動し，最小の initramfs の上の init (stone の cc で組んだ静的 ELF) が syscall を確かめて電源を切る
 
 ## 2. 決めたこと (2026-10-09)
 
@@ -18,7 +18,7 @@ C99 と GNU 拡張 (roadmap の Stage 18) は，Linux のソースを入力と�
 | 対象 | Linux 5.4.302 (5.4 系の最終版)。`-std=gnu89` のままで，`_Generic` を使う前の版である。`arch/riscv/configs/rv32_defconfig` を持つ |
 | 取得 | GitHub の stable ミラー (gregkh/linux) から commit で固定する。kernel.org はこの作業環境から到達できない ([SOURCES.md](SOURCES.md)) |
 | 実行の場所 | ビルドはすべて stone の OS (QEMU) の中で行う。ホストは sfs4 のイメージを詰めることと，結果を取り出すことだけをする |
-| stone 製の意味 | (a) 我々が書いたツール，または (b) Linux 自身が持つ補助プログラム (fixdep・gen_init_cpio など) を我々の cc で組んだもの。Linux 以外の外部ツール (GNU make・flex・bison・bc) は使わず，(a) で置き換える |
+| stone 製の意味 | (a) 我々が書いたツール，または (b) Linux 自身が持つ補助プログラム (fixdep・gen_init_cpio など) を stone の cc で組んだもの。Linux 以外の外部ツール (GNU make・flex・bison・bc) は使わず，(a) で置き換える |
 | 開発中の測定 | 壁を早く見つけるため，ホストから単位ごとに我々の pp / cc を並列に呼んでよい (GCC の `tools/gcc17.sh` と同じ方式)。これは完了条件に数えない |
 | SBI | 我々の M モードのコードで最小の SBI を書く (OpenSBI を使わない) |
 
@@ -39,7 +39,7 @@ C99 と GNU 拡張 (roadmap の Stage 18) は，Linux のソースを入力と�
 | sh | `scripts/*.sh` (`link-vmlinux.sh` など) | sh5 | 足りない構文を足す |
 | kconfig | flex / bison で作る `conf` | 無い | Kconfig を読む道具 `kconf` を書く (4 章) |
 | bc | `kernel/time/timeconst.bc` (多倍長整数) | 無い | bc の部分集合を書く |
-| 補助プログラム | fixdep・gen_init_cpio (・modpost) | - | Linux のソースから我々の cc で組む |
+| 補助プログラム | fixdep・gen_init_cpio (・modpost) | - | Linux のソースから stone の cc で組む |
 | ファイル系 | ツリーは展開して約 1.2 GB | sfs4 の窓は 512 MiB | 構成が参照するファイルに絞って詰める。足りなければブロックデバイスを足す |
 
 ## 4. kconf (Kconfig を読む道具)
@@ -85,7 +85,7 @@ C99 と GNU 拡張 (roadmap の Stage 18) は，Linux のソースを入力と�
 
 ### 4.4 stone の OS の上で走らせるために要るもの
 
-kconf1 は C89 で書いてあり，我々の cc で訳す。libc26 には次が無い。
+kconf1 は C89 で書いてあり，stone の cc で訳す。libc26 には次が無い。
 
 - `getenv`。Kbuild は `srctree`・`SRCARCH`・`CC` などを環境変数で渡すが，stone の OS はプロセスに環境変数を渡していない (`environ[0] == 0`)
 - `$(shell,...)` を実行する手段 (上流は `popen`)
