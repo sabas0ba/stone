@@ -6,6 +6,7 @@
 #   linux19.sh one <kbout> <obj>    1 単位を前処理して cc に通し，表の 1 行を出す
 #   linux19.sh all <kbout>          全単位を通して表に足していく (途中から再開できる)
 #   linux19.sh scan <kbout>         前処理した単位の中の拡張の使われ方を数える
+#   linux19.sh spre <kbout>         .S の単位を前処理だけする (nas1 の入力。docs/stage018-ncc.md 10 章の M1)
 #
 # <kbout> は tools/kbuildlog.sh run の出力先 (Kbuild の objtree) である。
 # 単位ごとの命令行はそこの kblog/tools.log にある。
@@ -34,15 +35,24 @@ HOSTCC=${HOSTCC:-gcc}
 die() { echo "linux19.sh: $*" >&2; exit 1; }
 
 # C の単位 (-c で __ASSEMBLY__ でないもの) の命令行を 1 単位 1 ファイルに分ける
+# 第 2 引数が asm なら .S の単位 (-D__ASSEMBLY__ のもの) を拾う
 units() {
     kb=$1
+    kind=${2:-c}
     log="$kb/kblog/tools.log"
     [ -s "$log" ] || die "記録が無い: $log (sh tools/kbuildlog.sh run)"
     rm -rf "$work/args"
     mkdir -p "$work/args"
     : > "$work/units.tsv"
+    if [ "$kind" = asm ]; then
+        sel='-D__ASSEMBLY__'
+        neg=''
+    else
+        sel=' -c '
+        neg='-D__ASSEMBLY__'
+    fi
     # cc-option の試し (-c -x c /dev/null -o .tmp_*/tmp) は単位ではない
-    grep '^gcc ' "$log" | grep -- ' -c ' | grep -v -- '-D__ASSEMBLY__' \
+    grep '^gcc ' "$log" | grep -- ' -c ' | grep -- "$sel" | grep -v -e "${neg:-^$}" \
         | grep -v -- ' /dev/null' | grep -v -- ' -o \.tmp_' | grep -v -- ' -o /tmp/' \
         | while IFS= read -r line; do
             obj=$(printf '%s\n' "$line" | tr ' ' '\n' | awk 'p { print; exit } $0 == "-o" { p = 1 }')
@@ -94,6 +104,11 @@ preprocess() {
         shift
     done
     [ -n "$src" ] || return 1
+    # .S は拡張子でホストの cpp が assembler-with-cpp として読む。-std は C のときだけ
+    case "$src" in
+    *.S) stdopt='' ;;
+    *) stdopt='-std=gnu89' ;;
+    esac
     # 選択肢は 1 行 1 個で持っているので，改行で区切って渡す
     (
         cd "$kb"
@@ -101,7 +116,7 @@ preprocess() {
 '
         set -f
         # shellcheck disable=SC2046
-        "$HOSTCC" -E -P -undef -nostdinc -std=gnu89 -include "$predef" \
+        "$HOSTCC" -E -P -undef -nostdinc $stdopt -include "$predef" \
             $(cat "$out.args") "$src" -o "$out" 2> "$out.cpp.err"
     )
 }
@@ -168,6 +183,26 @@ pre_all() {
     echo "pre: 前処理できた $ok / 失敗 $ng"
 }
 
+# .S の単位を前処理する。-D__ASSEMBLY__ は単位の命令行が持つ。作業の置き場は
+# C の単位と分ける (<work>/asm)。.s は nas1 の試験の入力になる
+spre_all() {
+    kb=$1
+    work="$work/asm"
+    units "$kb" asm
+    rm -rf "$work/out"
+    mkdir -p "$work/out"
+    ok=0; ng=0
+    while IFS="$(printf '\t')" read -r obj key; do
+        if preprocess "$kb" "$key" "$work/out/$key.s" < /dev/null; then
+            ok=$((ok + 1))
+        else
+            ng=$((ng + 1))
+            echo "cpp で失敗: $obj ($work/out/$key.s.cpp.err)" >&2
+        fi
+    done < "$work/units.tsv"
+    echo "spre: 前処理できた $ok / 失敗 $ng ($work/out)"
+}
+
 # 前処理した単位の中で，C89 の外の形がいくつの単位に現れるかを数える。
 # 字面で数える目安であり，構文として確かめてはいない
 scan() {
@@ -220,8 +255,9 @@ pre) [ $# -ge 2 ] || die "pre <kbout>"; pre_all "$kbabs" ;;
 one) [ $# -ge 3 ] || die "one <kbout> <obj>"; one "$kbabs" "$3" ;;
 all) [ $# -ge 2 ] || die "all <kbout>"; all "$kbabs" ;;
 scan) [ $# -ge 2 ] || die "scan <kbout>"; scan ;;
+spre) [ $# -ge 2 ] || die "spre <kbout>"; spre_all "$kbabs" ;;
 *)
-    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan <kbout>}" >&2
+    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan <kbout> | spre <kbout>}" >&2
     exit 2
     ;;
 esac
