@@ -24,6 +24,9 @@
 | mpc | MPC 1.0.3 (GCC の前提) | https://ftp.gnu.org/gnu/mpc/mpc-1.0.3.tar.gz | 617decc6ea09889fb08ede330917a00b16809b8db88c29c31bfbb49cbf88ecc3 |
 | linux54 | Linux 5.4.302 (Stage 18 / 19 の測定対象。RV32 のカーネルを我々のチェーンで組む)。stable の tag v5.4.302 を commit で固定 | https://github.com/gregkh/linux | commit 9e3157c56ec7917e6a80ea53a8bd752e0037f2cb |
 | flex | flex 2.6.4。照合用の上流 kconfig (`conf`) を組むためだけに使う (`tools/kconfref.sh`)。stone のビルドチェーンにもカーネルにも入らない | https://github.com/westes/flex/releases/download/v2.6.4/flex-2.6.4.tar.gz | e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995 |
+| psabi | RISC-V ELF psABI Specification 1.0 (AsciiDoc の原稿)。ncc1 / nas1 / nld1 の呼出し規約・ELF・再配置の一次資料 (docs/stage018-ncc.md) | https://github.com/riscv-non-isa/riscv-elf-psabi-doc | tag v1.0, commit 74936a9e25dec3c5b297b19e4c37e97d14868b22 |
+| asmman | RISC-V Assembly Programmer's Manual (AsciiDoc の原稿)。疑似命令・修飾子・`.option` の一次資料 | https://github.com/riscv-non-isa/riscv-asm-manual | main, commit 7ae3a91c7baf12b1ac58d27885288a2450e6d2c6 |
+| binutils | GNU binutils 2.40。**利用者向け文書 (`gas/doc/*.texi`・`ld/ld.texi`) だけを読む**。組まない・実行しない・ソースを参照しない | https://ftp.gnu.org/gnu/binutils/binutils-2.40.tar.bz2 | f8298eb153a4b37d112e945aa5cb2850040bcf26a3ea65b5a715c83afe05e48a |
 
 bzip2とzlibのSHA-256は公開済みの値を使用し、2026-08-10の取得時に照合した。GCC 4.7.4は事前に使用可能なSHA-256を記録していなかったため、GNU公式配布元をtrust bootstrapとして2026-08-31に初回取得し、そのSHA-256を固定した。以後、`fetch.sh`は記録値と一致しない取得物を削除して失敗する。
 
@@ -47,6 +50,8 @@ SHA-256 より照合値としては弱い (docs/stage015-tcc.md 3 章)。
 **5.4 系には修正されない既知の脆弱性が残る。** 我々はこのカーネルを QEMU の中で起動して試験するだけで，網に晒す用途に使わない。
 
 **flex は照合の相手を組むためだけに取る** (2026-10-12)。Linux の kconfig は字句解析器を flex で作り，生成済みのものを同梱しないので，我々の kconf と突き合わせる上流の `conf` を組むのに要る。release の署名 (`.sig`) を Will Estes の鍵 (fingerprint 56C6 7868 E933 90AA 1039 AD1C E4B2 9C8D 6488 5307) で検証した。鍵は keyserver.ubuntu.com から取った (GitHub と keys.openpgp.org はこの作業環境の egress 制限で到達できない)。**この fingerprint を別経路の資料と突き合わせてはいない。** OSV で既知の脆弱性は CVE-2019-6293 の 1 件で，flex が細工された `.l` を処理すると再帰で stack を使い果たすものである (2.6.4 で未修正)。入力は Linux の `scripts/kconfig/lexer.l` だけなので該当しないと判断した。生成される字句解析器の CVE-2016-6354 は 2.6.1 で修正済みである。NVD はこの作業環境から到達できず照会していない。保守者の侵害や悪意ある publish の報告は見つからなかった。
+
+**psabi・asmman・binutils は処理系の入力ではなく，Stage 18 の処理系を書くための文書として取る** (2026-10-14。docs/stage018-ncc.md の「一次資料」)。psabi は批准版 1.0 の tag (lightweight tag で，commit を直接指す) を，asmman は版の tag が無いので main の commit (2026-10-05。公開から 7 日を経たもの) を固定した。binutils は 2.40 の書庫の署名 (`.sig`) を Nick Clifton の鍵 (fingerprint 3A24 BC1E 8FB4 09FA 9F14 3718 13FC EF89 DD9E 3C4F) で検証してから SHA-256 を固定した。鍵は keyserver.ubuntu.com から取り，**別経路の資料との突き合わせはしていない**。書庫には as / ld のソースも入るが，[plan.md](plan.md) 2.1 (既存の as / ld を使わない，既存のコードを参照しない) により，展開したもののうち texinfo の文書だけを読む。3 点とも組まず実行もしないので，脆弱性の調査は対象外とした。
 
 zlib の取得元は当初 www.zlib.net/zlib-1.3.1.tar.gz だったが，zlib.net は
 新版が出ると旧版を fossils/ へ移す (404 になる) ため恒久 URL の方を

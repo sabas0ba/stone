@@ -104,13 +104,16 @@ ncc1 は最適化をしない。ただし Linux は次の 2 つを前提にし�
 
 ### 4.5 呼出し規約 (psABI ilp32)
 
-[RISC-V ELF psABI](#一次資料) の整数の呼出し規約に従う。要点は次のとおりで，実装の前に一次資料の文面で照合する。
+[RISC-V ELF psABI](#一次資料) 1.0 の整数の呼出し規約 (`riscv-cc.adoc` の Integer Calling Convention と va_list の節) に従う。要点は次のとおりで，2026-10-14 に文面と照合した。
 
 - 引数は a0〜a7。XLEN (32 bit) 以下の scalar は 1 本，2×XLEN の scalar は 2 本 (下位が若い番号)。1 本しか残らなければ下位をレジスタ，上位をスタックに置く
+- XLEN より狭い整数の引数は，型の符号に従って 32 bit へ広げてから渡す (呼ぶ側が拡張する)
+- スタックで渡す引数は，型の整列と XLEN の大きい方に揃える (64 bit の値は 8 バイト境界)。最初のスタック引数は入口の sp + 0 にある
 - 可変長引数のうち 2×XLEN の整列を持つものは，偶数番から始まる対で渡す (固定の引数にはこの整列は無い)。対が残っていなければスタックで渡し，**それ以降の引数はすべてスタックで渡す** (a7 は空いたまま残る)。呼ぶ側はこの「スタックへ移った」状態を引数の割付けの終わりまで持ち，7 章の 3 の組合せに入れる
-- 2×XLEN 以下の構造体は scalar と同じくレジスタで，それを超えるものは呼ぶ側の写しへの番地で渡す
-- 戻り値は a0 (/ a1)。2×XLEN を超えるものは呼ぶ側が領域を用意し，その番地を a0 に隠れた第 1 引数として渡す
-- callee-saved は s0〜s11 と sp。gp・tp は割り当てない
+- 2×XLEN 以下の構造体は scalar と同じくレジスタで (メモリ上の配置のまま。1 本しか残らなければ先頭の XLEN bit をレジスタ，残りをスタック)，それを超えるものは呼ぶ側の写しへの番地で渡す。呼ばれた側はその写しを書き換えてよい
+- 戻り値は，同じ型の最初の固定引数と同じ形で a0 (/ a1) に置く。番地で渡すことになる大きさのものは呼ぶ側が領域を用意し，その番地を隠れた第 1 引数として a0 で渡す。戻った時の a0 がその番地であることは前提にしない
+- callee-saved は s0〜s11 と sp。gp・tp は値を変えない (割り当てない)。sp は入口で 16 バイト境界にあり，関数の中でも常に揃えておく
+- ビットフィールドの配置も同じ節の規則 (小さい番地から詰め，型の整列境界をまたぐものは次の境界から始める) に従う
 - `va_list` は `void *`。可変長の関数は a0〜a7 をスタック引数の直前の領域へ退避し，スタック引数と連続させる
 
 64 bit の除算・剰余だけは実行時支援 (`__divdi3` など) の呼出しにし，乗算・比較・シフトはその場で展開する。カーネルは除算の支援を持たず，GCC が除算以外を展開することを前提にしている (riscv の 5.4 が選ぶ支援は `GENERIC_LIB_ASHLDI3`・`ASHRDI3`・`LSHRDI3`・`UCMPDI2` だけである)。
@@ -269,9 +272,9 @@ M6 までをホストから駆動して終えた後，stone の OS の中で回�
 
 ## 一次資料
 
-実装の前に取得し，[SOURCES.md](SOURCES.md) に固定して記録する (取得は承認を得てから行う)。
+2026-10-14 に取得し，[SOURCES.md](SOURCES.md) に固定して記録した (`tools/fetch.sh psabi`・`asmman`・`binutils`)。
 
-- RISC-V ELF psABI Specification (riscv-non-isa/riscv-elf-psabi-doc，批准版 1.0): 呼出し規約，ELF の `e_flags`，再配置の種類と計算式
-- RISC-V Assembly Programmer's Manual (riscv-non-isa/riscv-asm-manual): 疑似命令，`%hi` などの修飾子，`.option`
-- GNU as と GNU ld の利用者向け文書 (binutils 2.40 の版): 擬似命令とリンカ台本の文法と意味。文書だけを読み，ソースは参照しない
+- RISC-V ELF psABI Specification (riscv-non-isa/riscv-elf-psabi-doc，批准版 1.0): 呼出し規約 (`riscv-cc.adoc`)，ELF の `e_flags` と再配置の種類と計算式 (`riscv-elf.adoc`)
+- RISC-V Assembly Programmer's Manual (riscv-non-isa/riscv-asm-manual): 疑似命令，`%hi` などの修飾子，`.option` (`src/asm-manual.adoc`)
+- GNU as と GNU ld の利用者向け文書 (binutils 2.40 の版): 擬似命令とリンカ台本の文法と意味 (`gas/doc/as.texi`・`gas/doc/c-riscv.texi`・`ld/ld.texi`)。文書だけを読み，ソースは参照しない
 - 命令の符号化は既に持つ The RISC-V Instruction Set Manual Volume I / II ([SOURCES.md](SOURCES.md)) による

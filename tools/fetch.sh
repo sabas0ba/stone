@@ -43,6 +43,9 @@ mpfr https://ftp.gnu.org/gnu/mpfr/mpfr-3.1.6.tar.bz2 cf4f4b2d80abb79e820e78c8077
 mpc https://ftp.gnu.org/gnu/mpc/mpc-1.0.3.tar.gz 617decc6ea09889fb08ede330917a00b16809b8db88c29c31bfbb49cbf88ecc3
 linux54 https://github.com/gregkh/linux v5.4.302:9e3157c56ec7917e6a80ea53a8bd752e0037f2cb
 flex https://github.com/westes/flex/releases/download/v2.6.4/flex-2.6.4.tar.gz e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995
+psabi https://github.com/riscv-non-isa/riscv-elf-psabi-doc v1.0:74936a9e25dec3c5b297b19e4c37e97d14868b22
+asmman https://github.com/riscv-non-isa/riscv-asm-manual main:7ae3a91c7baf12b1ac58d27885288a2450e6d2c6
+binutils https://ftp.gnu.org/gnu/binutils/binutils-2.40.tar.bz2 f8298eb153a4b37d112e945aa5cb2850040bcf26a3ea65b5a715c83afe05e48a
 EOF
 }
 
