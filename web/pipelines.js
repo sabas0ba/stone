@@ -164,6 +164,16 @@ export const PIPELINES = {
             + 'For `printf("%f")` and `%llu`, boot the OS in the terminal below.',
     },
     stage016: null,     // OS。プレイグラウンドの代わりにターミナル (TERMINALS)
+    stage017: null,     // OS の上のツール群。ターミナル (TERMINALS)
+    stage018: null,     // nas1 は OS の上のコマンド。ターミナル (TERMINALS)
+    // Stage 19 は Linux 5.4 のソース (約 1.2 GB) を入力にした測定であり，
+    // 素材を repo に入れない決まり (docs/SOURCES.md) なのでブラウザでは走らせない
+    stage019: {
+        none: 'Stage 19 has no interactive demo. Its work is measurement against the Linux 5.4.302 '
+            + 'tree (which stays outside the repository, see docs/SOURCES.md): which GNU C extensions '
+            + 'the kernel needs from our compiler, what Kbuild invokes, and a Kconfig reader (`kconf1`). '
+            + 'The compiler generation that answers those measurements is Stage 18 — see the terminal there.',
+    },
 };
 
 // OS 世代のターミナル。kernel + sfs で起動し，UART をそのまま端末へつなぐ。
@@ -217,6 +227,93 @@ const guestBuild = (headers, incDir, unit, objs, opts = {}) => [
         src: 'prev', prefix: 'E', term: 'nul', extra: objs,
     },
 ];
+
+// ---- Stage 17 / 18 の素材 ----
+// libc18 のヘッダ (tools/bundle.sh へ *.h で渡すものと同じ並び)。sys/ は別
+const LIBC18 = ['assert.h', 'ctype.h', 'dirent.h', 'errno.h', 'fcntl.h',
+    'inttypes.h', 'limits.h', 'math.h', 'setjmp.h', 'stdarg.h', 'stddef.h',
+    'stdio.h', 'stdlib.h', 'string.h', 'time.h', 'unistd.h'];
+// libc26 のヘッダ。stage018 の nas1 と tests/stage017 第 12 部が bundle する並び
+const LIBC26 = ['alloca.h', 'assert.h', 'ctype.h', 'dirent.h', 'errno.h',
+    'fcntl.h', 'float.h', 'inttypes.h', 'limits.h', 'math.h', 'setjmp.h',
+    'signal.h', 'stdarg.h', 'stddef.h', 'stdio.h', 'stdlib.h', 'string.h',
+    'time.h', 'unistd.h'];
+// /lib の 1 揃い (tests/stage017 の mkroot と同じ並び。順番を変えると
+// ドライバが組んだものだけ挙動が変わる。docs/stage017-cc.md 3.2)
+const L18_LIB = [
+    'assets/bin/l18_src_string.o', 'assets/bin/l18_src_stdlib.o',
+    'assets/bin/l18_src_misc15.o', 'assets/bin/l18_posix_sys.o',
+    'assets/bin/l18_posix_morecore.o', 'assets/bin/l18_posix_stdio.o',
+    'assets/bin/l18_posix_assert.o', 'assets/bin/l18_posix_dir.o',
+    'assets/bin/rt64.o', 'assets/bin/rtfp.o',
+];
+// libc26 の部品 (tools/ld18.sh -L tmp/build/l26_*.o rt64.o rtfp.o の並び)
+const L26_LIB = [
+    'assets/bin/l26_posix_assert.o', 'assets/bin/l26_posix_dir.o',
+    'assets/bin/l26_posix_morecore.o', 'assets/bin/l26_posix_signal.o',
+    'assets/bin/l26_posix_stdio.o', 'assets/bin/l26_posix_sys.o',
+    'assets/bin/l26_posix_sys26.o', 'assets/bin/l26_src_ctype.o',
+    'assets/bin/l26_src_misc15.o', 'assets/bin/l26_src_misc26.o',
+    'assets/bin/l26_src_morecore.o', 'assets/bin/l26_src_stdlib.o',
+    'assets/bin/l26_src_string.o', 'assets/bin/rt64.o', 'assets/bin/rtfp.o',
+];
+// cc ドライバが呼ぶ 3 段 (/bin)。cc19 はリンカの経路を "/bin/ld16" と
+// 埋め込んでいるので名前は世代に関わらず固定である
+const TOOLBIN17 = [
+    { name: 'bin/pp16', asset: 'assets/bin/pp16cmd' },
+    { name: 'bin/cc15p', asset: 'assets/bin/cc15pcmd' },
+    { name: 'bin/ld16', asset: 'assets/bin/ld16cmd' },
+    ...LIBC18.map((h) => ({ name: `include/${h}`, asset: `files/stage016/libc18/include/${h}` })),
+    { name: 'include/sys/stat.h', asset: 'files/stage016/libc18/include/sys/stat.h' },
+    { name: 'include/sys/time.h', asset: 'files/stage016/libc18/include/sys/time.h' },
+];
+// tests/stage017 の mkroot: /bin の 3 段，/include，/lib の 1 揃い，ツール
+const ROOT17 = [
+    ...TOOLBIN17,
+    ...L18_LIB.map((a) => ({ name: `lib/${a.replace(/^.*\//, '')}`, asset: a })),
+    { name: 'cc', asset: 'assets/bin/cc17' },
+    { name: 'cc18', asset: 'assets/bin/cc18' },
+    { name: 'ar', asset: 'assets/bin/ar17' },
+    { name: 'mk', asset: 'assets/bin/mk17' },
+    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+];
+// libc18 のソース (OS の上で libc 自身を書庫にする節が使う)
+const LIBC18_SRC = [
+    ...['string', 'ctype', 'stdlib', 'morecore', 'misc15'].map((f) =>
+        ({ name: `src/${f}.c`, asset: `files/stage016/libc18/src/${f}.c` })),
+    ...['sys', 'morecore', 'stdio', 'assert', 'dir'].map((f) =>
+        ({ name: `posix/${f}.c`, asset: `files/stage016/libc18/posix/${f}.c` })),
+];
+// 最前線 (cc15as の遠距離呼出し + ld18 + libc26) で OS の実行形式を組む。
+// tests/stage017 第 12 部・tools/build/stage018.sh と同じ手順
+const frontlineBuild = (name, asset) => [
+    {
+        name: 'pp16', bin: 'assets/bin/pp16.bin', src: 'bundle',
+        members: [
+            ...LIBC26.map((h) => ({ name: h, asset: `files/stage017/libc26/include/${h}` })),
+            { name: 'sys/time.h', asset: 'files/stage017/libc26/include/sys/time.h' },
+            { name: 'sys/times.h', asset: 'files/stage017/libc26/include/sys/times.h' },
+            { name: 'sys/stat.h', asset: 'files/stage017/libc26/include/sys/stat.h' },
+            { name: 'sys/types.h', asset: 'files/stage017/libc26/include/sys/types.h' },
+            { name, asset },
+        ],
+    },
+    { name: 'cc15as', bin: 'assets/bin/cc15as.bin', src: 'prev', term: null,
+        prefix: '#pragma stone far_call\n' },
+    { name: 'ld18', bin: 'assets/bin/ld18.bin', kind: 'ld18', lib: L26_LIB },
+];
+const seq = (c, n) => Array.from({ length: n }, (_, i) => `${c}${i + 1}`).join(' ');
+const ARGS_C = '#include <stdio.h>\nint main(int argc, char **argv) {\n'
+    + '  printf("argc %d last %s\\n", argc, argv[argc - 1]);\n  return 0;\n}\n';
+// GCC 4.7.4 の木の最長 (92 バイト) と深さ 12 の経路 (tests/stage017 第 5 部)
+const G92 = 'g'.repeat(92);
+const G92B = 'h'.repeat(92);
+const DEEP = 'aaaaaaaaaa/bbbbbbbbbb/cccccccccc/dddddddddd/eeeeeeeeee/ffffffffff/'
+    + 'gggggggggg/hhhhhhhhhh/iiiiiiiiii/jjjjjjjjjj/kkkkkkkkkk/target.txt';
+const HELLO_S = '    .text\n    .globl main\nmain:\n    la a0, msg\n    call puts\n'
+    + '    li a0, 0\n    ret\n\n    .section .rodata.str1.1,"aMS",@progbits,1\nmsg:\n'
+    + '    .asciz "hello"\n';
 
 export const TERMINALS = {
     stage012: {
@@ -444,5 +541,288 @@ export const TERMINALS = {
                 samples: [{ cmd: 'memprobe', note: 'got 13 — UBRKMAX - UBASE = 14 MB, less the image and stack' }],
             },
         ],
+    },
+    // ---- Stage 17: stone の OS の上のツール群 ----
+    // 各シナリオは tests/stage017/test.sh の節と同じ根・同じ台本である。
+    // sh2 は標準入力を EOF まで読んでから実行するので，対話ではなく
+    // **台本 (go.sh) を編集して `sh2 go.sh` で起動する** (mode: 'script')。
+    // 世代ごとに sfs の形式と配置が違うので，fs / sfsOffset / ramSize は
+    // シナリオが持つ (kernel23: sfs2 @64 MiB / kernel24: sfs3 @64 MiB /
+    // kernel25〜28: sfs4 @512 MiB・RAM 1 GiB / kernel29: sfs4 @1.5 GiB・RAM 2 GiB)
+    stage017: {
+        mode: 'script',
+        bootLine: 'sh2 go.sh\n',
+        note: 'Each scenario boots a root filesystem assembled from real chain artifacts and runs '
+            + 'the script on the left with `sh2 go.sh` — the same way tests/stage017 drives QEMU. '
+            + 'Edit the script freely. The guided tour on the right holds the scripts of the '
+            + 'test sections; the expected output is in tests/stage017/expected.',
+        scenarios: [
+            {
+                id: 'cc',
+                label: 'kernel23 · cc',
+                kernel: 'assets/bin/kernel23.bin',
+                fs: 2, imgSize: 16 << 20, maxEntries: 256, ramSize: 512 << 20,
+                blurb: '`cc` is a driver that runs pp16 → cc15p → ld16 as commands on the OS '
+                    + '(the three live in `/bin`, the libc objects in `/lib`). `selfhost.c` goes '
+                    + 'through structs, recursion, qsort, sprintf and malloc — every one of them '
+                    + 'resolved from `/lib`. kernel23 raised the argv limit from 8 to 64 words and '
+                    + 'fails with E2BIG instead of silently dropping the rest.',
+                files: [
+                    ...ROOT17,
+                    { name: 'hello.c', asset: 'files/tests/stage017/user/hello.c' },
+                    { name: 'selfhost.c', asset: 'files/tests/stage017/user/selfhost.c' },
+                    { name: 'args.c', text: ARGS_C },
+                ],
+                samples: [
+                    { cmd: 'basic', note: 'compile and run hello.c and selfhost.c (tests/stage017/expected/basic.txt)',
+                        script: 'cc -o hello hello.c\necho "hello-build $?"\nhello\necho "hello-run $?"\n'
+                            + 'cc -o selfhost selfhost.c\necho "selfhost-build $?"\nselfhost\necho "selfhost-run $?"\n' },
+                    { cmd: 'args', note: '32 words arrive intact; 96 words fail with E2BIG instead of being truncated',
+                        script: 'cc18 -o args args.c\necho "build $?"\n'
+                            + `args ${seq('a', 31)}\necho "many $?"\n`
+                            + `args ${seq('b', 95)}\necho "toomany $?"\n` },
+                ],
+            },
+            {
+                id: 'ar',
+                label: 'kernel23 · ar',
+                kernel: 'assets/bin/kernel23.bin',
+                fs: 2, imgSize: 16 << 20, maxEntries: 256, ramSize: 512 << 20,
+                blurb: 'Separate compilation on the OS: `cc18 -c` makes objects, `ar rcs` packs '
+                    + 'them into an archive (plain ar format, no symbol index — host `ar t` lists '
+                    + 'it), and the final link pulls `addx` / `catx` from the archive and `printf` '
+                    + 'from `/lib`. `-I inc` finds the headers, `-DVERSION=7` comes from the command line.',
+                files: [
+                    ...ROOT17,
+                    { name: 'multi.c', asset: 'files/tests/stage017/user/multi.c' },
+                    { name: 'mathx.c', asset: 'files/tests/stage017/user/mathx.c' },
+                    { name: 'strx.c', asset: 'files/tests/stage017/user/strx.c' },
+                    { name: 'inc/mathx.h', asset: 'files/tests/stage017/user/inc/mathx.h' },
+                    { name: 'inc/strx.h', asset: 'files/tests/stage017/user/inc/strx.h' },
+                ],
+                samples: [
+                    { cmd: 'multi', note: 'two units → libx.a → link → run (tests/stage017/expected/multi.txt)',
+                        script: 'cc18 -c -I inc mathx.c -o mathx.o\necho "compile-mathx $?"\n'
+                            + 'cc18 -c -I inc strx.c -o strx.o\necho "compile-strx $?"\n'
+                            + 'ar rcs libx.a mathx.o strx.o\necho "ar-rcs $?"\nar t libx.a\n'
+                            + 'cc18 -I inc -DVERSION=7 -o multi multi.c libx.a\necho "link $?"\nmulti\necho "run $?"\n' },
+                ],
+            },
+            {
+                id: 'mk',
+                label: 'kernel23 · mk',
+                kernel: 'assets/bin/kernel23.bin',
+                fs: 2, imgSize: 32 << 20, maxEntries: 512, ramSize: 512 << 20,
+                blurb: 'The OS builds **its own libc** from a Makefile: eight sources become '
+                    + 'objects through one pattern rule, `ar` packs `libc.a`, and `uselibc` links '
+                    + 'against the archive alone — `/lib` holds only rt64 / rtfp here, so a '
+                    + 'successful link proves the symbols came from the archive. `mk19` adds '
+                    + 'functions (`patsubst`, `filter`, `foreach`, `call`, …); `fn.mk` derives the '
+                    + 'object list instead of spelling it out.',
+                files: [
+                    ...TOOLBIN17,
+                    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'lib/rt64.o', asset: 'assets/bin/rt64.o' },
+                    { name: 'lib/rtfp.o', asset: 'assets/bin/rtfp.o' },
+                    ...LIBC18_SRC,
+                    { name: 'cc18', asset: 'assets/bin/cc18' },
+                    { name: 'ar', asset: 'assets/bin/ar17' },
+                    { name: 'mk', asset: 'assets/bin/mk17' },
+                    { name: 'mk19', asset: 'assets/bin/mk19' },
+                    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'uselibc.c', asset: 'files/tests/stage017/user/uselibc.c' },
+                    { name: 'Makefile', asset: 'files/tests/stage017/mk/libc.mk' },
+                    { name: 'fn.mk', asset: 'files/tests/stage017/mk/fn.mk' },
+                ],
+                samples: [
+                    { cmd: 'mk', note: 'mk17 runs libc.mk: 8 compiles, ar, link, run (expected/mk.txt)',
+                        script: 'mk\necho "mk $?"\nuselibc\necho "run $?"\n' },
+                    { cmd: 'mk19 -f fn.mk', note: 'mk19: functions derive the object list (expected/fn.txt)',
+                        script: 'mk19 -f fn.mk show\nmk19 -f fn.mk\necho "mk $?"\nuselibc\necho "run $?"\n' },
+                ],
+            },
+            {
+                id: 'mtime',
+                label: 'kernel24 · sfs3 time',
+                kernel: 'assets/bin/kernel24.bin',
+                fs: 3, imgSize: 4 << 20, maxEntries: 128, ramSize: 512 << 20,
+                blurb: 'sfs3 entries carry a modification time in nanoseconds; the kernel reads the '
+                    + 'goldfish RTC (here: your browser clock) and stamps every write. `stamp` prints '
+                    + 'what the kernel sees — the times packed into the image are deliberately in the '
+                    + 'past (2017 / 2020 / 2017) so you can tell them from fresh ones. `mk18` turns '
+                    + 'that into incremental builds: the second run does nothing, and after '
+                    + '`echo C > b.src` only the part that depends on b.src is remade.',
+                files: [
+                    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'stamp', asset: 'assets/bin/stamp' },
+                    { name: 'mk', asset: 'assets/bin/mk18' },
+                    { name: 'a.src', text: 'A\n', mtime: 1500000000000000000n },
+                    { name: 'b.src', text: 'B\n', mtime: 1500000000000000000n },
+                    { name: 'Makefile', text: 'all: prog\n\n%.cp: %.src\n\tcat $< > $@\n\nprog: a.cp b.cp\n\tcat $^ > $@\n',
+                        mtime: 1500000000000000000n },
+                    { name: 'a.txt', text: 'hello\n', mtime: 1700000000123456789n },
+                    { name: 'd/b.txt', text: 'worldly\n', mtime: 1600000123000000001n },
+                    { name: 'd', dir: true, mtime: 1400000000500000000n },
+                ],
+                samples: [
+                    { cmd: 'stamp', note: 'type, length, mtime (high word, low word) — nanoseconds straight from the table',
+                        script: 'stamp a.txt d/b.txt d\necho "stamp $?"\necho made > new.txt\nstamp new.txt\nstamp nosuch\necho "missing $?"\n' },
+                    { cmd: 'mk (incremental)', note: 'tests/stage017/expected/inc.txt: nothing on the 2nd run, b-side only on the 3rd, everything with -B',
+                        script: 'echo "--1--"\nmk\necho "--2--"\nmk\necho "--3--"\necho C > b.src\nmk\necho "--4--"\nmk -B\necho "--end--"\nstamp a.src b.src a.cp b.cp prog\n' },
+                ],
+            },
+            {
+                id: 'names',
+                label: 'kernel25 · sfs4 names',
+                kernel: 'assets/bin/kernel25.bin',
+                fs: 4, sfsOffset: 512 << 20, imgSize: 4 << 20, maxEntries: 128, ramSize: 1 << 30,
+                heavy: true,
+                blurb: 'GCC 4.7.4\'s tree has a 92-byte file name and paths 131 bytes long, 12 '
+                    + 'levels deep. sfs3 refuses the name (47-byte limit); sfs4 widens the entry to '
+                    + '128 bytes and kernel25 moves the image above the user area (a 512 MiB window at '
+                    + '0xa000_0000, so the emulator needs 1 GiB). The path buffer grew to 255 bytes — '
+                    + 'without that, a 92-byte name can be `cat` but not `stat`.',
+                files: [
+                    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'stamp', asset: 'assets/bin/stamp' },
+                    { name: G92, text: 'ninety-two\n', mtime: 1700000001222222222n },
+                    { name: DEEP, text: 'deep file\n', mtime: 1700000002333333333n },
+                ],
+                samples: [
+                    { cmd: 'long names', note: 'read, copy, create and stat a 92-byte name and a 131-byte path',
+                        script: `cat ${G92}\necho "cat $?"\ncp ${G92} ${G92B}\necho "cp $?"\ncat ${G92B}\n`
+                            + `stamp ${G92}\necho "name-stat $?"\nstamp ${DEEP}\necho "deep-stat $?"\n` },
+                ],
+            },
+            {
+                id: 'times',
+                label: 'kernel27 · times',
+                kernel: 'assets/bin/kernel27.bin',
+                fs: 4, sfsOffset: 512 << 20, imgSize: 4 << 20, maxEntries: 128, ramSize: 1 << 30,
+                heavy: true,
+                blurb: '`times` (153) with per-process accounting — the kernel reads the RTC on '
+                    + 'every trap entry and exit and charges the difference to the current depth, so '
+                    + 'a spawned child\'s CPU time lands in the parent\'s `cutime`. `tmx` burns 3 '
+                    + 'ticks in a child and checks that; it also checks `sysconf(_SC_CLK_TCK)`, '
+                    + '`pathconf`, and that a 255-byte path passes `stat` (kernel26 lost one byte).',
+                files: [
+                    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'tmx', asset: 'assets/bin/tmx' },
+                ],
+                samples: [
+                    { cmd: 'tmx', note: 'expect: clk 100 / spawn 0 / cut y / path-max 256 256 / p255 0 0 / p256 -1 7. '
+                        + 'own-small may read n here: the emulator is about ten times slower than QEMU, so the spawn path alone can exceed the child\'s 3 ticks',
+                        script: 'tmx\necho "rc $?"\n' },
+                ],
+            },
+            {
+                id: 'libc26',
+                label: 'kernel28 · libc26 + ld18',
+                kernel: 'assets/bin/kernel28.bin',
+                fs: 4, sfsOffset: 512 << 20, imgSize: 4 << 20, maxEntries: 128, ramSize: 1 << 30,
+                heavy: true,
+                blurb: 'The frontline toolchain for GCC\'s cc1: `l26x.c` is compiled here by '
+                    + 'pp16 → **cc15as** (with `#pragma stone far_call`, the long-call code model) '
+                    + 'and linked by **ld18**, which exchanges input and output through RAM and '
+                    + 'takes libc26 as library parts (only what resolves an undefined name is '
+                    + 'linked). The program exercises strtok, strcasecmp, frexp, fstat on an '
+                    + 'unlinked file (kernel28\'s fstat2), O_EXCL, a stable qsort, `%.2f` rounding '
+                    + 'and freopen.',
+                files: [
+                    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'l26x', build: frontlineBuild('l26x.c', 'files/tests/stage017/user/l26x.c') },
+                ],
+                samples: [
+                    { cmd: 'l26x', note: 'expected lines are in tests/stage017/test.sh (section 12); rc 0 and freopen y at the end',
+                        script: 'l26x\necho "rc $?"\ncat y.txt\n' },
+                ],
+            },
+            {
+                id: 'heap29',
+                label: 'kernel29 · 2 GiB',
+                kernel: 'assets/bin/kernel29.bin',
+                fs: 4, sfsOffset: 1536 << 20, imgSize: 4 << 20, maxEntries: 128, ramSize: 2147483648,
+                heavy: true,
+                blurb: 'GCC\'s cc1 ran out of heap on `gcc/insn-recog.c -O2` under kernel28 (256 MiB '
+                    + 'of user space, 142 MB of it the image). kernel29 maps RAM as 2 GiB — the '
+                    + 'full 32-bit range above 0x8000_0000 — and gives user space 1 GiB; the sfs '
+                    + 'window moves to 0xe000_0000. `bigheap` takes 48 MiB sixteen times and writes '
+                    + 'both ends of each block: expect **heap 768 0 1**. The emulator reserves 2 GiB '
+                    + 'lazily; this scenario really touches about 800 MB of your browser\'s memory.',
+                files: [
+                    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'bigheap', build: frontlineBuild('bigheap.c', 'files/tests/stage017/user/bigheap.c') },
+                ],
+                samples: [
+                    { cmd: 'bigheap', note: 'heap <MiB taken> <mismatches> <crossed 0x9600_0000> — 768 0 1 on kernel29',
+                        script: 'bigheap\necho "rc $?"\n' },
+                ],
+            },
+            {
+                id: 'heap28',
+                label: 'kernel28 · 256 MiB',
+                kernel: 'assets/bin/kernel28.bin',
+                fs: 4, sfsOffset: 512 << 20, imgSize: 4 << 20, maxEntries: 128, ramSize: 1 << 30,
+                heavy: true,
+                blurb: 'The identical binary on the previous generation: malloc returns NULL part '
+                    + 'way through and the top never crosses 0x9600_0000. One number alone proves '
+                    + 'nothing, which is why tests/stage017 always runs both.',
+                files: [
+                    { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                    { name: 'bigheap', build: frontlineBuild('bigheap.c', 'files/tests/stage017/user/bigheap.c') },
+                ],
+                samples: [
+                    { cmd: 'bigheap', note: 'stops inside 256 MiB: heap <n> 0 0', script: 'bigheap\necho "rc $?"\n' },
+                ],
+            },
+        ],
+    },
+    // ---- Stage 18: nas1 (psABI のアセンブラ) ----
+    // tests/stage018 と同じく kernel29 の上で走らせる (nas1 は libc26 と組んで
+    // あり，fstat2 (kernel28) を要る。tools/nas18.sh run と同じ配置)
+    stage018: {
+        mode: 'script',
+        bootLine: 'sh2 go.sh\n',
+        note: '`nas1` is the first piece of the psABI toolchain for Linux: a GNU-as-compatible '
+            + 'assembler for RV32IMA + Zicsr + Zifencei that writes ELF32 relocatable objects. It '
+            + 'is written in C89, compiled by cc15as and linked by ld18 against libc26, and runs '
+            + 'as a command on kernel29. The `.o` files it produces appear below after the session; '
+            + 'tests/stage018 checks them against the ISA text with objdump / readelf, and against '
+            + 'a host-built nas1 byte for byte.',
+        scenarios: [{
+            id: 'nas1',
+            label: 'kernel29 · nas1',
+            kernel: 'assets/bin/kernel29.bin',
+            fs: 4, sfsOffset: 1536 << 20, imgSize: 64 << 20, maxEntries: 1024, ramSize: 2147483648,
+            heavy: true,
+            blurb: '`insn.s` lists every instruction and pseudo-instruction with the encoding '
+                + 'expected from the ISA text in a comment; `elf.s` exercises sections, data, '
+                + 'relocations (`%hi` / `%lo` / `%pcrel_hi` / `call` / branches / `ADD64` − '
+                + '`SUB64` pairs) and symbol binding — its expected section table is '
+                + 'tests/stage018/nas1/elf.expect. `far.s` branches out of range and must be '
+                + 'refused rather than silently truncated.',
+            files: [
+                { name: 'bin/sh2', asset: 'assets/bin/sh2.bin' },
+                { name: 'sh2', asset: 'assets/bin/sh2.bin' },
+                { name: 'nas1', asset: 'assets/bin/nas1' },
+                { name: 'insn.s', asset: 'files/tests/stage018/nas1/insn.s' },
+                { name: 'elf.s', asset: 'files/tests/stage018/nas1/elf.s' },
+                { name: 'far.s', text: ' beq a0, a1, .+4096\n' },
+                { name: 'hello.s', text: HELLO_S },
+            ],
+            samples: [
+                { cmd: 'assemble the tests', note: 'insn.o and elf.o; far.s must fail (expect rc 0, 0, then nonzero)',
+                    script: 'nas1 -o insn.o insn.s\necho "insn $?"\nnas1 -o elf.o elf.s\necho "elf $?"\n'
+                        + 'nas1 -o far.o far.s\necho "far $?"\n' },
+                { cmd: 'hello.s', note: 'a small unit of your own — edit hello.s via the script (here-doc) and assemble it',
+                    script: 'nas1 -o hello.o hello.s\necho "hello $?"\n' },
+            ],
+        }],
     },
 };

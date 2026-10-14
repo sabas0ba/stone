@@ -11,6 +11,15 @@
 // docs/stage012-os.md 5 章)。PMP は CSR としては受けるが強制はしない
 // (全許可相当。デモではメモリ保護の失敗を再現する必要がない)。
 //
+// Stage 17 以降のカーネルのために 2 つを足してある:
+//   - goldfish RTC (0x0010_1000): TIME_LOW / TIME_HIGH。epoch からのナノ秒
+//     (kernel24 以降が sfs3 / sfs4 の更新時刻と times (153) に使う。
+//     docs/stage017-cc.md 11.2)。下位語を読んだ瞬間の上位語を固定して
+//     TIME_HIGH に見せる (QEMU の goldfish-rtc と同じ)
+//   - RAM の遅延確保: 2 GiB (kernel29) の RAM は WebAssembly.Memory で
+//     予約し，触れたページだけを確保する。ブラウザでも node でも
+//     同じ 1 本の Uint8Array として扱う (docs/stage017-gcc.md 8.15)
+//
 // ビルド経路には一切使用しない (検証の基準は QEMU + コンテナのまま。
 // docs/plan.md 2.3)。本実装の正しさは web/test-emu.mjs が「チェーンの
 // 実成果物を実行した出力が QEMU での出力とビット一致すること」で確かめる。
@@ -22,6 +31,23 @@ export const RAM_SIZE = 128 << 20;          // QEMU virt の既定と同じ 128 
 
 const UART_BASE = 0x10000000;
 const FINISHER = 0x00100000;
+const RTC_LOW = 0x00101000;             // goldfish-rtc TIME_LOW
+const RTC_HIGH = 0x00101004;            // goldfish-rtc TIME_HIGH
+
+// RAM を確保する。大きな RAM (1〜2 GiB) は WebAssembly.Memory で予約する ——
+// 触れたページだけが実際に確保されるので，疎に使うカーネル (kernel29 は
+// sfs の窓を 0xe000_0000 に置く) の分を前もって払わずに済む。
+// WebAssembly が無い環境や上限を超えたときは通常の ArrayBuffer に落とす
+function allocRam(size) {
+    const PAGE = 65536;
+    if (typeof WebAssembly !== 'undefined' && size % PAGE === 0) {
+        try {
+            const m = new WebAssembly.Memory({ initial: size / PAGE });
+            return new Uint8Array(m.buffer);
+        } catch { /* fall through */ }
+    }
+    return new Uint8Array(size);
+}
 
 const CSR_MSTATUS = 0x300;
 const CSR_MTVEC = 0x305;
@@ -33,11 +59,13 @@ const CSR_MTVAL = 0x343;
 // feed() で入力を足して run() を呼び直すと続きから走る (対話実行)。
 export class Machine {
     // opts.ramSize: RAM の大きさ (既定 128 MiB)。kernel19 の配置は
-    // 0xa000_0000 まで届くので 512 MiB を要る (docs/stage016-os.md 8.3)
+    // 0xa000_0000 まで届くので 512 MiB を要る (docs/stage016-os.md 8.3)。
+    // kernel25〜28 は 1 GiB，kernel29 は 2 GiB (docs/stage017-gcc.md 7.2 / 8.15)
     constructor(program, opts = {}) {
         this.ramSize = opts.ramSize || RAM_SIZE;
-        this.mem = new Uint8Array(this.ramSize);  // 新規確保 = ゼロ初期化 (QEMU と同じ)
+        this.mem = allocRam(this.ramSize);        // 新規確保 = ゼロ初期化 (QEMU と同じ)
         this.mem.set(program, 0);
+        this.rtcHigh = 0;                         // TIME_LOW を読んだ瞬間の上位語
         this.dv = new DataView(this.mem.buffer);
         this.x = new Int32Array(32);
         this.pc = 0;                            // RAM_BASE からのオフセット
@@ -152,6 +180,14 @@ export class Machine {
                 } else if (addr === UART_BASE) {
                     v = this.inHead < input.length ? input[this.inHead++] : 0;
                     this.emptyPolls = 0;
+                } else if (addr === RTC_LOW) {
+                    // epoch からのナノ秒。ミリ秒の時計しか無いので下 6 桁は 0 だが，
+                    // カーネルが要るのは「読むたびに進む単調な時刻」である
+                    const ns = BigInt(Date.now()) * 1000000n;
+                    this.rtcHigh = Number(ns >> 32n) | 0;
+                    v = Number(ns & 0xffffffffn) | 0;
+                } else if (addr === RTC_HIGH) {
+                    v = this.rtcHigh;
                 } else if (addr === UART_BASE + 5) {
                     // LSR は getc (bit0 待ち) と putc (bit5 待ち) の両方が読む。
                     // 送信は常に可能なので，入力が無いまま LSR のポーリングが

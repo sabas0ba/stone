@@ -3,8 +3,11 @@
 // チェーンの実成果物 (tmp/build/。QEMU + コンテナで生成したもの) を
 // エミュレータで実行し，出力が QEMU での出力とビット一致することを確かめる。
 // フィルタ実行 (Stage 1〜11, 14, 15) に加えて，OS (kernel12/13 + sfs,
-// kernel17/18/19 + sfs2) の起動とゲスト内ビルドまで tests/stage012・013・
-// 015・016 と同じ素材・期待値で検査する。
+// kernel17/18/19 + sfs2, kernel23〜29 + sfs2/3/4) の起動とゲスト内ビルドまで
+// tests/stage012・013・015・016・017・018 と同じ素材・期待値で検査する。
+// Stage 17 以降は sfs3 / sfs4 の JS 版がホストのツールとバイト一致すること，
+// ld18 の JS 駆動がチェーンの nas1 を再現すること，goldfish RTC を読む
+// カーネルの時刻と差分ビルドまで含む。
 // 事前に sh tools/build.sh all を済ませておくこと。
 //
 // 使用法: node web/test-emu.mjs
@@ -12,6 +15,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import { Machine, runFilter, withTerminator, concatBytes, buildBundle } from './rv32.js';
 import { packSfs, unpackSfs, SFS_OFFSET } from './sfs.js';
 import { packSfs2, unpackSfs2 } from './sfs2.js';
+import { packSfs3, unpackSfs3 } from './sfs3.js';
+import { packSfs4, unpackSfs4 } from './sfs4.js';
+import { ld18Input, runLd18 } from './ld18.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -513,6 +519,397 @@ function guestElf(gen, unit, extraHeaders = []) {
         `os16: kernel18 (128 MB) の上限は 14 MiB 未満 (got ${old.mib} MiB, verify ok)`);
     report(wide.exitCode === 0 && wide.ok && wide.mib >= 250,
         `os16: kernel19 (512 MB) は 250 MiB 以上を取って書き戻せる (got ${wide.mib} MiB)`);
+}
+
+// ===========================================================================
+// Stage 17 / 18: stone の OS の上のツール群と nas1。手順・素材・期待値は
+// tests/stage017/test.sh・tests/stage018/test.sh と同一 (web/pipelines.js の
+// ターミナルが使うものと同じ根・同じ台本)
+
+// --- sfs3 / sfs4: JS 版がホスト側のツールとバイト一致すること --------------
+{
+    const tree = [
+        { name: 'top.txt', data: text('hello\n'), mtime: 1700000000123456789n },
+        { name: 'src/one.c', data: text('aaa\n'), mtime: 1600000123000000001n },
+        { name: 'src/a/two.c', data: text('bbb\n'), mtime: 1500000000999999999n },
+        { name: 'src/a/b/three.c', data: text('ccc\n'), mtime: 1n },
+        { name: 'inc/one.c', data: text('ddd\n'), mtime: 0n },
+        { name: 'inc/empty.h', data: new Uint8Array(0), mtime: 1400000000500000000n },
+        { name: 'empty', dir: true, mtime: 1300000000000000000n },
+        { name: 'src', dir: true, mtime: 1200000000000000000n },
+        { name: 'src/a', dir: true, mtime: 1100000000000000000n },
+        { name: 'src/a/b', dir: true, mtime: 1000000000000000000n },
+        { name: 'inc', dir: true, mtime: 900000000000000000n },
+    ];
+    const stampOf = (ns) => `@${ns / 1000000000n}.${String(ns % 1000000000n).padStart(9, '0')}`;
+    for (const [tag, pack, unpack, tool, extra] of [
+        ['sfs3', packSfs3, unpackSfs3, 'tools/sfs3.sh', []],
+        ['sfs4', packSfs4, unpackSfs4, 'tools/sfs4.sh',
+            [{ name: `src/${'g'.repeat(92)}`, data: text('long\n'), mtime: 1333333333444444444n }]],
+    ]) {
+        const dir = mkdtempSync(`${tmpdir()}/stone-${tag}-`);
+        try {
+            const list = [...tree, ...extra];
+            for (const f of list) {
+                const full = `${dir}/root/${f.name}`;
+                if (f.dir) { mkdirSync(full, { recursive: true }); continue; }
+                mkdirSync(full.slice(0, full.lastIndexOf('/')), { recursive: true });
+                writeFileSync(full, f.data);
+            }
+            // 時刻はディレクトリを深い順に，中身を作った後で付ける
+            for (const f of list.filter((x) => !x.dir)) {
+                execFileSync('touch', ['-d', stampOf(f.mtime), `${dir}/root/${f.name}`]);
+            }
+            for (const f of list.filter((x) => x.dir).sort((a, b) => b.name.length - a.name.length)) {
+                execFileSync('touch', ['-d', stampOf(f.mtime), `${dir}/root/${f.name}`]);
+            }
+            execFileSync('touch', ['-d', stampOf(800000000000000000n), `${dir}/root`]);
+            execFileSync('sh', [tool, 'pack', `${dir}/root`, `${dir}/ref.img`, '1048576', '64'],
+                { stdio: 'pipe' });
+            const mine = pack(list, 1 << 20, 64, { rootMtime: 800000000000000000n });
+            report(eq(mine, read(`${dir}/ref.img`)),
+                `${tag}: JS の pack がホスト側 ${tool} のイメージとバイト一致 (時刻を含む)`);
+            const back = unpack(mine);
+            const got = Object.fromEntries(back.map((f) => [f.path, f]));
+            report(back.length === list.length
+                && got['src/one.c'].mtime === 1600000123000000001n
+                && got['src/a/b'].dir === true && got['src/a/b'].mtime === 1000000000000000000n
+                && dec(got['inc/one.c'].data) === 'ddd\n',
+            `${tag}: unpack がツリーと時刻をそのまま戻す`);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }
+}
+
+// sfs2 / sfs3 / sfs4 のツリーでカーネルを起動する。配置と RAM は tests/stage017 の
+// runroot* と同じ (kernel23/24: @64 MiB・512 MiB，kernel25〜28: @512 MiB・1 GiB，
+// kernel29: @1.5 GiB・2 GiB)
+const PACK = { 2: packSfs2, 3: packSfs3, 4: packSfs4 };
+const UNPACK = { 2: unpackSfs2, 3: unpackSfs3, 4: unpackSfs4 };
+const runOSn = (kernel, fs, files, opts = {}) => {
+    const imgSize = opts.imgSize || (4 << 20);
+    const off = opts.sfsOffset || SFS_OFFSET;
+    const m = new Machine(read(kernel), { ramSize: opts.ramSize || (512 << 20) });
+    m.mem.set(PACK[fs](files, imgSize, opts.maxEntries || 128), off);
+    const chunks = [];
+    for (;;) {
+        const r = m.run(4_000_000_000);
+        chunks.push(r.output);
+        if (r.status === 'exit' || r.status !== 'budget') {
+            const files2 = () => UNPACK[fs](m.mem.subarray(off, off + imgSize));
+            return { exitCode: r.status === 'exit' ? m.exitCode : -1, status: r.status,
+                output: concatBytes(chunks), m, files: files2 };
+        }
+    }
+};
+const sh2 = (script) => [
+    { name: 'bin/sh2', data: read('tmp/build/sh2.bin') },
+    { name: 'sh2', data: read('tmp/build/sh2.bin') },
+    { name: 'go.sh', data: text(script) },
+    boot('sh2 go.sh\n'),
+];
+const expect17 = (name) => read(`tests/stage017/expected/${name}.txt`);
+const u17 = (p) => read(`tests/stage017/user/${p}`);
+const HDR18 = ['assert.h', 'ctype.h', 'dirent.h', 'errno.h', 'fcntl.h', 'inttypes.h',
+    'limits.h', 'math.h', 'setjmp.h', 'stdarg.h', 'stddef.h', 'stdio.h', 'stdlib.h',
+    'string.h', 'time.h', 'unistd.h'];
+const L18 = ['l18_src_string', 'l18_src_stdlib', 'l18_src_misc15', 'l18_posix_sys',
+    'l18_posix_morecore', 'l18_posix_stdio', 'l18_posix_assert', 'l18_posix_dir',
+    'rt64', 'rtfp'];
+// tests/stage017 の mkroot と同じ根 (/bin の 3 段・/include・/lib の 1 揃い・ツール)
+const toolbin17 = () => [
+    { name: 'bin/pp16', data: read('tmp/build/pp16cmd') },
+    { name: 'bin/cc15p', data: read('tmp/build/cc15pcmd') },
+    { name: 'bin/ld16', data: read('tmp/build/ld16cmd') },
+    ...HDR18.map((h) => ({ name: `include/${h}`, data: read(`stage016/libc18/include/${h}`) })),
+    { name: 'include/sys/stat.h', data: read('stage016/libc18/include/sys/stat.h') },
+    { name: 'include/sys/time.h', data: read('stage016/libc18/include/sys/time.h') },
+];
+const root17 = () => [
+    ...toolbin17(),
+    ...L18.map((o) => ({ name: `lib/${o}.o`, data: read(`tmp/build/${o}.o`) })),
+    { name: 'cc', data: read('tmp/build/cc17') },
+    { name: 'cc18', data: read('tmp/build/cc18') },
+    { name: 'ar', data: read('tmp/build/ar17') },
+    { name: 'mk', data: read('tmp/build/mk17') },
+];
+const libc18src = () => [
+    ...['string', 'ctype', 'stdlib', 'morecore', 'misc15'].map((f) =>
+        ({ name: `src/${f}.c`, data: read(`stage016/libc18/src/${f}.c`) })),
+    ...['sys', 'morecore', 'stdio', 'assert', 'dir'].map((f) =>
+        ({ name: `posix/${f}.c`, data: read(`stage016/libc18/posix/${f}.c`) })),
+];
+
+// --- OS: cc が hello と selfhost を組み，走らせる (第 1 部) ------------------
+{
+    const r = runOSn('tmp/build/kernel23.bin', 2, [
+        ...root17(),
+        { name: 'hello.c', data: u17('hello.c') },
+        { name: 'selfhost.c', data: u17('selfhost.c') },
+        ...sh2('cc -o hello hello.c\necho "hello-build $?"\nhello\necho "hello-run $?"\n'
+            + 'cc -o selfhost selfhost.c\necho "selfhost-build $?"\nselfhost\necho "selfhost-run $?"\n'),
+    ], { imgSize: 16 << 20, maxEntries: 256 });
+    report(r.exitCode === 0 && eq(r.output, expect17('basic')),
+        'os17: kernel23 の上で cc (pp16 → cc15p → ld16) が hello と selfhost を組み，走る (basic)');
+}
+
+// --- OS: 複数の翻訳単位と書庫 (第 2 部) -------------------------------------
+{
+    const r = runOSn('tmp/build/kernel23.bin', 2, [
+        ...root17(),
+        { name: 'multi.c', data: u17('multi.c') },
+        { name: 'mathx.c', data: u17('mathx.c') },
+        { name: 'strx.c', data: u17('strx.c') },
+        { name: 'inc/mathx.h', data: u17('inc/mathx.h') },
+        { name: 'inc/strx.h', data: u17('inc/strx.h') },
+        ...sh2('cc18 -c -I inc mathx.c -o mathx.o\necho "compile-mathx $?"\n'
+            + 'cc18 -c -I inc strx.c -o strx.o\necho "compile-strx $?"\n'
+            + 'ar rcs libx.a mathx.o strx.o\necho "ar-rcs $?"\nar t libx.a\n'
+            + 'cc18 -I inc -DVERSION=7 -o multi multi.c libx.a\necho "link $?"\nmulti\necho "run $?"\n'),
+    ], { imgSize: 16 << 20, maxEntries: 256 });
+    const made = Object.fromEntries(r.files().map((f) => [f.path, f]));
+    report(r.exitCode === 0 && eq(r.output, expect17('multi'))
+        && made['libx.a'] && dec(made['libx.a'].data.subarray(0, 8)) === '!<arch>\n',
+    'os17: cc18 と ar17 が複数の翻訳単位を書庫経由でビルドする (multi。書庫は ar の形)');
+}
+
+// --- OS: make が libc を組む (第 3 部の 1 / 第 3 部の 2) -------------------
+{
+    const kroot = (mk, makefile) => [
+        ...toolbin17(),
+        { name: 'lib/rt64.o', data: read('tmp/build/rt64.o') },
+        { name: 'lib/rtfp.o', data: read('tmp/build/rtfp.o') },
+        ...libc18src(),
+        { name: 'cc18', data: read('tmp/build/cc18') },
+        { name: 'ar', data: read('tmp/build/ar17') },
+        { name: 'mk', data: read(`tmp/build/${mk}`) },
+        { name: 'uselibc.c', data: u17('uselibc.c') },
+        { name: 'Makefile', data: read(`tests/stage017/mk/${makefile}`) },
+    ];
+    const r = runOSn('tmp/build/kernel23.bin', 2, [
+        ...kroot('mk17', 'libc.mk'),
+        ...sh2('mk\necho "mk $?"\nuselibc\necho "run $?"\n'),
+    ], { imgSize: 32 << 20, maxEntries: 512 });
+    report(r.exitCode === 0 && eq(r.output, expect17('mk')),
+        'os17: mk17 が Makefile どおりに libc を組み，繋いだものが走る (mk)');
+    const r2 = runOSn('tmp/build/kernel23.bin', 2, [
+        ...kroot('mk19', 'fn.mk'),
+        ...sh2('mk show\nmk\necho "mk $?"\nuselibc\necho "run $?"\n'),
+    ], { imgSize: 32 << 20, maxEntries: 512 });
+    report(r2.exitCode === 0 && eq(r2.output, expect17('fn')),
+        'os17: mk19 の関数で導いた並びから libc が組める (fn)');
+}
+
+// --- OS: sfs3 の時刻と差分ビルド (第 4 部。kernel24 は goldfish RTC を読む) ---
+{
+    const hilo = (ns) => `${ns >> 32n} ${ns & 0xffffffffn}`;
+    const t = { a: 1700000000123456789n, b: 1600000123000000001n, z: 1500000000999999999n,
+        d: 1400000000500000000n };
+    const before = Date.now();
+    const r = runOSn('tmp/build/kernel24.bin', 3, [
+        { name: 'stamp', data: read('tmp/build/stamp') },
+        { name: 'a.txt', data: text('hello\n'), mtime: t.a },
+        { name: 'd/b.txt', data: text('worldly\n'), mtime: t.b },
+        { name: 'zero', data: new Uint8Array(0), mtime: t.z },
+        { name: 'd', dir: true, mtime: t.d },
+        ...sh2('stamp a.txt d/b.txt zero d\necho "stamp $?"\nstamp nosuch\necho "missing $?"\n'
+            + 'echo made > new.txt\nstamp new.txt\n'),
+    ]);
+    const after = Date.now();
+    const want = `f 6 ${hilo(t.a)} a.txt\nf 8 ${hilo(t.b)} d/b.txt\nf 0 ${hilo(t.z)} zero\n`
+        + `d 0 ${hilo(t.d)} d\nstamp 0\n? nosuch\nmissing 1\n`;
+    const out = dec(r.output);
+    report(r.exitCode === 0 && out.startsWith(want),
+        'os17: ホストが詰めた時刻を kernel24 が読み，ナノ秒まで一致する (stamp)');
+    const m = out.slice(want.length).match(/^f 5 (\d+) (\d+) new\.txt\n$/);
+    const ns = m ? (BigInt(m[1]) << 32n) | BigInt(m[2]) : -1n;
+    const sec = Number(ns / 1000000000n);
+    report(m !== null && sec >= Math.floor(before / 1000) - 2 && sec <= Math.ceil(after / 1000) + 2,
+        'os17: OS が書いたファイルに今の時刻 (goldfish RTC) が立つ');
+    const made = r.files().find((f) => f.path === 'new.txt');
+    report(made && made.mtime === ns,
+        'os17: 走った後の sfs3 イメージを JS が読み，表の時刻が stamp の出力と一致する');
+
+    // mk18 の差分ビルド (期待値は tests/stage017/expected/inc.txt)
+    const old = 1500000000000000000n;
+    const r2 = runOSn('tmp/build/kernel24.bin', 3, [
+        { name: 'mk', data: read('tmp/build/mk18') },
+        { name: 'a.src', data: text('A\n'), mtime: old },
+        { name: 'b.src', data: text('B\n'), mtime: old },
+        { name: 'Makefile', data: text('all: prog\n\n%.cp: %.src\n\tcat $< > $@\n\nprog: a.cp b.cp\n\tcat $^ > $@\n'),
+            mtime: old },
+        ...sh2('echo "--1--"\nmk\necho "--2--"\nmk\necho "--3--"\necho C > b.src\nmk\n'
+            + 'echo "--4--"\nmk -B\necho "--end--"\n'),
+    ]);
+    report(r2.exitCode === 0 && eq(r2.output, expect17('inc')),
+        'os17: mk18 は 2 度目に作らず，触った依存に繋がる分だけ作り直す (inc)');
+}
+
+// --- OS: sfs4 と kernel25 — 長い名前と広い窓 (第 5 部) ----------------------
+{
+    const G92 = 'g'.repeat(92);
+    const G92B = 'h'.repeat(92);
+    const DEEP = 'aaaaaaaaaa/bbbbbbbbbb/cccccccccc/dddddddddd/eeeeeeeeee/ffffffffff/'
+        + 'gggggggggg/hhhhhhhhhh/iiiiiiiiii/jjjjjjjjjj/kkkkkkkkkk/target.txt';
+    const hilo = (ns) => `${ns >> 32n} ${ns & 0xffffffffn}`;
+    const t1 = 1700000001222222222n, t2 = 1700000002333333333n;
+    const r = runOSn('tmp/build/kernel25.bin', 4, [
+        { name: 'stamp', data: read('tmp/build/stamp') },
+        { name: G92, data: text('ninety-two\n'), mtime: t1 },
+        { name: DEEP, data: text('deep file\n'), mtime: t2 },
+        ...sh2(`cat ${G92}\necho "cat $?"\ncp ${G92} ${G92B}\necho "cp $?"\ncat ${G92B}\n`
+            + `stamp ${G92}\necho "name-stat $?"\nstamp ${DEEP}\necho "deep-stat $?"\n`),
+    ], { sfsOffset: 512 << 20, ramSize: 1 << 30 });
+    const want = `ninety-two\ncat 0\ncp 0\nninety-two\nf 11 ${hilo(t1)} ${G92}\nname-stat 0\n`
+        + `f 10 ${hilo(t2)} ${DEEP}\ndeep-stat 0\n`;
+    const made = r.files().find((f) => f.path === G92B);
+    report(r.exitCode === 0 && dec(r.output) === want && made && dec(made.data) === 'ninety-two\n',
+        'os17: kernel25 (sfs4 @0xa000_0000, RAM 1 GiB) が 92 バイトの名前と 131 バイトの経路を扱う');
+}
+
+// --- OS: プロセスの時間と経路の上限 (第 9 部。kernel27 / libc25) -------------
+{
+    const r = runOSn('tmp/build/kernel27.bin', 4, [
+        { name: 'tmx', data: read('tmp/build/tmx') },
+        ...sh2('tmx\necho "rc $?"\n'),
+    ], { sfsOffset: 512 << 20, ramSize: 1 << 30 });
+    // own-small は「spawn の間に親が使った時間 < 子の時間 (3 tick)」である。
+    // 子は 30 ms しか燃やさないので，QEMU より 1 桁遅いこのエミュレータでは
+    // spawn の経路 (親のイメージの退避と子の読込み) だけで 3 tick を超えて
+    // n になりうる。時計の正しさは cut (子の時間が cutime へ入る) で見る
+    const want = 'clk 100\npre-cut y\nspawn 0\ncut y\nown-small ?\npath-max 256 256\n'
+        + 'path-noent -1 2\nmkdir y\np254 0 0\np255 0 0\np256 -1 7\nrc 0\n';
+    const got = dec(r.output).replace(/^own-small [yn]$/m, 'own-small ?');
+    report(r.exitCode === 0 && got === want,
+        'os17: kernel27 の times (RTC で計上) が子の時間を cutime へ入れ，255 バイトの経路が通る (tmx)');
+}
+
+// --- ld18: RAM で受け渡すリンカの JS 駆動がチェーンの nas1 を再現する -------
+const L26 = ['l26_posix_assert', 'l26_posix_dir', 'l26_posix_morecore', 'l26_posix_signal',
+    'l26_posix_stdio', 'l26_posix_sys', 'l26_posix_sys26', 'l26_src_ctype', 'l26_src_misc15',
+    'l26_src_misc26', 'l26_src_morecore', 'l26_src_stdlib', 'l26_src_string', 'rt64', 'rtfp'];
+const l26libs = () => L26.map((n) => read(`tmp/build/${n}.o`));
+{
+    const r = runLd18(read('tmp/build/ld18.bin'), ld18Input(l26libs(), [read('tmp/build/nas1.o')]));
+    report(r.status === 'exit' && r.exitCode === 0 && eq(r.output, read('tmp/build/nas1')),
+        'ld18: JS 駆動 (RAM の 0x9000_0000 / 0xa800_0000) が tools/ld18.sh と同じ nas1 を出す');
+}
+
+// 最前線 (pp16 → cc15as の遠距離呼出し → ld18 + libc26) で OS の実行形式を組む。
+// tests/stage017 第 12 部・第 13 部と同じ手順
+const HDR26 = ['alloca.h', 'assert.h', 'ctype.h', 'dirent.h', 'errno.h', 'fcntl.h',
+    'float.h', 'inttypes.h', 'limits.h', 'math.h', 'setjmp.h', 'signal.h', 'stdarg.h',
+    'stddef.h', 'stdio.h', 'stdlib.h', 'string.h', 'time.h', 'unistd.h'];
+function frontlineElf(unit) {
+    const inc = 'stage017/libc26/include';
+    const i = run('tmp/build/pp16.bin', buildBundle([
+        ...HDR26.map((h) => ({ name: h, data: read(`${inc}/${h}`) })),
+        ...['time.h', 'times.h', 'stat.h', 'types.h'].map((h) =>
+            ({ name: `sys/${h}`, data: read(`${inc}/sys/${h}`) })),
+        { name: unit.replace(/^.*\//, ''), data: read(unit) }]));
+    const o = run('tmp/build/cc15as.bin', concatBytes([text('#pragma stone far_call\n'), i.output]));
+    const r = runLd18(read('tmp/build/ld18.bin'), ld18Input(l26libs(), [o.output]));
+    if (i.exitCode || o.exitCode || r.exitCode) {
+        throw new Error(`frontlineElf ${unit}: pp ${i.exitCode} cc ${o.exitCode} ld ${r.exitCode}`);
+    }
+    return r.output;
+}
+
+// --- OS: libc26 の関数が kernel28 / kernel29 の上で動く (第 12 部・第 13 部) ---
+{
+    const l26x = frontlineElf('tests/stage017/user/l26x.c');
+    const want = 'tok [a] [b] [c]\ncmp 1 1 1\nfrexp 750 6 -62500 -2\nfstat 0 6 1 1\naccess 0 -1\n'
+        + 'asctime Sun Sep 16 01:03:52 1973\nalloca 42000 50000\nunlink 0 8 -1\n'
+        + 'excl -1 17 1 1 0 -1 0 0 1\nmisc 5 123 4096 1 3 3\nqsort 0 3 6 2 5 8 1 4 7\n'
+        + 'fmt 0.01 0.12 2.5 2\nrc 0\nfreopen y\n';
+    const files = [{ name: 'l26x', data: l26x }, ...sh2('l26x\necho "rc $?"\ncat y.txt\n')];
+    const r28 = runOSn('tmp/build/kernel28.bin', 4, files, { sfsOffset: 512 << 20, ramSize: 1 << 30 });
+    report(r28.exitCode === 0 && dec(r28.output) === want,
+        'os17: libc26 の関数が kernel28 の上で期待どおりに動く (ld18 / cc15as の遠距離呼出し, l26x)');
+    const r29 = runOSn('tmp/build/kernel29.bin', 4, files, { sfsOffset: 1536 << 20, ramSize: 2147483648 });
+    report(r29.exitCode === 0 && dec(r29.output) === want,
+        'os17: 同じ l26x が kernel29 (RAM 2 GiB，sfs @0xe000_0000) の上でも同じ結果になる');
+
+    // ユーザ領域が 1 GiB あること。48 MiB を 16 回取る。kernel28 では途中で止まる
+    const bigheap = frontlineElf('tests/stage017/user/bigheap.c');
+    const bh = [{ name: 'bigheap', data: bigheap }, ...sh2('bigheap\n')];
+    const b29 = runOSn('tmp/build/kernel29.bin', 4, bh, { sfsOffset: 1536 << 20, ramSize: 2147483648 });
+    report(b29.exitCode === 0 && dec(b29.output) === 'heap 768 0 1\n',
+        'os17: kernel29 のヒープは 768 MiB を取れ，0x9600_0000 (kernel28 の上限) を超える');
+    const b28 = runOSn('tmp/build/kernel28.bin', 4, bh, { sfsOffset: 512 << 20, ramSize: 1 << 30 });
+    const m28 = dec(b28.output).match(/^heap (\d+) 0 0\n$/);
+    report(b28.exitCode === 0 && m28 !== null && Number(m28[1]) < 768,
+        `os17: 同じプログラムは kernel28 では 256 MiB の内で止まる (heap ${m28 ? m28[1] : '?'})`);
+}
+
+// --- Stage 18: nas1 が kernel29 の上で試験の入力を組み立てる -----------------
+{
+    const r = runOSn('tmp/build/kernel29.bin', 4, [
+        { name: 'nas1', data: read('tmp/build/nas1') },
+        { name: 'insn.s', data: read('tests/stage018/nas1/insn.s') },
+        { name: 'elf.s', data: read('tests/stage018/nas1/elf.s') },
+        { name: 'far.s', data: text(' beq a0, a1, .+4096\n') },
+        ...sh2('nas1 -o insn.o insn.s\necho "insn $?"\nnas1 -o elf.o elf.s\necho "elf $?"\n'
+            + 'nas1 -o far.o far.s\necho "far $?"\n'),
+    ], { sfsOffset: 1536 << 20, ramSize: 2147483648, imgSize: 64 << 20, maxEntries: 1024 });
+    const made = Object.fromEntries(r.files().map((f) => [f.path, f]));
+    const out = dec(r.output);
+    report(r.exitCode === 0 && /^insn 0\nelf 0\n/.test(out) && /\nfar [1-9]\d*\n$/.test(out)
+        && made['insn.o'] && made['elf.o'] && !made['far.o'],
+    'os18: kernel29 の上で nas1 が insn.s / elf.s を組み立て，範囲外の分岐 (far.s) を止める');
+
+    // elf.o の節見出しが tests/stage018/nas1/elf.expect の section 行と一致する
+    // (readelf -S の要約。ELF32 の節見出しを直に読む)
+    const b = made['elf.o'] ? made['elf.o'].data : new Uint8Array(0);
+    const sections = (bytes) => {
+        const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const shoff = dv.getUint32(32, true), shnum = dv.getUint16(48, true);
+        const shstr = dv.getUint16(50, true), ent = dv.getUint16(46, true);
+        const sh = (i) => ({ name: dv.getUint32(shoff + i * ent, true),
+            type: dv.getUint32(shoff + i * ent + 4, true), flags: dv.getUint32(shoff + i * ent + 8, true),
+            off: dv.getUint32(shoff + i * ent + 16, true), size: dv.getUint32(shoff + i * ent + 20, true),
+            align: dv.getUint32(shoff + i * ent + 32, true), entsize: dv.getUint32(shoff + i * ent + 36, true) });
+        const strOff = sh(shstr).off;
+        const nm = (o) => { let e = strOff + o; while (bytes[e]) e++; return dec(bytes.subarray(strOff + o, e)); };
+        const T = { 1: 'PROGBITS', 7: 'NOTE', 8: 'NOBITS' };
+        const F = (f) => [[1, 'W'], [2, 'A'], [4, 'X'], [0x10, 'M'], [0x20, 'S']]   // readelf の順
+            .filter(([bit]) => f & bit).map(([, c]) => c).join('');
+        const out2 = [];
+        for (let i = 1; i < shnum; i++) {
+            const s = sh(i);
+            if (!(s.flags & 2)) continue;                 // 割付けられる節だけ (expect と同じ)
+            out2.push(`section ${nm(s.name)} ${T[s.type] || s.type} ${F(s.flags)} size=0x${s.size.toString(16)} align=${s.align} entsize=${s.entsize}`);
+        }
+        return out2;
+    };
+    const want = readFileSync('tests/stage018/nas1/elf.expect', 'utf8').split('\n')
+        .filter((ln) => ln.startsWith('section '));
+    let got = [];
+    try { got = b.length ? sections(b) : []; } catch { got = []; }
+    report(got.length === want.length && got.every((ln, i) => ln === want[i]),
+        'os18: elf.o の節 (名前・種類・旗・大きさ・整列) が tests/stage018/nas1/elf.expect と一致');
+
+    // ホストの cc で組んだ nas1 と同じ .o を出すこと (tests/stage018 の 5。gcc があるときだけ)
+    let hostcc = null;
+    try { execFileSync('gcc', ['--version'], { stdio: 'pipe' }); hostcc = 'gcc'; } catch { /* 無い */ }
+    if (hostcc && made['insn.o'] && made['elf.o']) {
+        const dir = mkdtempSync(`${tmpdir()}/stone-nas1-`);
+        try {
+            execFileSync(hostcc, ['-std=c89', '-pedantic', '-Wno-long-long', '-Wall', '-Wextra',
+                '-Werror', '-O1', '-o', `${dir}/nas1`, 'stage018/nas1.c'], { stdio: 'pipe' });
+            let same = true;
+            for (const u of ['insn', 'elf']) {
+                execFileSync(`${dir}/nas1`, ['-o', `${dir}/${u}.o`, `tests/stage018/nas1/${u}.s`], { stdio: 'pipe' });
+                if (!eq(read(`${dir}/${u}.o`), made[`${u}.o`].data)) same = false;
+            }
+            report(same, 'os18: stone の OS の上の nas1 とホストの cc で組んだ nas1 が同じ .o を出す');
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    } else {
+        console.log('skip os18: ホストの cc が無い (nas1 のホスト版との突き合わせ)');
+    }
 }
 
 console.log(`\npassed: ${pass}, failed: ${fail} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);

@@ -5,6 +5,9 @@
 import { Machine, runFilter, withTerminator, concatBytes, buildBundle } from './rv32.js';
 import { packSfs, unpackSfs, SFS_OFFSET } from './sfs.js';
 import { packSfs2, unpackSfs2 } from './sfs2.js';
+import { packSfs3, unpackSfs3 } from './sfs3.js';
+import { packSfs4, unpackSfs4 } from './sfs4.js';
+import { ld18Input, runLd18 } from './ld18.js';
 
 const cache = new Map();
 
@@ -47,9 +50,18 @@ async function runPipeline(steps, userBytes, progress) {
     for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
         const bin = await fetchBytes(step.bin);
-        const input = await composeInput(step, prev, userBytes);
         const t = performance.now();
-        const r = runFilter(bin, input);
+        let r;
+        if (step.kind === 'ld18') {
+            const libs = [];
+            for (const url of step.lib || []) libs.push(await fetchBytes(url));
+            const objs = [prev];
+            for (const url of step.extra || []) objs.push(await fetchBytes(url));
+            r = runLd18(bin, ld18Input(libs, objs, step.dstk));
+        } else {
+            const input = await composeInput(step, prev, userBytes);
+            r = runFilter(bin, input);
+        }
         if (progress) {
             progress(i, {
                 status: r.status, exitCode: r.exitCode, icount: r.icount,
@@ -98,30 +110,53 @@ async function handlePipeline(msg) {
 const sessions = new Map();
 const SLICE = 30_000_000;
 
-async function prepareFile(f, imgFiles) {
-    if (f.asset) {
-        imgFiles.push({ name: f.name, data: await fetchBytes(f.asset) });
+// sfs の世代ごとの pack / unpack。sfs3 以降は項目が時刻を持つ
+const FS = {
+    1: { pack: (f, size, n) => packSfs(f, size), unpack: (img) =>
+        unpackSfs(img).map((f) => ({ ...f, dir: false })) },
+    2: { pack: packSfs2, unpack: (img) =>
+        unpackSfs2(img).map((f) => ({ name: f.path, dir: f.dir, data: f.data })) },
+    3: { pack: packSfs3, unpack: (img) =>
+        unpackSfs3(img).map((f) => ({ name: f.path, dir: f.dir, data: f.data, mtime: f.mtime })) },
+    4: { pack: packSfs4, unpack: (img) =>
+        unpackSfs4(img).map((f) => ({ name: f.path, dir: f.dir, data: f.data, mtime: f.mtime })) },
+};
+
+async function prepareFile(f, imgFiles, progress) {
+    const mtime = f.mtime == null ? undefined : BigInt(f.mtime);
+    if (f.dir) {
+        imgFiles.push({ name: f.name, dir: true, mtime });
+    } else if (f.asset) {
+        imgFiles.push({ name: f.name, data: await fetchBytes(f.asset), mtime });
     } else if (f.text != null) {
-        imgFiles.push({ name: f.name, data: new TextEncoder().encode(f.text) });
+        imgFiles.push({ name: f.name, data: new TextEncoder().encode(f.text), mtime });
     } else if (f.build) {
+        progress(`building ${f.name} in the emulator…`);
         const r = await runPipeline(f.build, new Uint8Array(0), null);
-        if (!r.ok) throw new Error(`build ${f.name}: step ${r.failedStep} exit ${r.exitCode}`);
-        imgFiles.push({ name: f.name, data: r.output });
+        if (!r.ok) {
+            const why = r.output && r.output.length ? ` — ${new TextDecoder().decode(r.output).trim()}` : '';
+            throw new Error(`build ${f.name}: ${f.build[r.failedStep].name} ${r.status} exit ${r.exitCode}${why}`);
+        }
+        imgFiles.push({ name: f.name, data: r.output, mtime });
     }
 }
 
 async function handleBoot(msg) {
     const { id, kernel, files, bootLine, imgSize, maxEntries, ramSize } = msg;
     const fs = msg.fs || 1;
+    const sfsOffset = msg.sfsOffset || SFS_OFFSET;
     try {
         const imgFiles = [];
-        for (const f of files) await prepareFile(f, imgFiles);
+        const progress = (text) => postMessage({ id, kind: 'tstate', state: 'preparing', text });
+        for (const f of files) await prepareFile(f, imgFiles, progress);
         imgFiles.push({ name: 'boot', data: new TextEncoder().encode(bootLine) });
+        for (const [name, text] of Object.entries(msg.extraFiles || {})) {
+            imgFiles.push({ name, data: new TextEncoder().encode(text) });
+        }
         const size = imgSize || (4 << 20);
-        const img = fs === 2
-            ? packSfs2(imgFiles, size, maxEntries || 256)
-            : packSfs(imgFiles, size, maxEntries || 128);
-        // 大きな RAM (kernel19 の 512 MB) は確保に失敗しうるので分けて確保する
+        const img = FS[fs].pack(imgFiles, size, maxEntries || (fs === 1 ? 128 : 256));
+        // 大きな RAM (kernel19 の 512 MB，kernel29 の 2 GiB) は確保に失敗しうるので
+        // 分けて確保する。rv32.js は WebAssembly.Memory で予約し，触れた分だけ使う
         let m;
         try {
             m = new Machine(await fetchBytes(kernel), { ramSize });
@@ -129,8 +164,8 @@ async function handleBoot(msg) {
             throw new Error(`could not allocate ${Math.round((ramSize || 0) / (1 << 20))} MB `
                 + `of emulator memory in this browser (${e})`);
         }
-        m.mem.set(img, SFS_OFFSET);
-        sessions.set(id, { m, size, fs, pumping: false });
+        m.mem.set(img, sfsOffset);
+        sessions.set(id, { m, size, fs, sfsOffset, pumping: false });
         postMessage({ id, kind: 'tstate', state: 'running', icount: 0 });
         pump(id);
     } catch (e) {
@@ -163,11 +198,8 @@ async function pump(id) {
             postMessage({ id, kind: 'tstate',
                 state: r.status === 'exit' ? 'exited' : 'crashed',
                 exitCode: s.m.exitCode, icount: s.m.icount });
-            const img = s.m.mem.slice(SFS_OFFSET, SFS_OFFSET + s.size);
-            const out = (s.fs === 2
-                ? unpackSfs2(img).map((f) => ({ name: f.path, dir: f.dir, data: f.data }))
-                : unpackSfs(img).map((f) => ({ ...f, dir: false })))
-                .filter((f) => f.name !== 'boot');
+            const img = s.m.mem.slice(s.sfsOffset, s.sfsOffset + s.size);
+            const out = FS[s.fs].unpack(img).filter((f) => f.name !== 'boot');
             postMessage({ id, kind: 'tfiles', files: out },
                 out.map((f) => f.data.buffer));
             sessions.delete(id);

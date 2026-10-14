@@ -18,7 +18,9 @@
       <strong>256-byte</strong> binary. Each stage uses artifacts from earlier stages.
       The toolchain also builds <strong>tcc</strong>; successive tcc self-builds on stone's OS are
       <strong>byte-identical</strong> to each other and to the cross-compiled reference.
-      Explore sixteen stages and run the examples in an RV32 browser emulator.</p>
+      On that OS the toolchain then becomes commands (<code>cc</code>, <code>ar</code>, <code>mk</code>),
+      GCC 4.7.4's cc1 is compiled and run, and a psABI assembler starts the road to Linux.
+      Explore nineteen stages and run the examples in an RV32 browser emulator.</p>
     <nav class="site-links">
       <a id="repo-link" href="#" rel="noopener">Repository</a>
       <span id="build-info"></span>
@@ -32,7 +34,7 @@
   <div class="tl-slider">
     <button id="tl-play" title="Auto-advance through the generations">▶ auto</button>
     <button id="tl-prev" title="Previous stage (←)">←</button>
-    <input type="range" id="tl-range" min="1" max="16" value="1" step="1"
+    <input type="range" id="tl-range" min="1" max="19" value="1" step="1"
            aria-label="Stage">
     <button id="tl-next" title="Next stage (→)">→</button>
   </div>
@@ -111,10 +113,14 @@
         <p class="pg-note" id="term-note"></p>
         <p class="pg-note" id="term-blurb" hidden></p>
         <pre class="term-out" id="term-out" aria-live="polite"></pre>
-        <div class="term-in-row">
+        <div class="term-in-row" id="term-in-row">
           <span class="term-prompt">›</span>
           <input id="term-in" spellcheck="false" autocomplete="off"
                  placeholder="type a command and press Enter">
+        </div>
+        <div id="term-script-box" hidden>
+          <label class="pg-label" for="term-script">go.sh — the script that <code>sh2 go.sh</code> runs at boot (edit, then Run script)</label>
+          <textarea id="term-script" spellcheck="false" rows="9"></textarea>
         </div>
         <div id="term-files-box" hidden>
           <div class="pg-out-head" id="term-files-head">Files in the sfs image after the session — click to download</div>
@@ -123,7 +129,7 @@
       </div>
       <aside class="term-side">
         <div class="cov-title">Guided tour</div>
-        <div class="term-side-note">Each suggested command is pre-typed into the input —
+        <div class="term-side-note" id="term-side-note">Each suggested command is pre-typed into the input —
           just press Enter. Click any step to load it instead.</div>
         <ol class="term-samples" id="term-samples"></ol>
       </aside>
