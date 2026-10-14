@@ -27,7 +27,7 @@ Linux 5.4 を訳すために新しく書く処理系の設計を記録する。�
 
 ## 2. 完了条件
 
-1. rv32-stone の C の単位 374 個すべてを ncc1 が訳し，nas1 が `.S` の単位 15 個と ncc1 の出力すべてを組み立てる
+1. rv32-stone の C の単位 374 個すべてを ncc1 が訳し，nas1 が `.S` の単位 12 個と ncc1 の出力すべてを組み立てる
 2. nld1 が `vmlinux.lds` で `vmlinux` を，`vdso.lds` で `vdso.so` を組む。`ld -r` による `vmlinux.o` を modpost が読める
 3. その `vmlinux` が QEMU virt (rv32) で起動し，我々の SBI の上で initramfs の init まで届く (stage019-linux.md の完了条件 2 と同じもの)
 4. 7 章の試験がすべて通る
@@ -46,7 +46,7 @@ Linux 5.4 を訳すために新しく書く処理系の設計を記録する。�
 
 段を分ける理由は 3 つある。
 
-1. Linux の `.S` 15 単位と inline asm の文字列は GNU as の書式で書かれており，アセンブラはどのみち要る。ncc1 も同じ書式を出せば，機械語の生成は nas1 の 1 箇所に集まる
+1. Linux の `.S` の単位と inline asm の文字列は GNU as の書式で書かれており，アセンブラはどのみち要る。ncc1 も同じ書式を出せば，機械語の生成は nas1 の 1 箇所に集まる
 2. inline asm は文字列をアセンブリへ埋めるだけでよくなる。ncc1 は命令を解釈しない
 3. 段ごとの出力がテキストまたは標準の ELF なので，verify 層の `objdump` / `readelf` と目で検査できる
 
@@ -255,7 +255,7 @@ Kbuild の記録 (rv32-stone) で呼ばれる形を持つ。
 
 | 部 | 内容 | 終わりの判定 |
 |---|---|---|
-| M1 | nas1 | 7 章の 1 が通る。Linux の `.S` 15 単位 (ホストの cpp で前処理したもの) が組み立てられる |
+| M1 | nas1 | 7 章の 1 が通る。Linux の `.S` の単位 (ホストの cpp で前処理したもの) が組み立てられる。**完了** (12 章) |
 | M2 | nld1 の基本 (`-T` の最小形・`ET_EXEC`) と素の実行環境 | `.S` だけの試験が QEMU で走る |
 | M3 | ncc1 の C89 と psABI | 7 章の 2・3 が通る |
 | M4 | ncc1 の GNU 拡張・組込み・inline asm | 374 単位すべてが訳され，nas1 を通る |
@@ -269,6 +269,40 @@ M6 までをホストから駆動して終えた後，stone の OS の中で回�
 1. **inline 展開に依る `BUILD_BUG_ON`**: 4.3 の判定で残る件数が多ければ，`always_inline` の関数に限って呼出しの場所で本体を展開する。引数の定数を伝えて畳み込むところまでで足りるかを測ってから決める
 2. **psABI の誤り**: 照合の相手になる既存の処理系が無いので，C と `.S` の境目 (`entry.S` から C を呼ぶ所，`memcpy.S` など) の誤りは起動まで表に出ない。7 章の 3 を先に厚くする
 3. **ncc1 の速さ**: cc15as で組んだ ncc1 で 404 MB の入力を訳す時間が，stone の中で回す段の大きさを決める。M4 の後に単位あたりの時間を測り，9 章の自己ホストの要否を判断する材料にする
+
+## 12. M1 の到達点 (2026-10-14)
+
+nas1 ([stage018/nas1.c](../stage018/nas1.c)，約 3,100 行) を書いた。`sh tools/build.sh stage018` が pp・cc15as・ld18 と libc26 で `tmp/build/nas1` に組み，試験 ([tests/stage018/test.sh](../tests/stage018/test.sh)) はそれを kernel29 の上で走らせる。
+
+| 検査 | 結果 |
+|---|---|
+| 命令の符号化 (`tests/stage018/nas1/insn.s`) | 216 命令が，ISA の文面から書いた期待と verify 層の objdump の読みで一致 ([verify/nas1insn.sh](../verify/nas1insn.sh)) |
+| 節・データ・再配置・記号 (`tests/stage018/nas1/elf.s`) | 入力から手で数えた期待 (`elf.expect`) と readelf の読みで一致 ([verify/nas1elf.sh](../verify/nas1elf.sh)) |
+| 誤った入力 | 範囲外の分岐・知らない命令・範囲外の即値・`.err`・知らないレジスタ・記号の二重定義の 6 種を止める |
+| ホスト版との一致 | cc15as で組んで stone の OS で走らせたものと，ホストの gcc で組んだものが，試験の入力と Linux の単位のすべてで同じ `.o` を出す |
+| Linux 5.4 の `.S` | rv32-stone の 12 単位のうち，ファイルから組む 10 単位をすべて組み立てる。残る 2 単位 (`lib-ksyms` の `.lib_exports.o`) は標準入力の空行を組むもので，空の入力として試した |
+
+### 12.1 単位の数
+
+[stage019-linux.md](stage019-linux.md) 5.2 の表の「`.S` の単位 15」は Kbuild の記録で `-D__ASSEMBLY__ -c` を持つ行の数で，`as-instr` などの試し 3 件を含む。試しを除いた単位は 12 で，うち 2 つは `echo | $(CC) ... -x assembler -` の形で標準入力を組む。
+
+### 12.2 GNU as に合わせて足したもの
+
+Linux の `.S` を通すために，6.1 の範囲に次を足した。いずれも GNU as が受ける形である。
+
+- `add a3, a3, 4` のように即値を書いた R 形の命令を I 形 (`addi` など) にする
+- `csrs 0x100, 2` のように即値を書いた CSR の疑似命令を即値形 (`csrrsi` など) にする
+- `.type sym STT_FUNC` (カンマを省いた形)
+- 解けない記号の差 (`.dword _end - _start`) を R_RISCV_ADD64 / SUB64 の対にする (psABI の `riscv-elf.adoc` の ADD / SUB の再配置)
+
+### 12.3 試験が見つけた誤り
+
+- `.asciz` が終端の 0 を置いていなかった (擬似命令名を 4 文字目で判定していた)。`elf.expect` の大きさとバイト列で見つかった
+- `li a0, 0xfffff800` を 2 命令にしていた (32 bit の符号付きに直す前に 1 命令で済むかを判定していた)
+
+### 12.4 まだ無いもの
+
+`.incbin` は試験では置き換えた中身で試した (Linux の `vdso.so` と `initramfs_data.cpio` は nld1 と gen_init_cpio の後にできる)。Linux の inline asm の文字列は ncc1 ができてから通す (M4)。
 
 ## 一次資料
 
