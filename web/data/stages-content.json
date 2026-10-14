@@ -1606,6 +1606,326 @@
     "docs/roadmap.md"
    ],
    "trivia": "An earlier getcwd implementation always returned \"/\". Adding the syscall-backed implementation caused a duplicate-symbol link error and exposed the obsolete definition. Returning \"/\" after chdir gives callers an incorrect working directory; tests must check the returned path after changing directories."
+  },
+  {
+   "id": "stage017",
+   "num": 17,
+   "name": "tools",
+   "title": "tools — the compiler as a command, ar, make, timestamps, and the road to cc1",
+   "tagline": "The toolchain becomes commands on our OS: cc, ar, mk with incremental builds, sed / awk / sh with regular expressions. The file system and kernel grow until GCC 4.7.4's cc1 compiles and runs on kernel29 with output identical to the host's.",
+   "phase": "phase-d",
+   "lang_in": "C89 (cc15p … cc15as: 29 compiler generations closing conformance gaps found by tcc, zlib, bzip2 and GCC 4.7.4)",
+   "lang_impl": "C89 for the OS programs (cc17–19, ar17, mk17–20, sed, awk, sh3–5, kernel23–29, libc19–26); .sc for the compiler and preprocessor generations",
+   "built_by": "cc15p + pp16 + ld16 for the frozen tools; the frontline (cc15ab … cc15as) + ld17 / ld18 for new tools and the cc1 experiment",
+   "summary_md": "Stage 17 turns the Stage 15 toolchain into **commands on our own OS** and then keeps growing the OS until a real compiler, GCC 4.7.4's `cc1`, builds and runs on it. tcc, zlib, bzip2 and GCC are used only as **inputs to measure our compiler** — never as tools (chapter 34 of the design document records the retraction of three chapters that had crossed that line).\n\n**Part 1 — `cc` as a command.** `pp16` / `cc15p` / `ld16` are re-linked as ELF (`'E'` prefix, no new source) and `cc17` drives the three in sequence. tcc's `configure` finds the compiler and detects it (`CC_NAME=unknown` — proof that `conftest` was really built and run). kernel23 raises the argv limit from 8 to 64 words and refuses the overflow with `E2BIG` instead of silently dropping words.\n\n**Part 2 — separate compilation and `ar`.** `cc18` adds `-c`, `-o`, `-I`, `-D` and archives on the command line; `ar17` writes plain `ar` archives (no symbol index) that the host `ar` reads. The OS compiles its own libc into eight objects, packs `libc.a`, and links a program against the archive alone.\n\n**Part 3 — `make`.** `mk17` has pattern rules and automatic variables; `mk19` adds twelve functions (`patsubst`, `filter`, `foreach`, `call`, …); `mk20` reads tcc's `Makefile` verbatim and emits the same 34 commands as GNU `make -n`. The check is always the **sequence of commands**, compared with the real make, not just the result.\n\n**Part 4 — time.** `sfs3` gives every entry a nanosecond modification time; kernel24 reads the goldfish RTC and stamps every write; `mk18` rebuilds only what depends on a changed file. The expected values are produced on the host (`touch -d`), never written by hand.\n\n**Measuring against real code.** zlib and bzip2 are compiled by cc19 + cc15s **on the OS**, archived by our `ar`, linked by our `ld`, and checked against the host's CRC and adler32 — a round trip alone would hide a symmetric bug. The differential tests (`tools/diff17.sh`) run the same probes through libc on the OS and on the host; they found printf's `%g`, `strtoul`, `fgets` and float rounding (libc23).\n\n**configure's tools.** sed with its own regex engine (`re1` / `re2`: BRE, ERE, backtracking), `sh3`–`sh5` with `grep -E`, `tr` / `expr` / `basename` / `dirname` / `wc` / `sort` and glob, and `awk1` — each compared line by line with the host implementation, with the two documented POSIX-vs-host divergences written down as values.\n\n**sfs4 and kernel25.** GCC 4.7.4's tree has 92-byte names, 131-byte paths and depth 12, and needs a 473 MB image. sfs4 widens entries to 128 bytes (103-byte names); kernel25 moves the image above the user area (512 MiB window at 0xa000_0000, RAM 1 GiB) and widens path buffers to 255 bytes.\n\n**GCC 4.7.4 through our compiler.** libiberty (55 units), libcpp (15) and gcc/ (347) are fed to the compiler one unit at a time; each failure is classified (conformance gap, libc, preprocessor, capacity) and fixed in a new generation: cc15w … cc15al, pp18 (`defined` appearing after expansion), pp19 (pushback), pp20 (15,000 macros), pp21 (64 KiB directive lines), libc22–26, kernel26 (`statat2`), kernel27 (`times`), kernel28 (`fstat2`). ld18 exchanges input and output through RAM because cc1's image is 142 MB.\n\n**cc1 runs.** cc1 is linked by ld18 and run on kernel28 / kernel29; gcc/'s units compiled by it match the host-built cc1's output. `gcc/insn-recog.c -O2` exhausted the 256 MiB user space, so kernel29 maps RAM as 2 GiB (the whole 32-bit range above 0x8000_0000) and gives user programs 1 GiB — 768 MiB measured by `bigheap`.",
+   "new_capabilities": [
+    "cc17 / cc18 / cc19: the compiler as a command on the OS (-c, -o, -I, -D, archives; -I as a search path)",
+    "ar17: plain ar archives; libc itself becomes libc.a and programs link against it alone",
+    "mk17 → mk20: pattern rules, functions, incremental builds, and tcc's Makefile verbatim",
+    "sfs3 / sfs4: nanosecond mtime, 103-byte names, depth 12; kernel24 reads the goldfish RTC",
+    "kernel23–29: E2BIG on argv overflow, statat2 / times / fstat2, 512 MiB sfs window, 2 GiB RAM with 1 GiB of user space",
+    "sed, awk, sh3–5 with regular expressions and glob — everything configure needs, compared with the host",
+    "libc19–26: stat, fcntl locks, signal.h, putc, %g / %e, struct stat fields, times / pathconf, and what cc1 named",
+    "pp17–21: -I search paths, defined after expansion, deeper pushback, 15,000 macros, 64 KiB lines",
+    "ld17 names undefined symbols; ld18 links 128 MB+ programs through RAM",
+    "cc15q … cc15as: 29 compiler generations; GCC 4.7.4's 417 C units compile with 0 gaps and cc1 runs on our OS"
+   ],
+   "artifacts": [
+    {
+     "file": "cc17",
+     "desc": "Part 1: the driver — pp16 → cc15p → ld16 as one command (libc18)"
+    },
+    {
+     "file": "cc18",
+     "desc": "Part 2: -c / -o / -I / -D and archives on the command line"
+    },
+    {
+     "file": "cc19",
+     "desc": "Part 3-3-2: -I handed to pp17 as a search path instead of bundling"
+    },
+    {
+     "file": "ar17",
+     "desc": "Part 2: ar rcs / ar t — plain ar format, no symbol index"
+    },
+    {
+     "file": "mk17",
+     "desc": "Part 3-1: pattern rules, automatic variables, -f / -n / -s"
+    },
+    {
+     "file": "mk18",
+     "desc": "Part 4-2: incremental builds from sfs3 mtimes, -B"
+    },
+    {
+     "file": "mk19",
+     "desc": "Part 3-2: twelve functions (patsubst, filter, foreach, call, …)"
+    },
+    {
+     "file": "mk20",
+     "desc": "Part 3-3-1: target-specific variables, -C, recursive $(MAKE) — tcc's Makefile verbatim"
+    },
+    {
+     "file": "pp17",
+     "desc": "-I as a search path (the bundle route is byte-identical to pp16)"
+    },
+    {
+     "file": "pp18",
+     "desc": "defined that appears only after macro expansion (GCC's system.h)"
+    },
+    {
+     "file": "pp19",
+     "desc": "256-slot pushback: nested expansion 60 deep"
+    },
+    {
+     "file": "pp20",
+     "desc": "hash-indexed macro table: 15,000 macros, 64-byte names"
+    },
+    {
+     "file": "pp21",
+     "desc": "64 KiB directive lines (MPFR's 9 KB macro)"
+    },
+    {
+     "file": "kernel23.bin",
+     "desc": "64 argv words / 4095 bytes; E2BIG on overflow (sfs2)"
+    },
+    {
+     "file": "kernel24.bin",
+     "desc": "sfs3 and the goldfish RTC: every write gets a timestamp"
+    },
+    {
+     "file": "kernel25.bin",
+     "desc": "sfs4, image at 0xa000_0000 (512 MiB window, RAM 1 GiB), 255-byte paths"
+    },
+    {
+     "file": "kernel26.bin",
+     "desc": "statat2 (502): st_dev / st_ino / st_mode / st_mtime"
+    },
+    {
+     "file": "kernel27.bin",
+     "desc": "times (153) with per-process accounting from the RTC"
+    },
+    {
+     "file": "kernel28.bin",
+     "desc": "fstat2 (503): stat by descriptor, even after unlink"
+    },
+    {
+     "file": "kernel29.bin",
+     "desc": "RAM 2 GiB, user space 1 GiB, sfs window at 0xe000_0000"
+    },
+    {
+     "file": "sed3",
+     "desc": "sed over the re2 engine (BRE / ERE, backtracking)"
+    },
+    {
+     "file": "awk1",
+     "desc": "awk — the last tool configure needs; checked against the host awk"
+    },
+    {
+     "file": "sh5",
+     "desc": "the shell with grep -E, configure's tools, and glob"
+    },
+    {
+     "file": "stamp",
+     "desc": "tests/stage017: prints type, size and mtime (high, low words) of files"
+    },
+    {
+     "file": "tmx",
+     "desc": "tests/stage017: times / sysconf / pathconf and the 255-byte path (kernel27 / libc25)"
+    },
+    {
+     "file": "ld18.bin",
+     "desc": "the linker that exchanges input and output through RAM (Stage 15 source, built here)"
+    },
+    {
+     "file": "cc15as.bin",
+     "desc": "the frontline compiler: far calls and alloca release for cc1"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage017/cc17.c",
+     "desc": "Part 1: the driver"
+    },
+    {
+     "path": "stage017/cc19.c",
+     "desc": "the driver with -I as a search path"
+    },
+    {
+     "path": "stage017/ar17.c",
+     "desc": "ar rcs / ar t"
+    },
+    {
+     "path": "stage017/mk20.c",
+     "desc": "make with functions, target-specific variables and -C"
+    },
+    {
+     "path": "stage017/kernel24.c",
+     "desc": "sfs3 and the goldfish RTC"
+    },
+    {
+     "path": "stage017/kernel29.c",
+     "desc": "the 2 GiB layout (with the notes of kernel23–28 carried forward)"
+    },
+    {
+     "path": "stage017/pp17.sc",
+     "desc": "the preprocessor with -I"
+    },
+    {
+     "path": "stage017/awk1.c",
+     "desc": "awk (numbers and formats in awkfmt1.c)"
+    },
+    {
+     "path": "stage017/sed3.c",
+     "desc": "sed over re2"
+    },
+    {
+     "path": "stage017/libc26",
+     "desc": "the frontline libc (what cc1 named)"
+    },
+    {
+     "path": "tools/sfs3.sh",
+     "desc": "host-side pack / unpack / list for sfs3 (nanosecond mtime)"
+    },
+    {
+     "path": "tools/sfs4.sh",
+     "desc": "host-side pack / unpack / list for sfs4 (103-byte names)"
+    },
+    {
+     "path": "tools/ld18.sh",
+     "desc": "drives ld18 through a RAM file"
+    },
+    {
+     "path": "tests/stage017/user",
+     "desc": "the probes: hello, selfhost, multi, uselibc, stamp, tmx, l26x, bigheap"
+    },
+    {
+     "path": "tests/stage017/mk",
+     "desc": "the Makefiles: libc.mk, fn.mk, tccish*.mk"
+    }
+   ],
+   "docs": [
+    "docs/stage017-cc.md",
+    "docs/stage017-gcc.md",
+    "stage015/ld18.md",
+    "stage017/libc26.md",
+    "docs/roadmap.md"
+   ],
+   "trivia": "Three chapters (30–32) once linked tcc's output into our OS, compiled our libc with tcc, and built zlib with tcc. They were retracted: tcc, GCC and Linux are targets that measure our compiler, not tools. What decides whether an object is ours is who translated it, not who wrote the source. The measurements were redone with cc19 + cc15s on our OS."
+  },
+  {
+   "id": "stage018",
+   "num": 18,
+   "name": "nas1",
+   "title": "nas1 — a psABI assembler for the Linux build",
+   "tagline": "A GNU-as-compatible assembler for RV32IMA + Zicsr + Zifencei, written in C89, built by cc15as and ld18, running on kernel29. 216 instructions match the ISA text; Linux 5.4's .S units assemble.",
+   "phase": "phase-d",
+   "lang_in": "GNU as syntax: RV32IMA + Zicsr + Zifencei, pseudo-instructions, %hi / %lo / %pcrel_hi / %pcrel_lo, .macro, numeric labels, .section / .pushsection, .incbin",
+   "lang_impl": "C89 (+ long long as cc15as accepts it); builds with the host gcc -std=c89 -pedantic -Werror as well",
+   "built_by": "pp → cc15as → ld18 with libc26 as library parts (tools/build/stage018.sh); runs on kernel29",
+   "summary_md": "Stage 18 starts the **psABI toolchain** that Linux 5.4 needs: `ncc1` (C → GNU as syntax), `nas1` (assembler → ELF32 `ET_REL`) and `nld1` (linker scripts → `vmlinux`). The decision (2026-10-13) is to write a new C compiler in C and build it with cc15as rather than extend cc15as itself; the calling convention is the RISC-V psABI ilp32, the code is RV32IM with A and CSR instructions reaching the assembler through inline asm and `.S` files. **M1, the assembler, is done.**\n\n**What nas1 accepts.** RV32I / M / A, Zicsr (with CSR names), Zifencei, `sfence.vma` / `wfi` / `sret` / `mret`; the pseudo-instructions (`li`, `la`, `lla`, `call`, `tail`, `mv`, `not`, `neg`, `seqz`, `snez`, `j`, `jr`, `ret`, branch aliases, `csrr` / `csrw` / `csrs` / `csrc` and their immediate forms); `%hi` / `%lo` / `%pcrel_hi` / `%pcrel_lo`, symbol ± constant, label differences; `.option`, `.section`, `.pushsection` / `.popsection`, `.balign`, `.word` / `.dword`, `.ascii` / `.asciz`, `.globl`, `.weak`, `.set`, `.type`, `.size`, `.incbin`, `.macro` / `.endm`, `.altmacro`; numeric labels `1:` / `1b` / `1f`. Two passes without relaxation — instruction sizes are fixed in pass one (`li` decides between one and two instructions by its immediate).\n\n**What it emits.** ELF32 `ET_REL`, `EM_RISCV`, soft-float ilp32 flags, `.rela.*`, `.symtab`, `.strtab`, `.shstrtab`; relocations `R_RISCV_32`, `HI20`, `LO12_I` / `LO12_S`, `PCREL_HI20`, `PCREL_LO12_I` / `S`, `CALL_PLT`, `JAL`, `BRANCH`, and `ADD64` / `SUB64` pairs for differences of unresolved symbols. `R_RISCV_RELAX` is never emitted.\n\n**How it is checked** (plan.md 2.2: the existing as / ld are never used as reference, only the read-only verify layer): `insn.s` lists 216 instructions with the encoding expected from the ISA text in a comment, and objdump's disassembly must match; `elf.s` exercises sections, data, relocations and symbol binding, and readelf's reading must match `elf.expect`, counted by hand from the input. Six kinds of wrong input (out-of-range branch, unknown mnemonic, out-of-range immediate, `.err`, unknown register, duplicate symbol) must be refused. The nas1 built by cc15as on our OS and the nas1 built by the host gcc produce the same `.o` for every input, including 10 of the 12 `.S` units of the rv32-stone Linux configuration (the other two assemble an empty standard input).\n\n**Errors the tests caught.** `.asciz` did not write its terminating zero (the directive was recognised by its fourth letter); `li a0, 0xfffff800` became two instructions because the one-instruction check ran before sign-extension.\n\n**Next.** M2: the minimum nld1 (`-T`, `ET_EXEC`) and a bare execution environment so that `.S`-only tests run on QEMU; M3: ncc1's C89 and psABI; M4: the GNU extensions Linux needs (Stage 19 measured them); M5: linker scripts, `-r`, archives, `-shared`; M6: SBI, initramfs and boot.",
+   "new_capabilities": [
+    "nas1: a GNU-as-compatible RV32IMA + Zicsr + Zifencei assembler producing ELF32 relocatable objects",
+    "Relocations HI20 / LO12 / PCREL_HI20 / PCREL_LO12 / CALL_PLT / JAL / BRANCH / 32 and ADD64 − SUB64 pairs",
+    ".macro / .altmacro, numeric labels, .pushsection / .popsection, .incbin, .option norelax (accepted, ignored)",
+    "Refuses six kinds of wrong input instead of truncating or guessing",
+    "Byte-identical output from the nas1 built on our OS (cc15as + ld18 + libc26) and the one built by the host gcc",
+    "Assembles the .S units of Linux 5.4's rv32-stone configuration",
+    "Design of ncc1 and nld1 fixed: psABI ilp32, GNU as syntax between the stages, no IR, no relaxation"
+   ],
+   "artifacts": [
+    {
+     "file": "nas1",
+     "desc": "M1: the assembler as an OS command (ELF, linked by ld18 against libc26; runs on kernel29)"
+    }
+   ],
+   "sources": [
+    {
+     "path": "stage018/nas1.c",
+     "desc": "the assembler (about 3,100 lines of C89)"
+    },
+    {
+     "path": "tests/stage018/nas1/insn.s",
+     "desc": "216 instructions with the encoding expected from the ISA text"
+    },
+    {
+     "path": "tests/stage018/nas1/elf.s",
+     "desc": "sections, data, relocations and symbol binding"
+    },
+    {
+     "path": "tests/stage018/nas1/elf.expect",
+     "desc": "the section / relocation / symbol table counted by hand"
+    },
+    {
+     "path": "verify/nas1insn.sh",
+     "desc": "verify layer: objdump -M no-aliases against the expected encodings"
+    },
+    {
+     "path": "verify/nas1elf.sh",
+     "desc": "verify layer: readelf against elf.expect"
+    },
+    {
+     "path": "tools/nas18.sh",
+     "desc": "runs nas1 on kernel29 and compares with the host-built nas1"
+    }
+   ],
+   "docs": [
+    "docs/stage018-ncc.md",
+    "docs/stage019-linux.md",
+    "docs/plan.md"
+   ],
+   "trivia": "The design chooses GNU as syntax as the interface between ncc1 and nas1 so that Linux's inline asm strings and .S files, both written for GNU as, go through one encoder; ncc1 never interprets instructions. The assembler is therefore the first piece, and it already had to learn four GNU-isms from Linux's sources: immediate forms of R-type mnemonics, immediate CSR pseudo-instructions, `.type sym STT_FUNC` without a comma, and ADD64 / SUB64 pairs for `.dword _end - _start`."
+  },
+  {
+   "id": "stage019",
+   "num": 19,
+   "name": "linux",
+   "title": "Linux — measuring what the kernel build needs",
+   "tagline": "Linux 5.4.302 pinned as the L2 benchmark: a 445-unit rv32 configuration, a Kbuild invocation log, a census of the GNU C extensions all 374 C units need, and kconf1, a Kconfig reader without flex or bison.",
+   "phase": "phase-d",
+   "lang_in": "Linux 5.4.302 (gnu89 + GNU extensions: inline asm, __attribute__, statement expressions, typeof, __builtin_*, designated initializers, case ranges, _Static_assert)",
+   "lang_impl": "measurement tools in sh (tools/linux19.sh, tools/kbuildlog.sh, tools/kconfref.sh) and C89 (stage019/kconf1.c)",
+   "built_by": "driven from the host for now (the design documents allow per-unit measurement from the host; the completion criterion is the build inside our OS)",
+   "summary_md": "Stage 19 is the **L2 goal** of the roadmap — compiling the Linux kernel — approached the same way as tcc and GCC: the source is an **input that measures our compiler**, never adopted into our environment. Linux 5.4.302 (the last 5.4, still `-std=gnu89`, with `rv32_defconfig`) is pinned by commit from the stable mirror; kernel.org is not reachable from the work environment.\n\n**Completion criteria.** (1) Build the RV32 kernel **inside our OS** with our tools only — every line of kernel code translated by our cc; (2) boot it on QEMU virt and run a minimal initramfs `init` (a static ELF built by our cc) that exercises syscalls and powers off. Our own minimal SBI in M-mode replaces OpenSBI.\n\n**The configuration.** `rv32-stone.config` on top of `allnoconfig`: RV32I, one hart, no FPU, no compressed instructions, printk over the SBI console, initramfs, ELF execution; no modules, no kallsyms, code model `medlow`. That is 445 C units (374 after dropping the config-time probes), 12 `.S` units, 11 `-E` and 14 `-S` invocations, 205 `ar` calls — against 1461 C units for `rv32_defconfig`.\n\n**What Kbuild invokes** (`tools/kbuildlog.sh`: a fake toolchain that records its arguments and claims to be GCC 4.6.4): Linux's own helpers (`fixdep`, `conf`, `mk_elfconfig`, `modpost`, `gen_init_cpio`, `gen_crc32table`, `dtc`), the external tools (make, sh with functions and `local`, sed, grep, expr, wc, getconf, bc for `timeconst.bc`, flex and bison for dtc), and the toolchain (`gcc -c / -S / -E`, `--version`, cc-option probes, `ld`, `ar`, `objcopy`, `objdump`, `nm`). `dtc` is not built inside our OS: this configuration translates no `.dts`, so writing a lexer and parser generator for an unused tool is out of proportion (decided 2026-10-13).\n\n**What our compiler must learn** (`tools/linux19.sh pre / scan`: all 374 units preprocess with the host cpp under `-undef -nostdinc` and the predefined macros of GCC 4.6.4 / riscv32 / -Os): `__attribute__`, `inline`, `long long` (372 units), inline asm (369), statement expressions (368), `__builtin_constant_p` (365), `__builtin_va_*` (363), `case a ... b` (363), `__alignof__` (362), `typeof` (350), `__builtin_expect` (346), designated initializers (341), `__builtin_choose_expr` / `__builtin_types_compatible_p` / `__label__` (334), `__builtin_offsetof` / `__builtin_unreachable` (327), zero-length arrays (323), `_Static_assert` (228); no asm goto, no computed goto. One unit (`arch/riscv/mm/init.c`) requires `-mcmodel=medany`, i.e. PC-relative addressing with `auipc`. Since every common header uses nearly every form, there is no useful order — one missing form blocks every unit. These measurements fix the scope of ncc1's M4 (Stage 18).\n\n**kconf1.** Kconfig has 1,518 files and 17,993 `config` symbols; the upstream `conf` is generated by flex and bison. `kconf1` reads Kconfig with a hand-written recursive-descent parser and writes `.config`, `auto.conf`, `tristate.conf`, `autoconf.h` and the per-symbol files `fixdep` depends on. The reference `conf` is built with flex 2.6.4 inside `tmp/` only to compare outputs (`tools/kconfref.sh`); flex never enters the chain or the kernel.\n\n**Measurement, not demo.** Nothing of Stage 19 runs in the browser: the source tree (about 1.2 GB unpacked) stays outside the repository (docs/SOURCES.md), and the results are tables in the design document. The executable progress on this road is Stage 18's nas1.",
+   "new_capabilities": [
+    "Linux 5.4.302 pinned by commit as the L2 benchmark; the rv32-stone configuration (445 units) defined",
+    "Kbuild invocation log: every tool, flag and helper the configuration calls, recorded with a fake GCC 4.6.4",
+    "Census of GNU C extensions per unit — the scope of ncc1's M4",
+    "kconf1: a Kconfig reader (no flex / bison) checked against the upstream conf",
+    "Decisions: our own SBI, no dtc, build inside our OS as the completion criterion"
+   ],
+   "artifacts": [],
+   "sources": [
+    {
+     "path": "stage019/kconf1.c",
+     "desc": "the Kconfig reader"
+    },
+    {
+     "path": "stage019/rv32-stone.config",
+     "desc": "the configuration: tiny.config plus RV32I, SBI console, initramfs, ELF"
+    },
+    {
+     "path": "stage019/predef-rv32-gcc46.h",
+     "desc": "the predefined macros of GCC 4.6.4 / riscv32 / -Os used for preprocessing"
+    },
+    {
+     "path": "tools/linux19.sh",
+     "desc": "preprocesses the 374 units and counts the extensions they use"
+    },
+    {
+     "path": "tools/kbuildlog.sh",
+     "desc": "runs Kbuild with a recording toolchain"
+    },
+    {
+     "path": "tools/kconfref.sh",
+     "desc": "builds the upstream conf with flex (reference only) for comparison"
+    }
+   ],
+   "docs": [
+    "docs/stage019-linux.md",
+    "docs/stage018-ncc.md",
+    "docs/roadmap.md",
+    "docs/SOURCES.md"
+   ],
+   "trivia": "The 15 .S units counted from the Kbuild log include three cc-option probes; the real count is 12, two of which assemble an empty standard input (`echo | $(CC) -x assembler -`) for lib-ksyms. nas1 handles that case as an empty input rather than a special one."
   }
  ],
  "tracks": [
@@ -1765,6 +2085,36 @@
      "stage": 15,
      "label": "C89 struct layout (bit-fields, 8-byte alignment)",
      "sub": "cc15p"
+    },
+    {
+     "stage": 17,
+     "label": "static initializers of string literals, sizeof of strings, nested char arrays (found by tcc)",
+     "sub": "cc15q–s"
+    },
+    {
+     "stage": 17,
+     "label": "qualifiers mid-declaration, compound-assignment signedness, scalar initializer overflow (zlib / bzip2)",
+     "sub": "cc15t–v"
+    },
+    {
+     "stage": 17,
+     "label": "what GCC 4.7.4's libiberty / libcpp needed — 0 gaps left",
+     "sub": "cc15w–ae"
+    },
+    {
+     "stage": 17,
+     "label": "gcc/ proper: typedef names, 64-bit values, struct families, table capacity",
+     "sub": "cc15af–al"
+    },
+    {
+     "stage": 17,
+     "label": "cc1 links and runs: far calls, alloca released on return",
+     "sub": "cc15am–as"
+    },
+    {
+     "stage": 19,
+     "label": "measured: the GNU extensions all 374 Linux units need (statement expressions, typeof, __builtin_*, case ranges, …)",
+     "sub": "linux"
     }
    ]
   },
@@ -1807,6 +2157,31 @@
      "stage": 15,
      "label": "correct recursion guard (pp16)",
      "sub": "pp16"
+    },
+    {
+     "stage": 17,
+     "label": "-I as a search path (pp17)",
+     "sub": "pp17"
+    },
+    {
+     "stage": 17,
+     "label": "defined that appears after expansion (pp18)",
+     "sub": "pp18"
+    },
+    {
+     "stage": 17,
+     "label": "256-slot pushback: nesting 60 deep (pp19)",
+     "sub": "pp19"
+    },
+    {
+     "stage": 17,
+     "label": "hash-indexed macro table: 15,000 macros, 64-byte names (pp20)",
+     "sub": "pp20"
+    },
+    {
+     "stage": 17,
+     "label": "64 KiB directive lines (pp21)",
+     "sub": "pp21"
     }
    ]
   },
@@ -1849,6 +2224,16 @@
      "stage": 15,
      "label": "software floating point calls (rtfp)",
      "sub": "cc15f–i"
+    },
+    {
+     "stage": 17,
+     "label": "far calls (#pragma stone far_call) for 128 MB+ programs",
+     "sub": "cc15am–as"
+    },
+    {
+     "stage": 17,
+     "label": "alloca released when the function returns (cc15ao)",
+     "sub": "cc15am–as"
     }
    ]
   },
@@ -1896,6 +2281,21 @@
      "stage": 15,
      "label": "mstatus.FS — U-mode may use the FPU (ld16)",
      "sub": "ld16"
+    },
+    {
+     "stage": 17,
+     "label": "the undefined symbol is named (ld17)",
+     "sub": "ld17"
+    },
+    {
+     "stage": 17,
+     "label": "input and output through RAM — cc1's 142 MB image links (ld18)",
+     "sub": "ld18"
+    },
+    {
+     "stage": 18,
+     "label": "ELF32 ET_REL with .rela / .symtab: HI20, LO12, PCREL, CALL, JAL, BRANCH, ADD64 − SUB64 (nas1)",
+     "sub": "nas1"
     }
    ]
   },
@@ -1958,6 +2358,26 @@
      "stage": 16,
      "label": "sys/stat.h and a truthful getcwd",
      "sub": "libc16"
+    },
+    {
+     "stage": 17,
+     "label": "stat; fcntl locks, getpid, EINTR; sys/types.h, signal.h, memchr, strerror; putc as a macro",
+     "sub": "libc19–22"
+    },
+    {
+     "stage": 17,
+     "label": "%g / %e / %E / %G / %F, float rounding, strtoul, fgets — found by the differential tests",
+     "sub": "libc23"
+    },
+    {
+     "stage": 17,
+     "label": "struct stat with st_dev / st_ino / st_mode / st_mtime; times, sysconf, pathconf, PATH_MAX",
+     "sub": "libc24–25"
+    },
+    {
+     "stage": 17,
+     "label": "what cc1 named: fstat by descriptor, stable qsort, %.2f rounding, freopen, strtok, strcasecmp, frexp",
+     "sub": "libc26"
     }
    ]
   },
@@ -2025,6 +2445,31 @@
      "stage": 16,
      "label": "EISDIR for read / write on a directory fd",
      "sub": "kernel18"
+    },
+    {
+     "stage": 17,
+     "label": "64 argv words, 4095 bytes; E2BIG on overflow (kernel23)",
+     "sub": "kernel23"
+    },
+    {
+     "stage": 17,
+     "label": "goldfish RTC; every write stamped (kernel24)",
+     "sub": "kernel24"
+    },
+    {
+     "stage": 17,
+     "label": "sfs4 window at 0xa000_0000 (512 MiB), 255-byte paths (kernel25)",
+     "sub": "kernel25"
+    },
+    {
+     "stage": 17,
+     "label": "statat2 (502), times (153), fstat2 (503)",
+     "sub": "kernel26–28"
+    },
+    {
+     "stage": 17,
+     "label": "2 GiB RAM: the whole 32-bit range above 0x8000_0000 (kernel29)",
+     "sub": "kernel29"
     }
    ]
   },
@@ -2067,6 +2512,16 @@
      "stage": 16,
      "label": "same name in different directories",
      "sub": "sfs2"
+    },
+    {
+     "stage": 17,
+     "label": "sfs3: nanosecond mtime per entry (72-byte entries)",
+     "sub": "sfs3"
+    },
+    {
+     "stage": 17,
+     "label": "sfs4: 103-byte names, depth 12, 473 MB images (128-byte entries)",
+     "sub": "sfs4"
     }
    ]
   },
@@ -2099,6 +2554,11 @@
      "stage": 16,
      "label": "512 MB layout with nothing below 0x8600_0000 moved",
      "sub": "kernel19"
+    },
+    {
+     "stage": 17,
+     "label": "256 MiB → 1 GiB of user space (768 MiB measured by bigheap)",
+     "sub": "kernel29"
     }
    ]
   },
@@ -2156,6 +2616,41 @@
      "stage": 15,
      "label": "T2 == T3 == tccH — tcc self-hosts on our OS",
      "sub": "tcc"
+    },
+    {
+     "stage": 17,
+     "label": "cc as a command: pp16 → cc15p → ld16; -c / -o / -I / -D; -I as a search path",
+     "sub": "cc17–19"
+    },
+    {
+     "stage": 17,
+     "label": "ar rcs / ar t — plain archives the host ar reads",
+     "sub": "ar17"
+    },
+    {
+     "stage": 17,
+     "label": "make: pattern rules, functions, incremental builds, tcc's Makefile verbatim (34 commands == GNU make -n)",
+     "sub": "mk17–20"
+    },
+    {
+     "stage": 17,
+     "label": "regular expressions (re1 / re2), sed, grep -E, tr / expr / basename / dirname / wc / sort, glob, awk",
+     "sub": "sed / sh / awk"
+    },
+    {
+     "stage": 17,
+     "label": "GCC 4.7.4's cc1 built by our toolchain and run on kernel29 — output identical to the host cc1",
+     "sub": "cc1"
+    },
+    {
+     "stage": 18,
+     "label": "a GNU-as-compatible assembler for RV32IMA + Zicsr + Zifencei, .macro, numeric labels (nas1)",
+     "sub": "nas1"
+    },
+    {
+     "stage": 19,
+     "label": "kconf1 (Kconfig reader without flex / bison), the Kbuild invocation log",
+     "sub": "linux"
     }
    ]
   }
