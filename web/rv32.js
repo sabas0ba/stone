@@ -66,6 +66,11 @@ export class Machine {
         this.mem = allocRam(this.ramSize);        // 新規確保 = ゼロ初期化 (QEMU と同じ)
         this.mem.set(program, 0);
         this.rtcHigh = 0;                         // TIME_LOW を読んだ瞬間の上位語
+        // 時計は起動時の epoch を基点に，単調な performance.now() で進める。
+        // Date.now() をそのまま返すとホストの時刻合わせで戻ることがあり，
+        // kernel27 以降は連続する読みの差を取るので，戻ると times が溢れる
+        this.rtcEpochNs = BigInt(Date.now()) * 1000000n;
+        this.rtcStart = performance.now();
         this.dv = new DataView(this.mem.buffer);
         this.x = new Int32Array(32);
         this.pc = 0;                            // RAM_BASE からのオフセット
@@ -181,9 +186,9 @@ export class Machine {
                     v = this.inHead < input.length ? input[this.inHead++] : 0;
                     this.emptyPolls = 0;
                 } else if (addr === RTC_LOW) {
-                    // epoch からのナノ秒。ミリ秒の時計しか無いので下 6 桁は 0 だが，
-                    // カーネルが要るのは「読むたびに進む単調な時刻」である
-                    const ns = BigInt(Date.now()) * 1000000n;
+                    // epoch からのナノ秒 (起動時の epoch + 単調な経過時間)
+                    const ns = this.rtcEpochNs
+                        + BigInt(Math.floor((performance.now() - this.rtcStart) * 1000000));
                     this.rtcHigh = Number(ns >> 32n) | 0;
                     v = Number(ns & 0xffffffffn) | 0;
                 } else if (addr === RTC_HIGH) {
