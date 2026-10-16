@@ -12,6 +12,7 @@ const PHASES = [
     { from: 8, to: 10, label: 'Phase A: language & toolchain', cls: 'a', color: 'var(--phase-a)' },
     { from: 11, to: 13, label: 'Phase B: self-sufficient environment', cls: 'b', color: 'var(--phase-b)' },
     { from: 14, to: 16, label: 'Phase C: external code & OS', cls: 'c', color: 'var(--phase-c)' },
+    { from: 17, to: 19, label: 'Phase D: toward GCC & Linux', cls: 'd', color: 'var(--phase-d)' },
 ];
 
 let DATA = null;
@@ -473,6 +474,14 @@ async function setupPlayground(st) {
         $('playground').hidden = true;
         return;
     }
+    if (pgConfig.none) {
+        // 対話デモを持たない世代 (Stage 19)。理由だけを出す
+        $('playground').hidden = false;
+        $('pg-body').hidden = true;
+        none.hidden = false;
+        none.innerHTML = inlineMd(pgConfig.none);
+        return;
+    }
     $('playground').hidden = false;
     $('pg-body').hidden = false;
     none.hidden = true;
@@ -583,6 +592,10 @@ let termId = null;
 let termSampleIdx = 0;
 
 const scenariosOf = (cfg) => cfg.scenarios || [cfg];
+// sfs の世代と配置はシナリオが持つことがある (Stage 17 は kernel23〜29 で
+// sfs2 / sfs3 / sfs4 と置き場所が違う)。無ければ世代の既定
+const termFs = () => (termScen && termScen.fs) || termConfig.fs || 1;
+const isScriptMode = () => termConfig && termConfig.mode === 'script';
 
 function setupTerminal(st) {
     termConfig = TERMINALS[st.id] || null;
@@ -626,12 +639,20 @@ function selectScenario(i) {
     $('term-status').textContent = 'not booted';
     $('term-status').className = 'term-status';
     $('term-files-box').hidden = true;
-    $('term-files-head').textContent = termConfig.fs === 2
-        ? 'The sfs2 tree after the session — click a file to download'
+    const fs = termFs();
+    $('term-files-head').textContent = fs >= 2
+        ? `The sfs${fs} tree after the session — click a file to download`
+            + (fs >= 3 ? ' (hover for the modification time)' : '')
         : 'Files in the sfs image after the session — click to download';
     termSampleIdx = 0;
     renderTermSamples();
-    $('term-boot').textContent = 'Boot';
+    const script = isScriptMode();
+    $('term-in-row').hidden = script;
+    $('term-script-box').hidden = !script;
+    $('term-boot').textContent = script ? 'Run script' : 'Boot';
+    $('term-side-note').textContent = script
+        ? 'Each step is a script: click one to load it into go.sh, edit if you like, then press Run script.'
+        : 'Each suggested command is pre-typed into the input — just press Enter. Click any step to load it instead.';
     $('term-in').placeholder = termConfig.mode === 'boot'
         ? 'boot line (program + argv) — press Enter to boot'
         : 'type a command and press Enter';
@@ -652,7 +673,9 @@ function renderTermSamples() {
 
 function loadTermSample() {
     const s = termScen.samples[termSampleIdx];
-    if (s) $('term-in').value = s.cmd;
+    if (!s) return;
+    if (isScriptMode()) $('term-script').value = s.script || '';
+    else $('term-in').value = s.cmd;
 }
 
 function termPrint(text, cls) {
@@ -681,13 +704,59 @@ function seededNames() {
         const parts = f.name.split('/');
         for (let i = 1; i <= parts.length; i++) names.add(parts.slice(0, i).join('/'));
     }
+    if (isScriptMode()) names.add('go.sh');
     return names;
 }
 
-// sfs / sfs2 の中身を出す。sfs2 はツリーなので経路順に並べて字下げする
+// ナノ秒 (BigInt) の時刻を読める形に
+const fmtNs = (ns) => {
+    if (ns == null) return '';
+    const ms = Number(ns / 1000000n);
+    const frac = String(ns % 1000000000n).padStart(9, '0');
+    return `${new Date(ms).toISOString().slice(0, 19)}.${frac}Z (${ns} ns)`;
+};
+
+// ELF32 の節見出しを読む (nas1 の出す .o を一覧するため。readelf -S の要約)。
+// 返り値: [{name, type, flags, size, align}] / ELF でなければ null
+const SHT = { 0: 'NULL', 1: 'PROGBITS', 2: 'SYMTAB', 3: 'STRTAB', 4: 'RELA',
+    7: 'NOTE', 8: 'NOBITS', 9: 'REL' };
+function elfSections(b) {
+    if (b.length < 52 || b[0] !== 0x7f || b[1] !== 0x45 || b[2] !== 0x4c || b[3] !== 0x46
+        || b[4] !== 1 || b[5] !== 1) return null;
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const shoff = dv.getUint32(32, true);
+    const shentsize = dv.getUint16(46, true);
+    const shnum = dv.getUint16(48, true);
+    const shstrndx = dv.getUint16(50, true);
+    if (!shoff || shoff + shnum * shentsize > b.length || shstrndx >= shnum) return null;
+    const sh = (i) => {
+        const o = shoff + i * shentsize;
+        return { nameOff: dv.getUint32(o, true), type: dv.getUint32(o + 4, true),
+            flags: dv.getUint32(o + 8, true), size: dv.getUint32(o + 20, true),
+            align: dv.getUint32(o + 32, true), off: dv.getUint32(o + 16, true) };
+    };
+    const str = sh(shstrndx);
+    const name = (off) => {
+        let e = str.off + off;
+        while (e < b.length && b[e] !== 0) e++;
+        return new TextDecoder().decode(b.subarray(str.off + off, e));
+    };
+    const flagStr = (f) => [[1, 'W'], [2, 'A'], [4, 'X'], [0x10, 'M'], [0x20, 'S'], [0x40, 'I']]
+        .filter(([bit]) => f & bit).map(([, c]) => c).join('');
+    const out = [];
+    for (let i = 1; i < shnum; i++) {
+        const s = sh(i);
+        out.push({ name: name(s.nameOff), type: SHT[s.type] || String(s.type),
+            flags: flagStr(s.flags), size: s.size, align: s.align });
+    }
+    return out;
+}
+
+// sfs の中身を出す。sfs2 以降はツリーなので経路順に並べて字下げする。
+// sfs3 以降は時刻を title に，ELF の .o は節見出しを添える
 function renderTermFiles(files) {
     const names = seededNames();
-    const tree = termConfig.fs === 2;
+    const tree = termFs() >= 2;
     const list = [...files].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     $('term-files-box').hidden = false;
     $('term-files').innerHTML = '';
@@ -696,6 +765,7 @@ function renderTermFiles(files) {
         const li = document.createElement('li');
         if (tree) li.style.paddingLeft = `${(parts.length - 1) * 16}px`;
         const label = tree ? parts[parts.length - 1] : f.name;
+        if (f.mtime != null) li.title = `mtime ${fmtNs(f.mtime)}`;
         if (f.dir) {
             li.insertAdjacentHTML('beforeend',
                 `<span class="tf-dir">${escapeHtml(label)}/</span>`);
@@ -717,11 +787,19 @@ function renderTermFiles(files) {
         if (!names.has(f.name)) {
             li.insertAdjacentHTML('beforeend', '<span class="tf-new">new</span>');
         }
+        const secs = !f.dir && f.name.endsWith('.o') ? elfSections(f.data) : null;
+        if (secs) {
+            li.insertAdjacentHTML('beforeend', '<span class="tf-elf">ELF32 relocatable</span>'
+                + `<table class="tf-sections"><tr><th>section</th><th>type</th><th>flags</th>`
+                + `<th>size</th><th>align</th></tr>${secs.map((s) =>
+                    `<tr><td>${escapeHtml(s.name)}</td><td>${s.type}</td><td>${s.flags}</td>`
+                    + `<td>0x${s.size.toString(16)}</td><td>${s.align}</td></tr>`).join('')}</table>`);
+        }
         $('term-files').appendChild(li);
     }
 }
 
-function termBoot(bootLine) {
+function termBoot(bootLine, extraFiles) {
     killTermSession();
     termId = ++runId;
     $('term-out').textContent = '';
@@ -729,13 +807,15 @@ function termBoot(bootLine) {
     termStatus(termScen.heavy ? 'preparing… (allocating a large emulator)' : 'preparing…',
         'running');
     termPrint(`— boot: ${bootLine.trim()} —\n`, 'echo');
+    // UART の出力は UTF-8 として読む (Stage 17 以降のツールは診断を日本語で出す)。
+    // 塊の境界で文字が割れても続きで繋がるよう，セッションごとに 1 つの decoder を持つ
+    const decoder = new TextDecoder('utf-8');
     handlers.set(termId, (m) => {
         if (m.kind === 'tout') {
-            let s = '';
-            for (let i = 0; i < m.data.length; i++) s += String.fromCharCode(m.data[i]);
-            termPrint(s);
+            termPrint(decoder.decode(m.data, { stream: true }));
         } else if (m.kind === 'tstate') {
-            if (m.state === 'running') termStatus('running…', 'running');
+            if (m.state === 'preparing') termStatus(m.text, 'running');
+            else if (m.state === 'running') termStatus('running…', 'running');
             else if (m.state === 'waiting') termStatus('waiting for input', 'running');
             else if (m.state === 'exited') {
                 termStatus(`exited with code ${m.exitCode} (${fmtNum(m.icount)} instructions)`);
@@ -755,13 +835,20 @@ function termBoot(bootLine) {
         imgSize: termScen.imgSize,
         maxEntries: termScen.maxEntries,
         ramSize: termScen.ramSize,
-        fs: termConfig.fs || 1,
+        fs: termFs(),
+        sfsOffset: termScen.sfsOffset,
+        extraFiles,
         bootLine,
     });
 }
 
 $('term-boot').onclick = () => {
     if (!termConfig || !termScen) return;
+    if (isScriptMode()) {
+        // 台本を go.sh として詰め，sh2 go.sh で起動する (tests/stage017 と同じ)
+        termBoot(termConfig.bootLine, { 'go.sh': $('term-script').value });
+        return;
+    }
     termBoot(termConfig.mode === 'boot'
         ? `${$('term-in').value.trim() || termScen.samples[0].cmd}\n`
         : termScen.bootLine);

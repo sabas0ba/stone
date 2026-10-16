@@ -14,6 +14,7 @@
     --phase-a: #6fb3e0;
     --phase-b: #9d8fe0;
     --phase-c: #e08fb4;
+    --phase-d: #8fd0a8;
     --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
@@ -285,7 +286,7 @@ h3 {
 .playground { margin: 1.1em 0 2.4em; }
 .pg-note { color: var(--fg-dim); font-size: 0.85em; margin: 0.3em 0; }
 .pg-label { display: block; font-size: 0.8em; color: var(--fg-dim); margin-bottom: 4px; }
-#pg-input, #pg-stdin {
+#pg-input, #pg-stdin, #term-script {
     width: 100%;
     background: var(--bg2);
     color: var(--fg);
@@ -297,7 +298,7 @@ h3 {
     padding: 10px 12px;
     resize: vertical;
 }
-#pg-input:focus, #pg-stdin:focus { outline: 1px solid var(--accent); }
+#pg-input:focus, #pg-stdin:focus, #term-script:focus { outline: 1px solid var(--accent); }
 #pg-stdin-box { margin-top: 8px; font-size: 0.85em; color: var(--fg-dim); }
 .pg-run-row {
     display: flex;
@@ -657,3 +658,18 @@ button.tk-label:hover, button.tk-label.open { color: var(--fg); }
     padding-top: 14px;
     padding-bottom: 30px;
 }
+
+/* ---- Stage 17 以降: 台本の編集と .o の節見出し ---- */
+#term-script-box { margin-top: 8px; }
+.term-in-row[hidden] { display: none; }
+#term-script-box .pg-label { margin-top: 6px; }
+.term-files .tf-elf { color: var(--phase-d); margin-left: 8px; font-size: 0.85em; }
+.tf-sections {
+    border-collapse: collapse;
+    margin: 4px 0 6px 12px;
+    font-size: 0.9em;
+    color: var(--fg-dim);
+}
+.tf-sections th, .tf-sections td { padding: 0 10px 0 0; text-align: left; font-weight: normal; }
+.tf-sections th { color: var(--fg-dim); border-bottom: 1px solid var(--line); }
+.tf-sections td:first-child { color: var(--fg); }

@@ -5,7 +5,7 @@
 # 用意しておくこと。生成物は tmp/site/ (git ignore) に置く。
 #
 #   tmp/site/
-#   ├── index.html, style.css, app.js, rv32.js, worker.js, pipelines.js
+#   ├── index.html, style.css, app.js, rv32.js, sfs*.js, ld18.js, worker.js, pipelines.js
 #   ├── data/stages.json     世代コンテンツ + 成果物メタ (サイズ / SHA-256)
 #   ├── assets/bin/          チェーン成果物 (プレイグラウンドが実行する実物)
 #   └── files/               ソース・サンプル (ビューアとプレイグラウンド初期値)
@@ -29,7 +29,8 @@ rm -rf "$dist"
 mkdir -p "$dist/data" "$dist/assets/bin" "$dist/files"
 
 cp web/index.html web/style.css web/app.js web/rv32.js web/sfs.js \
-   web/sfs2.js web/worker.js web/pipelines.js "$dist/"
+   web/sfs2.js web/sfs3.js web/sfs4.js web/ld18.js web/worker.js \
+   web/pipelines.js "$dist/"
 touch "$dist/.nojekyll"
 
 # stages.json: コンテンツに成果物のサイズと SHA-256 を付与する。
