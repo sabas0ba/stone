@@ -144,6 +144,7 @@ struct gsym {
     struct osec *osec;          /* 台本の定義を置いた出力節 */
     int provide;                /* PROVIDE で 1 */
     int hidden;
+    int outidx;                 /* 出力の記号表の番号 (-r) */
 };
 
 /* ---- 台本 ---- */
@@ -213,11 +214,36 @@ struct osec {
     int type;
     int kind;                   /* 0 命令，1 読出し，2 書込み，3 nobits，-1 空 */
     int orphan;
+    int nph;                    /* :phdr で指定した (または前から引き継いだ) program header */
+    char **phname;              /* 台本に書いた名前 */
+    struct phdr **ph;           /* 名前を PHDRS で引いたもの */
     unsigned char *data;
     int shndx;
     long offset;
     long nameoff;
+    struct osec *link;          /* 節見出しの sh_link (動的な節) */
+    u32 info;
+    u32 entsize;
 };
+
+/* PHDRS の 1 項 */
+struct phdr {
+    char *name;
+    u32 type;
+    int filehdr;
+    int phdrs;
+    struct expr *flagexpr;      /* FLAGS(...) (無ければ節の旗から決める) */
+    struct phdr *next;
+    /* 出力の時に決めるもの */
+    u32 offset, vaddr, paddr, filesz, memsz, align, flags;
+    int nsec;
+};
+
+#define PT_DYNAMIC 2
+#define PT_NOTE 4
+#define PT_PHDR 6
+#define PT_GNU_EH_FRAME 0x6474e550UL
+#define PT_GNU_STACK 0x6474e551UL
 
 /* ---- 状態 ---- */
 static struct ifile **files;
@@ -230,6 +256,15 @@ static u32 dot;
 static int lpass;
 static int final;
 static struct ifile *commonfile;
+static int stripall;            /* -s: 記号表を出さない */
+static int buildid;             /* --build-id */
+static int shared;              /* -shared */
+static const char *soname;
+static struct phdr *phdrs;      /* PHDRS (無ければ 0) */
+static int nphdrs;
+static char *vername;           /* VERSION の節点の名前 (1 つだけ持つ) */
+static char **verglobal;        /* その global: の記号 */
+static int nverglobal;
 
 static void fatal(const char *msg, const char *arg)
 {
@@ -345,14 +380,16 @@ static unsigned char *readfile(const char *name, long *size)
     return buf;
 }
 
-static void readobj(const char *name)
+/* 読み込んだオブジェクトを結合に加える。data は f が持つ */
+static void readobj_mem(const char *name, unsigned char *data, long size)
 {
     struct ifile *f = xmalloc(sizeof(struct ifile));
     unsigned char *d, *sh, *shstr;
     u32 shoff, shnum, shstrndx, i;
     int symsec = -1;
     f->name = xstrdup(name);
-    f->data = d = readfile(name, &f->size);
+    f->data = d = data;
+    f->size = size;
     if (f->size < 52 || d[0] != 0x7f || d[1] != 'E' || d[2] != 'L' || d[3] != 'F')
         fatal("ELF でない", name);
     if (d[4] != 1 || d[5] != 1)
@@ -465,6 +502,173 @@ static void readobj(const char *name)
     }
     files = xrealloc(files, (long)(nfiles + 1) * (long)sizeof(struct ifile *));
     files[nfiles++] = f;
+}
+
+/* ---- 書庫 ----
+ * --whole-archive の中の書庫はメンバをすべて読む。それ以外の書庫は，読んだ
+ * オブジェクトが参照して定義の無い大域の記号を定義するメンバだけを読み，
+ * 新しく読むものが無くなるまで繰り返す (書庫どうしの順を問わない。
+ * --start-group / --end-group はこれに含まれる)。 */
+struct amember {
+    char *name;
+    unsigned char *data;
+    long size;
+    int loaded;
+};
+
+struct archive {
+    char *name;
+    int n;
+    struct amember *m;
+    struct archive *next;
+};
+
+static struct archive *archives, **archtail = &archives;
+static int whole;               /* --whole-archive の中 */
+
+static long arfield(const unsigned char *h, int off, int len)
+{
+    char b[16];
+    memcpy(b, h + off, len);
+    b[len] = 0;
+    return strtol(b, 0, 10);
+}
+
+/* 書庫のメンバを並べる。thin ならメンバのファイルを書庫の場所から読む */
+static struct archive *readarchive(const char *name, unsigned char *p, long size)
+{
+    struct archive *a = xmalloc(sizeof(struct archive));
+    int thin = memcmp(p, "!<thin>\n", 8) == 0;
+    long off = 8, nnames = 0;
+    const char *names = 0, *slash = strrchr(name, '/');
+    long dirlen = slash ? (long)(slash - name) + 1 : 0;
+    a->name = xstrdup(name);
+    while (off + 60 <= size) {
+        const unsigned char *h = p + off;
+        long msize = arfield(h, 48, 10);
+        int special = h[0] == '/' && (h[1] == ' ' || (h[1] == '/' && h[2] == ' '));
+        if (h[58] != '`' || h[59] != '\n')
+            fatal("書庫のメンバの頭が壊れている", name);
+        if (special && h[1] == '/') {
+            names = (const char *)(p + off + 60);
+            nnames = msize;
+        }
+        if (!special) {
+            char *mname;
+            struct amember *m;
+            long k = 0;
+            if (h[0] == '/') {
+                long no = arfield(h, 1, 15);
+                if (!names || no >= nnames)
+                    fatal("書庫に長い名前の表が無い", name);
+                while (no + k < nnames && names[no + k] != '\n')
+                    k++;
+                if (k > 0 && names[no + k - 1] == '/')
+                    k--;
+                mname = xstrndup(names + no, k);
+            } else {
+                while (k < 16 && h[k] != '/' && h[k] != ' ')
+                    k++;
+                mname = xstrndup((const char *)h, k);
+            }
+            a->m = xrealloc(a->m, (long)(a->n + 1) * (long)sizeof(struct amember));
+            m = &a->m[a->n++];
+            memset(m, 0, sizeof *m);
+            if (thin) {
+                char *path = xmalloc(dirlen + (long)strlen(mname) + 1);
+                if (mname[0] != '/')
+                    memcpy(path, name, dirlen);
+                strcpy(path + (mname[0] != '/' ? dirlen : 0), mname);
+                m->name = path;
+                m->data = readfile(path, &m->size);
+            } else {
+                if (off + 60 + msize > size)
+                    fatal("書庫のメンバが末尾を越える", name);
+                m->name = xmalloc((long)strlen(name) + (long)strlen(mname) + 3);
+                sprintf(m->name, "%s(%s)", name, mname);
+                m->data = xmalloc(msize);
+                memcpy(m->data, p + off + 60, msize);
+                m->size = msize;
+            }
+        }
+        off += 60;
+        if (!thin || special)
+            off += msize + (msize & 1);
+    }
+    return a;
+}
+
+static void readobj(const char *name)
+{
+    long size;
+    unsigned char *p = readfile(name, &size);
+    if (size >= 8 && (memcmp(p, "!<arch>\n", 8) == 0 || memcmp(p, "!<thin>\n", 8) == 0)) {
+        struct archive *a = readarchive(name, p, size);
+        int i;
+        free(p);
+        if (whole) {
+            for (i = 0; i < a->n; i++) {
+                a->m[i].loaded = 1;
+                readobj_mem(a->m[i].name, a->m[i].data, a->m[i].size);
+            }
+            return;
+        }
+        *archtail = a;
+        archtail = &a->next;
+        return;
+    }
+    readobj_mem(name, p, size);
+}
+
+/* メンバが，参照されて定義の無い大域の記号を定義するか */
+static int member_needed(struct amember *m)
+{
+    const unsigned char *d = m->data;
+    u32 shoff, shnum, i;
+    if (m->size < 52 || memcmp(d, "\177ELF", 4) != 0)
+        return 0;
+    shoff = rd32(d + 32);
+    shnum = rd16(d + 48);
+    if (shoff + shnum * 40 > (u32)m->size)
+        fatal("節見出しが末尾を越える", m->name);
+    for (i = 0; i < shnum; i++) {
+        const unsigned char *h = d + shoff + i * 40;
+        u32 off, n, k;
+        const char *str;
+        if (rd32(h + 4) != SHT_SYMTAB)
+            continue;
+        off = rd32(h + 16);
+        n = rd32(h + 20) / 16;
+        str = (const char *)d + rd32(d + shoff + rd32(h + 24) * 40 + 16);
+        for (k = 1; k < n; k++) {
+            const unsigned char *e = d + off + k * 16;
+            struct gsym *g;
+            if ((e[12] >> 4) == STB_LOCAL || rd16(e + 14) == SHN_UNDEF || rd16(e + 14) == SHN_COMMON)
+                continue;
+            g = gsym(str + rd32(e), 0);
+            if (g && g->referenced && !g->defined && !g->common)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+static void pull_members(void)
+{
+    int changed = 1;
+    while (changed) {
+        struct archive *a;
+        changed = 0;
+        for (a = archives; a; a = a->next) {
+            int i;
+            for (i = 0; i < a->n; i++)
+                if (!a->m[i].loaded && member_needed(&a->m[i])) {
+                    a->m[i].loaded = 1;
+                    readobj_mem(a->m[i].name, a->m[i].data, a->m[i].size);
+                    changed = 1;
+                }
+        }
+    }
 }
 
 /* COMMON の記号を，擬似ファイル "COMMON" の節に 1 つずつ置く */
@@ -1020,8 +1224,12 @@ static struct stmt *output_section(char *name)
             sp += 3;
             exprname();
         } else if (*sp == ':' && sp[1] != ':') {
+            /* :phdr。PHDRS の名前で引くのは台本を読み終えてから */
+            char *n;
             sp++;
-            exprname();
+            n = exprname();
+            o->phname = xrealloc(o->phname, (long)(o->nph + 1) * (long)sizeof(char *));
+            o->phname[o->nph++] = n;
         } else if (*sp == '=' && sp[1] != '=') {
             sp++;
             parse_expr();
@@ -1053,9 +1261,18 @@ static void parse_script(const char *text, const char *name)
             expect(')');
             continue;
         }
+        if (keyword("EXTERN")) {
+            /* 未定義の参照として加える (lib-ksyms.o の台本。書庫のメンバを引き込む) */
+            expect('(');
+            while (!accept(')')) {
+                gsym(exprname(), 1)->referenced = 1;
+                accept(',');
+            }
+            continue;
+        }
         if (keyword("OUTPUT_ARCH") || keyword("OUTPUT_FORMAT") || keyword("TARGET")
             || keyword("SEARCH_DIR") || keyword("INPUT") || keyword("GROUP")
-            || keyword("STARTUP") || keyword("OUTPUT") || keyword("EXTERN")) {
+            || keyword("STARTUP") || keyword("OUTPUT")) {
             expect('(');
             while (!accept(')')) {
                 char *n = patname();
@@ -1075,6 +1292,89 @@ static void parse_script(const char *text, const char *name)
             s->msg = exprname();
             expect(')');
             append(&tail, s);
+            continue;
+        }
+        if (keyword("PHDRS")) {
+            struct phdr **pt = &phdrs;
+            while (*pt)
+                pt = &(*pt)->next;
+            expect('{');
+            while (!accept('}')) {
+                struct phdr *p = xmalloc(sizeof(struct phdr));
+                char *t;
+                p->name = exprname();
+                t = exprname();
+                if (strcmp(t, "PT_NULL") == 0)
+                    p->type = 0;
+                else if (strcmp(t, "PT_LOAD") == 0)
+                    p->type = PT_LOAD;
+                else if (strcmp(t, "PT_DYNAMIC") == 0)
+                    p->type = PT_DYNAMIC;
+                else if (strcmp(t, "PT_NOTE") == 0)
+                    p->type = PT_NOTE;
+                else if (strcmp(t, "PT_PHDR") == 0)
+                    p->type = PT_PHDR;
+                else if (strcmp(t, "PT_GNU_EH_FRAME") == 0)
+                    p->type = PT_GNU_EH_FRAME;
+                else if (strcmp(t, "PT_GNU_STACK") == 0)
+                    p->type = PT_GNU_STACK;
+                else
+                    serr("知らない program header の型");
+                for (;;) {
+                    if (keyword("FILEHDR"))
+                        p->filehdr = 1;
+                    else if (keyword("PHDRS"))
+                        p->phdrs = 1;
+                    else if (keyword("FLAGS")) {
+                        expect('(');
+                        p->flagexpr = parse_expr();
+                        expect(')');
+                    } else
+                        break;
+                }
+                expect(';');
+                *pt = p;
+                pt = &p->next;
+                nphdrs++;
+            }
+            continue;
+        }
+        if (keyword("VERSION")) {
+            /* 版の節点を 1 つだけ持つ: name { global: a; b; local: *; } ; */
+            expect('{');
+            while (!accept('}')) {
+                char *node = exprname();
+                int glob = 1;
+                if (vername)
+                    serr("VERSION の節点は 1 つだけ持つ");
+                vername = node;
+                expect('{');
+                while (!accept('}')) {
+                    char *n;
+                    if (keyword("global")) {
+                        expect(':');
+                        glob = 1;
+                        continue;
+                    }
+                    if (keyword("local")) {
+                        expect(':');
+                        glob = 0;
+                        continue;
+                    }
+                    n = patname();
+                    expect(';');
+                    if (!glob) {
+                        if (strcmp(n, "*") != 0)
+                            serr("local: は * だけを持つ");
+                        continue;
+                    }
+                    verglobal = xrealloc(verglobal, (long)(nverglobal + 1) * (long)sizeof(char *));
+                    verglobal[nverglobal++] = n;
+                }
+                if (peekc() != ';')
+                    exprname();
+                expect(';');
+            }
             continue;
         }
         if (keyword("SECTIONS")) {
@@ -1459,8 +1759,11 @@ static struct ev eval(struct expr *e)
             r.v = k;
             return r;
         }
-        if (strcmp(f, "SIZEOF_HEADERS") == 0)
+        if (strcmp(f, "SIZEOF_HEADERS") == 0) {
+            /* ELF 見出しと program header の大きさ (PHDRS のあるときだけ正しい) */
+            r.v = 52 + 32 * nphdrs;
             return r;
+        }
         if (strcmp(f, "CONSTANT") == 0) {
             /* MAXPAGESIZE / COMMONPAGESIZE */
             r.v = 0x1000;
@@ -1501,8 +1804,9 @@ static void setsym(struct stmt *s, struct ev v)
         /* PROVIDE は参照されていて入力が定義していないときだけ定義する */
         if (!g->referenced || g->defined == 1)
             return;
-    } else if (g->defined == 1 && lpass == 1)
-        fatal("台本が入力の定義した記号を定義し直した", s->sym);
+    }
+    /* 入力が定義した記号への代入は台本が勝つ (GNU ld と同じ。vmlinux.lds の
+     * `_start = .;` と head.S の _start) */
     g->defined = 2;
     g->sec = 0;
     g->value = (u32)v.v & 0xffffffffUL;
@@ -1548,7 +1852,7 @@ static void layout_body(struct osec *o)
 static void osec_attrs(struct osec *o)
 {
     struct stmt *b;
-    int any = 0, nobits = 1;
+    int any = 0, nobits = 1, same = -1;
     o->flags = SHF_ALLOC;
     for (b = o->body; b; b = b->next) {
         int i;
@@ -1564,9 +1868,11 @@ static void osec_attrs(struct osec *o)
                 nobits = 0;
             if (x->align > o->maxalign)
                 o->maxalign = x->align;
+            /* 入力の型がすべて同じなら (.note・動的な節) その型にする */
+            same = same == -1 || same == x->type ? x->type : -2;
         }
     }
-    o->type = (nobits && any) || o->noload ? SHT_NOBITS : SHT_PROGBITS;
+    o->type = (nobits && any) || o->noload ? SHT_NOBITS : same >= 0 ? same : SHT_PROGBITS;
 }
 
 static void layout(void)
@@ -1641,6 +1947,7 @@ struct hi {
 
 static struct hi *his;
 static int nhi;
+static int nundef;              /* 未定義の参照の数 */
 
 /* 入力の記号表の k 番の番地 (局所なら節 + 値) */
 static int symvalue(struct isec *x, int k, u32 *out, const char **name)
@@ -1797,8 +2104,13 @@ static void relocate(struct isec *x, unsigned char *base)
         if (off + 4 > x->size && type != R_RISCV_ADD8 && type != R_RISCV_SUB8
             && type != R_RISCV_ADD16 && type != R_RISCV_SUB16)
             relerr(x, off, "再配置が節の外", 0);
-        if (!symvalue(x, (int)(info >> 8), &s, &name))
-            relerr(x, off, "未定義の記号", name);
+        if (!symvalue(x, (int)(info >> 8), &s, &name)) {
+            /* 未定義の参照はすべて出してから止める (fill_sections の後) */
+            fprintf(stderr, "nld1: %s(%s+0x%lx): 未定義の記号: %s\n", x->file->name, x->name,
+                    (unsigned long)off, name);
+            nundef++;
+            continue;
+        }
         v = (s + (u32)addend) & 0xffffffffUL;
         switch (type) {
         case R_RISCV_32:
@@ -1945,6 +2257,393 @@ static void fill_sections(void)
     }
 }
 
+struct strtab {
+    char *buf;
+    long size;
+    long cap;
+};
+
+static long stradd(struct strtab *t, const char *s)
+{
+    long n = (long)strlen(s) + 1, off = t->size;
+    while (t->size + n > t->cap) {
+        t->cap = t->cap ? t->cap * 2 : 1024;
+        t->buf = xrealloc(t->buf, t->cap);
+    }
+    memcpy(t->buf + t->size, s, n);
+    t->size += n;
+    return off;
+}
+
+static int osec_index(struct osec *o);
+
+/* ---- リンカが作る節 ----
+ * -shared は .hash・.gnu.hash・.dynsym・.dynstr・.gnu.version・
+ * .gnu.version_d・.dynamic を，--build-id は .note.gnu.build-id を作る。
+ * 擬似ファイル "(nld1)" の入力節として台本に割り当てる。大きさは割付けの
+ * 前に決め，中身は割付けの後 (番地が決まってから) 書く。
+ *
+ * 動的な記号は，VERSION があればその global: の記号，無ければ定義された
+ * 大域の記号 (hidden を除く) である。VERSION の節点の名前も絶対値の記号と
+ * して加える (GNU ld と同じ)。動的な再配置は作らない (vdso の .S は位置に
+ * 依らない) */
+#define SHT_HASH 5
+#define SHT_DYNSYM 11
+#define SHT_GNU_HASH 0x6ffffff6UL
+#define SHT_GNU_VERDEF 0x6ffffffdUL
+#define SHT_GNU_VERSYM 0x6fffffffUL
+#define SHT_DYNAMIC 6
+#define SHT_NOTE 7
+
+static struct ifile *synfile;
+static struct isec *s_hash, *s_gnuhash, *s_dynsym, *s_dynstr, *s_versym, *s_verdef,
+    *s_dynamic, *s_buildid;
+
+struct dsym {
+    const char *name;
+    struct gsym *g;             /* 0 なら版の節点の記号 */
+    u32 hash;                   /* GNU の hash */
+    long nameoff;
+};
+
+static struct dsym *dsyms;      /* [0] は空 */
+static int ndsyms;
+static struct strtab dynstr;
+static u32 gnb;                 /* .gnu.hash の bucket の数 */
+
+static struct isec *synsec(const char *name, u32 type, u32 flags, u32 align, u32 size)
+{
+    struct isec *x = xmalloc(sizeof(struct isec));
+    if (!synfile) {
+        synfile = xmalloc(sizeof(struct ifile));
+        synfile->name = "(nld1)";
+        files = xrealloc(files, (long)(nfiles + 1) * (long)sizeof(struct ifile *));
+        files[nfiles++] = synfile;
+    }
+    synfile->secs = xrealloc(synfile->secs, (long)(synfile->nsec + 1) * (long)sizeof(struct isec *));
+    x->file = synfile;
+    x->idx = synfile->nsec;
+    synfile->secs[synfile->nsec++] = x;
+    x->name = (char *)name;
+    x->type = (int)type;
+    x->flags = flags;
+    x->align = align;
+    x->size = size;
+    x->data = xmalloc((long)size);
+    return x;
+}
+
+static u32 elfhash(const char *s)
+{
+    u32 h = 0, g;
+    while (*s) {
+        h = ((h << 4) + (unsigned char)*s++) & 0xffffffffUL;
+        g = h & 0xf0000000UL;
+        if (g)
+            h ^= g >> 24;
+        h &= ~g & 0xffffffffUL;
+    }
+    return h;
+}
+
+static u32 gnuhash(const char *s)
+{
+    u32 h = 5381;
+    while (*s)
+        h = (h * 33 + (unsigned char)*s++) & 0xffffffffUL;
+    return h;
+}
+
+static int exported(struct gsym *g)
+{
+    int i;
+    if (!g->defined || g->hidden)
+        return 0;
+    if (!vername)
+        return 1;
+    for (i = 0; i < nverglobal; i++)
+        if (strcmp(verglobal[i], g->name) == 0)
+            return 1;
+    return 0;
+}
+
+static int dsym_cmp(const void *a, const void *b)
+{
+    const struct dsym *x = a, *y = b;
+    if (x->hash % gnb != y->hash % gnb)
+        return x->hash % gnb < y->hash % gnb ? -1 : 1;
+    return strcmp(x->name, y->name);
+}
+
+/* 動的な節を作る (大きさだけ) */
+static void make_dynamic(void)
+{
+    int h;
+    struct gsym *g;
+    u32 n;
+    ndsyms = 1;
+    dsyms = xmalloc(sizeof(struct dsym));
+    for (h = 0; h < 4096; h++)
+        for (g = gtab[h]; g; g = g->next)
+            if (exported(g)) {
+                dsyms = xrealloc(dsyms, (long)(ndsyms + 1) * (long)sizeof(struct dsym));
+                dsyms[ndsyms].name = g->name;
+                dsyms[ndsyms].g = g;
+                ndsyms++;
+            }
+    if (vername) {
+        dsyms = xrealloc(dsyms, (long)(ndsyms + 1) * (long)sizeof(struct dsym));
+        dsyms[ndsyms].name = vername;
+        dsyms[ndsyms].g = 0;
+        ndsyms++;
+    }
+    n = (u32)ndsyms;
+    gnb = n > 2 ? (n - 1) / 2 : 1;
+    for (h = 1; h < ndsyms; h++)
+        dsyms[h].hash = gnuhash(dsyms[h].name);
+    /* .gnu.hash は bucket の順に並べた記号を要る */
+    qsort(dsyms + 1, (size_t)(ndsyms - 1), sizeof(struct dsym), dsym_cmp);
+    stradd(&dynstr, "");
+    if (!soname)
+        soname = "";
+    if (soname[0])
+        stradd(&dynstr, soname);
+    for (h = 1; h < ndsyms; h++)
+        dsyms[h].nameoff = stradd(&dynstr, dsyms[h].name);
+    s_hash = synsec(".hash", SHT_HASH, SHF_ALLOC, 4, 4 * (2 + n + n));
+    s_gnuhash = synsec(".gnu.hash", SHT_GNU_HASH, SHF_ALLOC, 4, 16 + 4 + 4 * gnb + 4 * (n - 1));
+    s_dynsym = synsec(".dynsym", SHT_DYNSYM, SHF_ALLOC, 4, 16 * n);
+    s_dynstr = synsec(".dynstr", SHT_STRTAB, SHF_ALLOC, 1, (u32)dynstr.size);
+    s_versym = synsec(".gnu.version", SHT_GNU_VERSYM, SHF_ALLOC, 2, 2 * n);
+    if (vername)
+        s_verdef = synsec(".gnu.version_d", SHT_GNU_VERDEF, SHF_ALLOC, 4, 2 * 28);
+    s_dynamic = synsec(".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE, 4, 8 * 12);
+}
+
+static u32 secaddr(struct isec *x)
+{
+    return x ? x->addr : 0;
+}
+
+static void put16(unsigned char *p, u32 v)
+{
+    p[0] = (unsigned char)(v & 0xff);
+    p[1] = (unsigned char)((v >> 8) & 0xff);
+}
+
+/* 割付けの後に中身を書く。節の番号 (shndx) が決まっている */
+static void fill_dynamic(void)
+{
+    u32 n = (u32)ndsyms, i;
+    unsigned char *p;
+    struct osec *strout = s_dynstr->out;
+    /* .dynsym */
+    for (i = 1; i < n; i++) {
+        struct gsym *g = dsyms[i].g;
+        p = s_dynsym->data + i * 16;
+        wr32(p, (u32)dsyms[i].nameoff);
+        if (g) {
+            int shndx = g->sec ? (g->sec->out ? g->sec->out->shndx : SHN_ABS) : osec_index(g->osec);
+            wr32(p + 4, symaddr(g));
+            wr32(p + 8, g->size);
+            p[12] = (unsigned char)(((g->weak ? STB_WEAK : STB_GLOBAL) << 4) | (g->type & 0xf));
+            put16(p + 14, (u32)shndx);
+        } else {
+            p[12] = (STB_GLOBAL << 4) | STT_OBJECT;
+            put16(p + 14, SHN_ABS);
+        }
+    }
+    /* .dynstr */
+    memcpy(s_dynstr->data, dynstr.buf, dynstr.size);
+    /* .hash (SysV): nbucket = nchain = n */
+    p = s_hash->data;
+    wr32(p, n);
+    wr32(p + 4, n);
+    for (i = 1; i < n; i++) {
+        u32 b = elfhash(dsyms[i].name) % n;
+        /* 鎖の先頭に差し込む */
+        wr32(p + 8 + 4 * n + 4 * i, rd32(p + 8 + 4 * b));
+        wr32(p + 8 + 4 * b, i);
+    }
+    /* .gnu.hash: symoffset 1，bloom 1 語，shift 6 */
+    p = s_gnuhash->data;
+    wr32(p, gnb);
+    wr32(p + 4, 1);
+    wr32(p + 8, 1);
+    wr32(p + 12, 6);
+    {
+        u32 bloom = 0;
+        for (i = 1; i < n; i++) {
+            u32 hv = dsyms[i].hash, b = hv % gnb;
+            bloom |= (1UL << (hv % 32)) | (1UL << ((hv >> 6) % 32));
+            if (rd32(p + 20 + 4 * b) == 0)
+                wr32(p + 20 + 4 * b, i);
+            wr32(p + 20 + 4 * gnb + 4 * (i - 1),
+                 (hv & ~1UL) | (i + 1 == n || dsyms[i + 1].hash % gnb != b ? 1 : 0));
+        }
+        wr32(p + 16, bloom & 0xffffffffUL);
+    }
+    /* .gnu.version: 空は 0 (局所)，他は 2 (VERSION の節点) か 1 (大域) */
+    for (i = 1; i < n; i++)
+        put16(s_versym->data + 2 * i, vername ? 2 : 1);
+    /* .gnu.version_d: 基底 (soname) と節点の 2 つ */
+    if (s_verdef) {
+        p = s_verdef->data;
+        put16(p, 1);
+        put16(p + 2, 1);        /* VER_FLG_BASE */
+        put16(p + 4, 1);
+        put16(p + 6, 1);
+        wr32(p + 8, elfhash(soname));
+        wr32(p + 12, 20);
+        wr32(p + 16, 28);
+        wr32(p + 20, soname[0] ? 1 : 0);
+        wr32(p + 24, 0);
+        p += 28;
+        put16(p, 1);
+        put16(p + 2, 0);
+        put16(p + 4, 2);
+        put16(p + 6, 1);
+        wr32(p + 8, elfhash(vername));
+        wr32(p + 12, 20);
+        wr32(p + 16, 0);
+        for (i = 1; i < n; i++)
+            if (!dsyms[i].g)
+                wr32(p + 20, (u32)dsyms[i].nameoff);
+        wr32(p + 24, 0);
+    }
+    /* .dynamic */
+    {
+        u32 dyn[24];
+        int k = 0;
+        if (soname[0]) {
+            dyn[k++] = 14;      /* DT_SONAME */
+            dyn[k++] = 1;
+        }
+        dyn[k++] = 4; dyn[k++] = secaddr(s_hash);
+        dyn[k++] = 0x6ffffef5UL; dyn[k++] = secaddr(s_gnuhash);
+        dyn[k++] = 5; dyn[k++] = secaddr(s_dynstr);
+        dyn[k++] = 6; dyn[k++] = secaddr(s_dynsym);
+        dyn[k++] = 10; dyn[k++] = (u32)dynstr.size;
+        dyn[k++] = 11; dyn[k++] = 16;
+        dyn[k++] = 0x6ffffff0UL; dyn[k++] = secaddr(s_versym);
+        if (s_verdef) {
+            dyn[k++] = 0x6ffffffcUL; dyn[k++] = secaddr(s_verdef);
+            dyn[k++] = 0x6ffffffdUL; dyn[k++] = 2;
+        }
+        dyn[k++] = 0; dyn[k++] = 0;
+        for (i = 0; i < (u32)k; i++)
+            wr32(s_dynamic->data + 4 * i, dyn[i]);
+    }
+    /* 節見出しの sh_link・sh_info・sh_entsize */
+    s_dynsym->out->link = strout;
+    s_dynsym->out->info = 1;
+    s_dynsym->out->entsize = 16;
+    s_hash->out->link = s_dynsym->out;
+    s_hash->out->entsize = 4;
+    s_gnuhash->out->link = s_dynsym->out;
+    s_versym->out->link = s_dynsym->out;
+    s_versym->out->entsize = 2;
+    if (s_verdef) {
+        s_verdef->out->link = strout;
+        s_verdef->out->info = 2;
+    }
+    s_dynamic->out->link = strout;
+    s_dynamic->out->entsize = 8;
+}
+
+/* --build-id: SHA-1 (FIPS 180-4) を出力のファイル全体で計算する。.note の
+ * 中身 (20 バイト) は 0 にしてから計算し，後で書き込む */
+static u32 rol(u32 x, int n)
+{
+    return ((x << n) | (x >> (32 - n))) & 0xffffffffUL;
+}
+
+static void sha1_block(u32 *hs, const unsigned char *b)
+{
+    u32 w[80], a, bb, c, d, e, t;
+    int i;
+    for (i = 0; i < 16; i++)
+        w[i] = ((u32)b[4 * i] << 24) | ((u32)b[4 * i + 1] << 16) | ((u32)b[4 * i + 2] << 8)
+               | (u32)b[4 * i + 3];
+    for (i = 16; i < 80; i++)
+        w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    a = hs[0]; bb = hs[1]; c = hs[2]; d = hs[3]; e = hs[4];
+    for (i = 0; i < 80; i++) {
+        u32 f, k;
+        if (i < 20) {
+            f = (bb & c) | ((~bb & 0xffffffffUL) & d);
+            k = 0x5a827999UL;
+        } else if (i < 40) {
+            f = bb ^ c ^ d;
+            k = 0x6ed9eba1UL;
+        } else if (i < 60) {
+            f = (bb & c) | (bb & d) | (c & d);
+            k = 0x8f1bbcdcUL;
+        } else {
+            f = bb ^ c ^ d;
+            k = 0xca62c1d6UL;
+        }
+        t = (rol(a, 5) + f + e + k + w[i]) & 0xffffffffUL;
+        e = d;
+        d = c;
+        c = rol(bb, 30);
+        bb = a;
+        a = t;
+    }
+    hs[0] = (hs[0] + a) & 0xffffffffUL;
+    hs[1] = (hs[1] + bb) & 0xffffffffUL;
+    hs[2] = (hs[2] + c) & 0xffffffffUL;
+    hs[3] = (hs[3] + d) & 0xffffffffUL;
+    hs[4] = (hs[4] + e) & 0xffffffffUL;
+}
+
+static void sha1(const unsigned char *p, long n, unsigned char *out)
+{
+    u32 hs[5];
+    unsigned char last[128];
+    long i, rem;
+    int k;
+    hs[0] = 0x67452301UL;
+    hs[1] = 0xefcdab89UL;
+    hs[2] = 0x98badcfeUL;
+    hs[3] = 0x10325476UL;
+    hs[4] = 0xc3d2e1f0UL;
+    for (i = 0; i + 64 <= n; i += 64)
+        sha1_block(hs, p + i);
+    rem = n - i;
+    memset(last, 0, sizeof last);
+    memcpy(last, p + i, rem);
+    last[rem] = 0x80;
+    {
+        long tot = rem + 1 + 8 > 64 ? 128 : 64;
+        unsigned long bits = (unsigned long)n * 8UL;
+        /* 長さ (bit) を big endian の 64 bit で。32 bit を超える長さは扱わない */
+        last[tot - 4] = (unsigned char)((bits >> 24) & 0xff);
+        last[tot - 3] = (unsigned char)((bits >> 16) & 0xff);
+        last[tot - 2] = (unsigned char)((bits >> 8) & 0xff);
+        last[tot - 1] = (unsigned char)(bits & 0xff);
+        last[tot - 5] = (unsigned char)(((unsigned long)n >> 29) & 0xff);
+        sha1_block(hs, last);
+        if (tot == 128)
+            sha1_block(hs, last + 64);
+    }
+    for (k = 0; k < 5; k++) {
+        out[4 * k] = (unsigned char)((hs[k] >> 24) & 0xff);
+        out[4 * k + 1] = (unsigned char)((hs[k] >> 16) & 0xff);
+        out[4 * k + 2] = (unsigned char)((hs[k] >> 8) & 0xff);
+        out[4 * k + 3] = (unsigned char)(hs[k] & 0xff);
+    }
+}
+
+static void make_buildid(void)
+{
+    s_buildid = synsec(".note.gnu.build-id", SHT_NOTE, SHF_ALLOC, 4, 36);
+    wr32(s_buildid->data, 4);
+    wr32(s_buildid->data + 4, 20);
+    wr32(s_buildid->data + 8, 3);        /* NT_GNU_BUILD_ID */
+    memcpy(s_buildid->data + 12, "GNU", 4);
+}
+
 /* ---- 出力 ---- */
 static unsigned char *obuf;
 static long opos;
@@ -1979,23 +2678,6 @@ static void patch32(long at, u32 v)
     wr32(obuf + at, v);
 }
 
-struct strtab {
-    char *buf;
-    long size;
-    long cap;
-};
-
-static long stradd(struct strtab *t, const char *s)
-{
-    long n = (long)strlen(s) + 1, off = t->size;
-    while (t->size + n > t->cap) {
-        t->cap = t->cap ? t->cap * 2 : 1024;
-        t->buf = xrealloc(t->buf, t->cap);
-    }
-    memcpy(t->buf + t->size, s, n);
-    t->size += n;
-    return off;
-}
 
 static int is_local_name(const char *n)
 {
@@ -2020,33 +2702,219 @@ static int osec_index(struct osec *o)
     return o && o->shndx ? o->shndx : SHN_ABS;
 }
 
+static struct osec **olist;     /* 出力する節 (節見出しの 1 番から) */
+static int nolist;
+
+/* 出力する節を決めて番号を付ける */
+static void number_sections(void)
+{
+    struct stmt *s;
+    for (s = top; s; s = s->next)
+        if (s->kind == S_OSEC && !s->os->discard && (s->os->size || s->os->orphan == 0)) {
+            struct osec *o = s->os;
+            if (o->size == 0 && o->kind < 0)
+                continue;
+            olist = xrealloc(olist, (long)(nolist + 1) * (long)sizeof(struct osec *));
+            olist[nolist++] = o;
+            o->shndx = nolist;
+        }
+}
+
+/* :phdr の名前を PHDRS で引く。指定の無い節は前の節の指定を引き継ぐ
+ * (GNU ld と同じ)。:NONE はどの program header にも入れない */
+static void resolve_phdrs(void)
+{
+    struct stmt *s;
+    struct phdr **cur = 0;
+    int ncur = 0;
+    if (!phdrs)
+        return;
+    for (s = top; s; s = s->next) {
+        struct osec *o;
+        int i;
+        if (s->kind != S_OSEC || s->os->discard)
+            continue;
+        o = s->os;
+        if (!o->nph) {
+            o->ph = cur;
+            o->nph = ncur;
+            continue;
+        }
+        o->ph = xmalloc((long)o->nph * (long)sizeof(struct phdr *));
+        ncur = 0;
+        for (i = 0; i < o->nph; i++) {
+            struct phdr *p;
+            if (strcmp(o->phname[i], "NONE") == 0)
+                continue;
+            for (p = phdrs; p && strcmp(p->name, o->phname[i]) != 0; p = p->next)
+                ;
+            if (!p)
+                fatal("PHDRS に無い program header", o->phname[i]);
+            o->ph[ncur++] = p;
+        }
+        o->nph = ncur;
+        cur = o->ph;
+    }
+}
+
+static int in_phdr(struct osec *o, struct phdr *p)
+{
+    int i;
+    for (i = 0; i < o->nph; i++)
+        if (o->ph[i] == p)
+            return 1;
+    return 0;
+}
+
+/* 節の中身を書く。PHDRS があれば，PT_LOAD の中の節はファイルの位置と番地の
+ * 差を揃える (FILEHDR の PT_LOAD は位置 0 から始まる) */
+static void write_sections(u32 hdrsize)
+{
+    int i;
+    struct phdr *p;
+    for (p = phdrs; p; p = p->next) {
+        struct osec *first = 0;
+        for (i = 0; i < nolist; i++)
+            if (in_phdr(olist[i], p)) {
+                first = olist[i];
+                break;
+            }
+        p->nsec = 0;
+        p->offset = (u32)-1;
+        if (p->type != PT_LOAD)
+            continue;
+        if (p->filehdr) {
+            if (!first)
+                p->vaddr = 0;
+            else if (first->vma < hdrsize)
+                fatal("FILEHDR の PT_LOAD の先頭の節が見出しと重なる", first->name);
+            else
+                p->vaddr = first->vma - hdrsize;
+            p->offset = 0;
+        } else if (first)
+            p->vaddr = first->vma;
+    }
+    for (i = 0; i < nolist; i++) {
+        struct osec *o = olist[i];
+        struct phdr *load = 0;
+        int k;
+        for (k = 0; k < o->nph; k++)
+            if (o->ph[k]->type == PT_LOAD)
+                load = o->ph[k];
+        if (load) {
+            u32 target;
+            if (load->offset == (u32)-1) {
+                /* ファイルの位置を番地と 4 KiB を法として揃える */
+                target = (u32)opos + ((o->vma - (u32)opos) & 0xfff);
+                load->offset = target - (o->vma - load->vaddr);
+            } else
+                target = load->offset + (o->vma - load->vaddr);
+            if ((long)target < opos)
+                fatal("節のファイルの位置が前の節と重なる", o->name);
+            while (opos < (long)target)
+                out1(0);
+        } else
+            outpad(o->maxalign > 4 ? (long)o->maxalign : 4);
+        o->offset = opos;
+        if (o->type != SHT_NOBITS && o->data) {
+            long k2;
+            for (k2 = 0; k2 < (long)o->size; k2++)
+                out1(o->data[k2]);
+        }
+    }
+}
+
+/* PHDRS の各項の値を，含む節から決める */
+static void fill_phdrs(long phoff, u32 hdrsize)
+{
+    struct phdr *p;
+    long at = phoff;
+    int i;
+    for (p = phdrs; p; p = p->next) {
+        u32 lo = 0, hi = 0, fhi = 0, flo = 0, fl = PF_R, al = 1;
+        int any = 0;
+        struct osec *first = 0;
+        for (i = 0; i < nolist; i++) {
+            struct osec *o = olist[i];
+            u32 fend;
+            if (!in_phdr(o, p))
+                continue;
+            if (!any) {
+                lo = o->vma;
+                flo = (u32)o->offset;
+                first = o;
+            }
+            any = 1;
+            if (o->vma + o->size > hi)
+                hi = o->vma + o->size;
+            fend = (u32)o->offset + (o->type == SHT_NOBITS ? 0 : o->size);
+            if (fend > fhi)
+                fhi = fend;
+            if (o->flags & SHF_WRITE)
+                fl |= PF_W;
+            if (o->flags & SHF_EXECINSTR)
+                fl |= PF_X;
+            if (o->maxalign > al)
+                al = o->maxalign;
+        }
+        if (p->type == PT_LOAD) {
+            al = 0x1000;
+            if (p->filehdr) {
+                flo = 0;
+                lo = p->vaddr;
+                if (!any)
+                    hi = fhi = hdrsize;
+            }
+        } else if (p->type == PT_PHDR) {
+            flo = (u32)phoff;
+            fhi = flo + (u32)(nphdrs * 32);
+            lo = 0;
+            hi = fhi - flo;
+            al = 4;
+        }
+        if (!any && p->type != PT_PHDR && !(p->type == PT_LOAD && p->filehdr))
+            lo = hi = flo = fhi = 0;
+        patch32(at, p->type);
+        patch32(at + 4, flo);
+        patch32(at + 8, lo);
+        patch32(at + 12, first ? (lo + (first->lma - first->vma)) & 0xffffffffUL : lo);
+        patch32(at + 16, fhi - flo);
+        patch32(at + 20, hi - lo);
+        patch32(at + 24, p->flagexpr ? (u32)eval(p->flagexpr).v : fl);
+        patch32(at + 28, al);
+        at += 32;
+    }
+}
+
 static void writeelf(u32 entry)
 {
     struct strtab shstr, str;
-    struct stmt *s;
-    struct osec *o, **list = 0;
-    int n = 0, i, nph = 0, shnum, symidx, stridx, shstridx, nlocal, nsyms = 0;
-    long phoff, shoff, symoff, symsize, stroff, shstroff;
+    struct osec *o;
+    int n = nolist, i, nph = 0, shnum, stridx, shstridx, nlocal = 0, nsyms = 0;
+    long phoff, shoff, symoff = 0, symsize = 0, stroff = 0, shstroff;
+    long symname = 0, strname = 0, shstrname;
+    u32 hdrsize;
     memset(&shstr, 0, sizeof shstr);
     memset(&str, 0, sizeof str);
     stradd(&shstr, "");
     stradd(&str, "");
-    for (s = top; s; s = s->next)
-        if (s->kind == S_OSEC && !s->os->discard && (s->os->size || s->os->orphan == 0)) {
-            o = s->os;
-            if (o->size == 0 && o->kind < 0)
-                continue;
-            list = xrealloc(list, (long)(n + 1) * (long)sizeof(struct osec *));
-            list[n++] = o;
-            o->shndx = n;
-            o->nameoff = stradd(&shstr, o->name);
-            if (o->size)
-                nph++;
-        }
-    symidx = n + 1;
-    stridx = n + 2;
-    shstridx = n + 3;
-    shnum = n + 4;
+    for (i = 0; i < n; i++) {
+        olist[i]->nameoff = stradd(&shstr, olist[i]->name);
+        if (olist[i]->size)
+            nph++;
+    }
+    if (phdrs)
+        nph = nphdrs;
+    if (stripall) {
+        stridx = 0;
+        shstridx = n + 1;
+        shnum = n + 2;
+    } else {
+        stridx = n + 2;
+        shstridx = n + 3;
+        shnum = n + 4;
+    }
+    hdrsize = 52 + 32 * (u32)nph;
 
     /* ELF 見出し */
     outn(0x464c457fUL, 4);
@@ -2056,7 +2924,7 @@ static void writeelf(u32 entry)
     out1(0);
     outn(0, 4);
     outn(0, 4);
-    outn(2, 2);                 /* ET_EXEC */
+    outn(shared ? 3 : 2, 2);    /* ET_DYN / ET_EXEC */
     outn(243, 2);               /* EM_RISCV */
     outn(1, 4);
     outn(entry, 4);
@@ -2073,23 +2941,25 @@ static void writeelf(u32 entry)
     for (i = 0; i < nph * 32; i++)
         out1(0);
 
-    /* 節の中身 */
-    for (i = 0; i < n; i++) {
-        o = list[i];
-        outpad(o->maxalign > 4 ? (long)o->maxalign : 4);
-        o->offset = opos;
-        if (o->type != SHT_NOBITS && o->data) {
-            long k;
-            for (k = 0; k < (long)o->size; k++)
-                out1(o->data[k]);
-        }
-    }
-    /* program header: 大きさのある出力節ごとに PT_LOAD */
-    {
+    if (phdrs) {
+        write_sections(hdrsize);
+        fill_phdrs(phoff, hdrsize);
+    } else {
         long at = phoff;
         for (i = 0; i < n; i++) {
+            o = olist[i];
+            outpad(o->maxalign > 4 ? (long)o->maxalign : 4);
+            o->offset = opos;
+            if (o->type != SHT_NOBITS && o->data) {
+                long k;
+                for (k = 0; k < (long)o->size; k++)
+                    out1(o->data[k]);
+            }
+        }
+        /* program header: 大きさのある出力節ごとに PT_LOAD */
+        for (i = 0; i < n; i++) {
             u32 fl = PF_R;
-            o = list[i];
+            o = olist[i];
             if (!o->size)
                 continue;
             if (o->flags & SHF_WRITE)
@@ -2109,91 +2979,374 @@ static void writeelf(u32 entry)
     }
 
     /* 記号表: 空・局所 (入力の局所の記号)・大域 */
+    if (!stripall) {
+        outpad(4);
+        symoff = opos;
+        outn(0, 4); outn(0, 4); outn(0, 4); out1(0); out1(0); outn(0, 2);
+        nsyms = 1;
+        for (i = 0; i < nfiles; i++) {
+            struct ifile *f = files[i];
+            int k;
+            for (k = 1; k < f->nsym; k++) {
+                struct lsym *ls = &f->syms[k];
+                struct isec *x;
+                if (ls->bind != STB_LOCAL || ls->type == STT_SECTION || ls->type == STT_FILE
+                    || !ls->name[0] || is_local_name(ls->name))
+                    continue;
+                if (ls->shndx == SHN_ABS) {
+                    outsym(&str, ls->name, ls->value, ls->size, STB_LOCAL, ls->type, 0, SHN_ABS);
+                    nsyms++;
+                    continue;
+                }
+                if (ls->shndx >= f->nsec || !(x = f->secs[ls->shndx]) || x->discard || !x->out)
+                    continue;
+                outsym(&str, ls->name, (x->addr + ls->value) & 0xffffffffUL, ls->size,
+                       STB_LOCAL, ls->type, 0, x->out->shndx);
+                nsyms++;
+            }
+        }
+        nlocal = nsyms;
+        {
+            int h;
+            struct gsym *g;
+            for (h = 0; h < 4096; h++)
+                for (g = gtab[h]; g; g = g->next) {
+                    int shndx;
+                    if (!g->defined) {
+                        if (!g->referenced)
+                            continue;
+                        shndx = SHN_UNDEF;
+                    } else if (g->sec)
+                        shndx = g->sec->discard || !g->sec->out || !g->sec->out->shndx
+                            ? SHN_ABS : g->sec->out->shndx;
+                    else
+                        shndx = osec_index(g->osec);
+                    outsym(&str, g->name, g->defined ? symaddr(g) : 0, g->size,
+                           g->weak ? STB_WEAK : STB_GLOBAL, g->type, g->hidden ? 2 : 0, shndx);
+                    nsyms++;
+                }
+        }
+        symsize = opos - symoff;
+        stroff = opos;
+        for (i = 0; i < str.size; i++)
+            out1(str.buf[i]);
+        symname = stradd(&shstr, ".symtab");
+        strname = stradd(&shstr, ".strtab");
+    }
+    shstrname = stradd(&shstr, ".shstrtab");
+    shstroff = opos;
+    for (i = 0; i < shstr.size; i++)
+        out1(shstr.buf[i]);
     outpad(4);
-    symoff = opos;
-    outn(0, 4); outn(0, 4); outn(0, 4); out1(0); out1(0); outn(0, 2);
-    nsyms = 1;
+    shoff = opos;
+    for (i = 0; i < 10; i++)
+        outn(0, 4);
+    for (i = 0; i < n; i++) {
+        o = olist[i];
+        outn((u32)o->nameoff, 4);
+        outn((u32)o->type, 4);
+        outn(o->flags, 4);
+        outn(o->vma, 4);
+        outn((u32)o->offset, 4);
+        outn(o->size, 4);
+        outn(o->link ? (u32)o->link->shndx : 0, 4);
+        outn(o->info, 4);
+        outn(o->maxalign, 4);
+        outn(o->entsize, 4);
+    }
+    if (!stripall) {
+        outn((u32)symname, 4); outn(SHT_SYMTAB, 4); outn(0, 4); outn(0, 4);
+        outn((u32)symoff, 4); outn((u32)symsize, 4); outn((u32)stridx, 4);
+        outn((u32)nlocal, 4); outn(4, 4); outn(16, 4);
+        outn((u32)strname, 4); outn(SHT_STRTAB, 4); outn(0, 4); outn(0, 4);
+        outn((u32)stroff, 4); outn((u32)str.size, 4); outn(0, 4); outn(0, 4);
+        outn(1, 4); outn(0, 4);
+    }
+    outn((u32)shstrname, 4); outn(SHT_STRTAB, 4); outn(0, 4); outn(0, 4);
+    outn((u32)shstroff, 4); outn((u32)shstr.size, 4); outn(0, 4); outn(0, 4);
+    outn(1, 4); outn(0, 4);
+    patch32(32, (u32)shoff);
+}
+
+static void writeout(const char *outname)
+{
+    FILE *f = fopen(outname, "wb");
+    if (!f)
+        fatal("書けない", outname);
+    if ((long)fwrite(obuf, 1, opos, f) != opos)
+        fatal("書込みに失敗した", outname);
+    if (fclose(f) != 0)
+        fatal("書込みに失敗した", outname);
+}
+
+/* ---- -r: 再配置可能オブジェクトを出す ----
+ * 入力の節を名前ごとにまとめ (最初に現れた順)，番地は 0 のまま節の中の位置を
+ * 決める。局所の記号はすべて (.L で始まるものも。%pcrel_lo が引く) 残し，
+ * 再配置は出力の節の記号か記号へ付け替えて出す。COMMON は COMMON のまま
+ * 残す。台本は EXTERN だけを使い，SECTIONS は持たない */
+static struct osec **rsecs;
+static int nrsecs;
+
+static void rlayout(void)
+{
+    int i, k;
     for (i = 0; i < nfiles; i++) {
         struct ifile *f = files[i];
-        int k;
+        for (k = 0; k < f->nsec; k++) {
+            struct isec *x = f->secs[k];
+            struct osec *o = 0;
+            int j;
+            if (!x)
+                continue;
+            for (j = 0; j < nrsecs; j++)
+                if (strcmp(rsecs[j]->name, x->name) == 0)
+                    o = rsecs[j];
+            if (!o) {
+                o = new_osec(x->name);
+                o->type = x->type;
+                o->flags = x->flags;
+                rsecs = xrealloc(rsecs, (long)(nrsecs + 1) * (long)sizeof(struct osec *));
+                rsecs[nrsecs++] = o;
+                o->shndx = nrsecs;
+            }
+            if (x->type != SHT_NOBITS)
+                o->type = x->type;
+            o->flags |= x->flags;
+            if (x->align > o->maxalign)
+                o->maxalign = x->align;
+            x->addr = alignup(o->size, x->align);
+            o->size = x->addr + x->size;
+            x->out = o;
+            addlist(o->body ? o->body : (o->body = mkstmt(S_INPUT)), x);
+        }
+    }
+    for (i = 0; i < nrsecs; i++) {
+        struct osec *o = rsecs[i];
+        struct stmt *b = o->body;
+        if (o->type == SHT_NOBITS)
+            continue;
+        o->data = xmalloc((long)o->size);
+        for (k = 0; k < b->nlist; k++)
+            if (b->list[k]->data)
+                memcpy(o->data + b->list[k]->addr, b->list[k]->data, b->list[k]->size);
+    }
+}
+
+static void writerel(void)
+{
+    struct strtab shstr, str;
+    int i, k, nsyms, nlocal;
+    long *relnameoff, symoff, stroff, shstroff, shoff, *reloff, *relsize;
+    int **lmap;                 /* ファイルごと，入力の記号の番号から出力の番号 */
+    int h;
+    struct gsym *g;
+    long symnameoff, strnameoff, shstrnameoff;
+    memset(&shstr, 0, sizeof shstr);
+    memset(&str, 0, sizeof str);
+    stradd(&shstr, "");
+    stradd(&str, "");
+    relnameoff = xmalloc((long)(nrsecs + 1) * (long)sizeof(long));
+    reloff = xmalloc((long)(nrsecs + 1) * (long)sizeof(long));
+    relsize = xmalloc((long)(nrsecs + 1) * (long)sizeof(long));
+    for (i = 0; i < nrsecs; i++) {
+        char *rn = xmalloc((long)strlen(rsecs[i]->name) + 6);
+        sprintf(rn, ".rela%s", rsecs[i]->name);
+        rsecs[i]->nameoff = stradd(&shstr, rsecs[i]->name);
+        relnameoff[i] = stradd(&shstr, rn);
+    }
+    symnameoff = stradd(&shstr, ".symtab");
+    strnameoff = stradd(&shstr, ".strtab");
+    shstrnameoff = stradd(&shstr, ".shstrtab");
+
+    /* ELF 見出し */
+    outn(0x464c457fUL, 4);
+    out1(1); out1(1); out1(1); out1(0);
+    outn(0, 4); outn(0, 4);
+    outn(1, 2);                 /* ET_REL */
+    outn(243, 2);
+    outn(1, 4);
+    outn(0, 4); outn(0, 4); outn(0, 4); outn(0, 4);
+    outn(52, 2); outn(0, 2); outn(0, 2); outn(40, 2);
+    outn((u32)(2 * nrsecs + 4), 2);
+    outn((u32)(2 * nrsecs + 3), 2);
+    for (i = 0; i < nrsecs; i++) {
+        struct osec *o = rsecs[i];
+        outpad(o->maxalign > 4 ? (long)o->maxalign : 4);
+        o->offset = opos;
+        if (o->type != SHT_NOBITS)
+            for (k = 0; k < (long)o->size; k++)
+                out1(o->data[k]);
+    }
+
+    /* 記号表: 空・出力の節の記号・入力の局所・大域 */
+    outpad(4);
+    symoff = opos;
+    outsym(&str, "", 0, 0, STB_LOCAL, 0, 0, 0);
+    nsyms = 1;
+    for (i = 0; i < nrsecs; i++) {
+        outn(0, 4); outn(0, 4); outn(0, 4); out1((STB_LOCAL << 4) | STT_SECTION); out1(0);
+        outn((u32)rsecs[i]->shndx, 2);
+        nsyms++;
+    }
+    lmap = xmalloc((long)(nfiles + 1) * (long)sizeof(int *));
+    for (i = 0; i < nfiles; i++) {
+        struct ifile *f = files[i];
+        lmap[i] = xmalloc((long)(f->nsym + 1) * (long)sizeof(int));
         for (k = 1; k < f->nsym; k++) {
             struct lsym *ls = &f->syms[k];
             struct isec *x;
-            if (ls->bind != STB_LOCAL || ls->type == STT_SECTION || ls->type == STT_FILE
-                || !ls->name[0] || is_local_name(ls->name))
+            if (ls->bind != STB_LOCAL || ls->type == STT_SECTION || ls->type == STT_FILE)
                 continue;
             if (ls->shndx == SHN_ABS) {
                 outsym(&str, ls->name, ls->value, ls->size, STB_LOCAL, ls->type, 0, SHN_ABS);
-                nsyms++;
+                lmap[i][k] = nsyms++;
                 continue;
             }
-            if (ls->shndx >= f->nsec || !(x = f->secs[ls->shndx]) || x->discard || !x->out)
+            if (ls->shndx >= f->nsec || !(x = f->secs[ls->shndx]))
                 continue;
-            outsym(&str, ls->name, (x->addr + ls->value) & 0xffffffffUL, ls->size,
-                   STB_LOCAL, ls->type, 0, x->out->shndx);
-            nsyms++;
+            outsym(&str, ls->name, x->addr + ls->value, ls->size, STB_LOCAL, ls->type, 0,
+                   x->out->shndx);
+            lmap[i][k] = nsyms++;
         }
     }
     nlocal = nsyms;
-    {
-        int h;
-        struct gsym *g;
-        for (h = 0; h < 4096; h++)
-            for (g = gtab[h]; g; g = g->next) {
-                int shndx;
-                if (!g->defined) {
-                    if (!g->referenced)
-                        continue;
-                    shndx = SHN_UNDEF;
-                } else if (g->sec)
-                    shndx = g->sec->discard || !g->sec->out || !g->sec->out->shndx
-                        ? SHN_ABS : g->sec->out->shndx;
-                else
-                    shndx = osec_index(g->osec);
-                outsym(&str, g->name, g->defined ? symaddr(g) : 0, g->size,
-                       g->weak ? STB_WEAK : STB_GLOBAL, g->type, g->hidden ? 2 : 0, shndx);
-                nsyms++;
+    for (h = 0; h < 4096; h++)
+        for (g = gtab[h]; g; g = g->next) {
+            int shndx;
+            u32 value, size = g->size;
+            if (!g->defined && !g->common && !g->referenced)
+                continue;
+            if (g->defined) {
+                shndx = g->sec ? g->sec->out->shndx : SHN_ABS;
+                value = symaddr(g);
+            } else if (g->common) {
+                shndx = SHN_COMMON;
+                value = g->calign ? g->calign : 4;
+                size = g->common;
+            } else {
+                shndx = SHN_UNDEF;
+                value = 0;
             }
-    }
-    symsize = opos - symoff;
-    stroff = opos;
-    for (i = 0; i < str.size; i++)
-        out1(str.buf[i]);
+            g->outidx = nsyms++;
+            outsym(&str, g->name, value, size, g->weak ? STB_WEAK : STB_GLOBAL,
+                   g->common && !g->defined ? STT_OBJECT : g->type, g->hidden ? 2 : 0, shndx);
+        }
     {
-        long a = stradd(&shstr, ".symtab"), b = stradd(&shstr, ".strtab"),
-             c = stradd(&shstr, ".shstrtab");
+        long symsize = opos - symoff;
+        stroff = opos;
+        for (k = 0; k < str.size; k++)
+            out1(str.buf[k]);
+
+        /* 再配置 */
+        for (i = 0; i < nrsecs; i++) {
+            struct stmt *b = rsecs[i]->body;
+            outpad(4);
+            reloff[i] = opos;
+            for (k = 0; b && k < b->nlist; k++) {
+                struct isec *x = b->list[k];
+                int fi, r;
+                for (fi = 0; fi < nfiles && files[fi] != x->file; fi++)
+                    ;
+                for (r = 0; r < x->nrel; r++) {
+                    unsigned char *e = x->rel + r * 12;
+                    u32 off = rd32(e), info = rd32(e + 4);
+                    long addend = sext(rd32(e + 8), 32);
+                    int sk = (int)(info >> 8), ns;
+                    struct lsym *ls;
+                    if ((info & 0xff) == R_RISCV_NONE)
+                        continue;
+                    if (sk <= 0 || sk >= x->file->nsym)
+                        fatal("再配置の記号の番号が範囲外", x->file->name);
+                    ls = &x->file->syms[sk];
+                    if (ls->g)
+                        ns = ls->g->outidx;
+                    else if (ls->type == STT_SECTION) {
+                        struct isec *t = ls->shndx < x->file->nsec ? x->file->secs[ls->shndx] : 0;
+                        if (!t)
+                            fatal("割り付けない節への再配置", x->file->name);
+                        ns = t->out->shndx;  /* 節の記号は出力の節の番号と同じ位置 */
+                        addend += (long)t->addr;
+                    } else {
+                        ns = lmap[fi][sk];
+                        if (!ns)
+                            fatal("再配置が出力しない記号を引く", ls->name);
+                    }
+                    outn(x->addr + off, 4);
+                    outn(((u32)ns << 8) | (info & 0xff), 4);
+                    outn((u32)addend, 4);
+                }
+            }
+            relsize[i] = opos - reloff[i];
+        }
         shstroff = opos;
-        for (i = 0; i < shstr.size; i++)
-            out1(shstr.buf[i]);
+        for (k = 0; k < shstr.size; k++)
+            out1(shstr.buf[k]);
         outpad(4);
         shoff = opos;
-        for (i = 0; i < 10; i++)
+        for (k = 0; k < 10; k++)
             outn(0, 4);
-        for (i = 0; i < n; i++) {
-            o = list[i];
-            outn((u32)o->nameoff, 4);
-            outn((u32)o->type, 4);
-            outn(o->flags, 4);
-            outn(o->vma, 4);
-            outn((u32)o->offset, 4);
-            outn(o->size, 4);
-            outn(0, 4);
-            outn(0, 4);
-            outn(o->maxalign, 4);
-            outn(0, 4);
+        for (i = 0; i < nrsecs; i++) {
+            struct osec *o = rsecs[i];
+            outn((u32)o->nameoff, 4); outn((u32)o->type, 4); outn(o->flags, 4); outn(0, 4);
+            outn((u32)o->offset, 4); outn(o->size, 4); outn(0, 4); outn(0, 4);
+            outn(o->maxalign, 4); outn(0, 4);
         }
-        outn((u32)a, 4); outn(SHT_SYMTAB, 4); outn(0, 4); outn(0, 4);
-        outn((u32)symoff, 4); outn((u32)symsize, 4); outn((u32)stridx, 4);
+        for (i = 0; i < nrsecs; i++) {
+            outn((u32)relnameoff[i], 4); outn(SHT_RELA, 4); outn(0x40, 4); outn(0, 4);
+            outn((u32)reloff[i], 4); outn((u32)relsize[i], 4);
+            outn((u32)(2 * nrsecs + 1), 4); outn((u32)rsecs[i]->shndx, 4);
+            outn(4, 4); outn(12, 4);
+        }
+        outn((u32)symnameoff, 4); outn(SHT_SYMTAB, 4); outn(0, 4); outn(0, 4);
+        outn((u32)symoff, 4); outn((u32)symsize, 4); outn((u32)(2 * nrsecs + 2), 4);
         outn((u32)nlocal, 4); outn(4, 4); outn(16, 4);
-        outn((u32)b, 4); outn(SHT_STRTAB, 4); outn(0, 4); outn(0, 4);
+        outn((u32)strnameoff, 4); outn(SHT_STRTAB, 4); outn(0, 4); outn(0, 4);
         outn((u32)stroff, 4); outn((u32)str.size, 4); outn(0, 4); outn(0, 4);
         outn(1, 4); outn(0, 4);
-        outn((u32)c, 4); outn(SHT_STRTAB, 4); outn(0, 4); outn(0, 4);
+        outn((u32)shstrnameoff, 4); outn(SHT_STRTAB, 4); outn(0, 4); outn(0, 4);
         outn((u32)shstroff, 4); outn((u32)shstr.size, 4); outn(0, 4); outn(0, 4);
         outn(1, 4); outn(0, 4);
+        patch32(32, (u32)shoff);
     }
-    patch32(32, (u32)shoff);
-    (void)symidx;
+}
+
+/* --just-symbols: ファイルの定義された大域の記号を，番地だけを持つ絶対値の
+ * 記号として取り込む (vdso-syms.o) */
+static void justsymbols(const char *name)
+{
+    long size;
+    unsigned char *d = readfile(name, &size);
+    u32 shoff, shnum, i;
+    if (size < 52 || memcmp(d, "\177ELF\001\001", 6) != 0)
+        fatal("ELF32 でない", name);
+    shoff = rd32(d + 32);
+    shnum = rd16(d + 48);
+    if (shoff + shnum * 40 > (u32)size)
+        fatal("節見出しが末尾を越える", name);
+    for (i = 0; i < shnum; i++) {
+        unsigned char *h = d + shoff + i * 40;
+        u32 off, n, k;
+        const char *str;
+        if (rd32(h + 4) != SHT_SYMTAB)
+            continue;
+        off = rd32(h + 16);
+        n = rd32(h + 20) / 16;
+        str = (const char *)d + rd32(d + shoff + rd32(h + 24) * 40 + 16);
+        for (k = 1; k < n; k++) {
+            unsigned char *e = d + off + k * 16;
+            struct gsym *g;
+            if ((e[12] >> 4) == STB_LOCAL || rd16(e + 14) == SHN_UNDEF)
+                continue;
+            g = gsym(str + rd32(e), 1);
+            if (g->defined)
+                fatal("記号の多重定義", g->name);
+            g->defined = 1;
+            g->sec = 0;
+            g->value = rd32(e + 4);
+            g->size = rd32(e + 8);
+            g->type = e[12] & 15;
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -2202,7 +3355,7 @@ int main(int argc, char **argv)
     char *script;
     int i, k;
     u32 entry = 0;
-    int hasentry = 0;
+    int hasentry = 0, relocatable = 0;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (strcmp(a, "-o") == 0 && i + 1 < argc)
@@ -2213,27 +3366,59 @@ int main(int argc, char **argv)
             scriptfile = a + 2;
         else if (strcmp(a, "-e") == 0 && i + 1 < argc)
             entryname = argv[++i];
+        else if (strcmp(a, "-r") == 0 || strcmp(a, "--relocatable") == 0)
+            relocatable = 1;
+        else if (strcmp(a, "-s") == 0 || strcmp(a, "--strip-all") == 0)
+            stripall = 1;
+        else if (strcmp(a, "--build-id") == 0 || strcmp(a, "--build-id=sha1") == 0)
+            buildid = 1;
+        else if (strcmp(a, "-shared") == 0 || strcmp(a, "--shared") == 0)
+            shared = 1;
+        else if (strcmp(a, "--whole-archive") == 0)
+            whole = 1;
+        else if (strcmp(a, "--no-whole-archive") == 0)
+            whole = 0;
+        else if ((strcmp(a, "--just-symbols") == 0 || strcmp(a, "-R") == 0) && i + 1 < argc)
+            justsymbols(argv[++i]);
+        else if (strncmp(a, "--just-symbols=", 15) == 0)
+            justsymbols(a + 15);
+        else if ((strcmp(a, "-soname") == 0 || strcmp(a, "-h") == 0) && i + 1 < argc)
+            soname = argv[++i];
+        else if (strncmp(a, "-soname=", 8) == 0)
+            soname = a + 8;
         else if ((strcmp(a, "-z") == 0 || strcmp(a, "-m") == 0 || strcmp(a, "-L") == 0
-                  || strcmp(a, "-soname") == 0 || strcmp(a, "-h") == 0 || strcmp(a, "-Map") == 0
+                  || strcmp(a, "-Map") == 0
                   || strcmp(a, "-u") == 0 || strcmp(a, "-y") == 0) && i + 1 < argc)
             i++;    /* 別の引数を取る選択肢 (-z noexecstack など) は引数ごと無視する */
         else if (a[0] == '-')
-            ;   /* -melf32lriscv / --no-warn-rwx-segments などは無視する */
+            ;   /* -melf32lriscv / --no-warn-rwx-segments / --start-group などは無視する */
         else
             readobj(a);
     }
-    if (nfiles == 0)
+    if (nfiles == 0 && !archives && !relocatable)
         fatal("入力が無い", 0);
-    makecommon();
     if (scriptfile) {
         long sz;
         script = (char *)readfile(scriptfile, &sz);
         script = xrealloc(script, sz + 1);
         script[sz] = 0;
         parse_script(script, scriptfile);
-    } else
+    } else if (!relocatable)
         parse_script(deftext, "(既定の台本)");
+    pull_members();
+    if (relocatable) {
+        rlayout();
+        writerel();
+        writeout(outname);
+        return 0;
+    }
+    makecommon();
+    if (shared)
+        make_dynamic();
+    if (buildid)
+        make_buildid();
     assign_all();
+    resolve_phdrs();
     {
         struct stmt *s;
         for (s = top; s; s = s->next)
@@ -2257,7 +3442,12 @@ int main(int argc, char **argv)
         final = 1;
         layout();
     }
+    number_sections();
+    if (shared)
+        fill_dynamic();
     fill_sections();
+    if (nundef)
+        fatal("未定義の参照がある", 0);
     if (entryname) {
         struct gsym *g = gsym(entryname, 0);
         if (g && g->defined) {
@@ -2272,13 +3462,10 @@ int main(int argc, char **argv)
             entry = t->vma;
     }
     writeelf(entry);
-    {
-        FILE *f = fopen(outname, "wb");
-        if (!f)
-            fatal("書けない", outname);
-        if ((long)fwrite(obuf, 1, opos, f) != opos)
-            fatal("書込みに失敗した", outname);
-        fclose(f);
+    if (s_buildid && s_buildid->out) {
+        long at = s_buildid->out->offset + (long)(s_buildid->addr - s_buildid->out->vma) + 16;
+        sha1(obuf, opos, obuf + at);
     }
+    writeout(outname);
     return 0;
 }

@@ -82,6 +82,11 @@ ncc1 は最適化をしない。ただし Linux は次の 2 つを前提にし�
 
 `__compiletime_assert` (BUILD_BUG_ON) は，条件が ICE でない場合に `error` 属性の関数の呼出しが残る。GCC はこれを inline 展開の後に判定するので，**我々が inline 展開をしないことによる差はここに出る**。呼出しが除去されずに残った `error` 属性の関数は，GCC と同じく翻訳時の誤りとして報告し，件数を測る。多ければ `always_inline` の関数に限った展開を足す (11 章の危険 1)。
 
+**M5 で改めたこと (16.2)。** 測ると，残る呼出しの多くは `always_inline` の関数の中ではなく，設定の無い時の `static inline` の代わり (`pmd_trans_huge()` が 0 を返すなど) を GCC が展開して畳んだ枝の中にあった。`always_inline` に限った展開では足りないので，次の 2 つにした。
+
+- **展開の代わりの畳込み**: 展開はしないが，GCC が展開した後に畳む形を条件の値として決める。値が定数に決まる `static inline` の関数の呼出し (本体が `return <定数>;`，その前に値の決まる `if (c) return <定数>;` が並ぶもの)・空の `static inline` の関数の呼出し・`&&` / `||` の片側が決まるもの・`x & 0`・定数で初期化して書き込まない局所の変数・関数の最上位で 1 度だけ代入する局所の変数を畳む。引数に副作用が無ければ呼出しそのものを出さない (引数だけが参照する `static` のデータも出さない)。`switch` の選択式も同じく畳む
+- **残った `error` 属性の呼出しは到達しない**: それでも残るものは，GCC で組める単位では到達しないので，参照を出さずに `ebreak` にし，件数を測るために警告を出す。畳込みの後の rv32-stone では 2 箇所 (定数の引数で呼ぶ `fix_to_virt()` の `BUILD_BUG_ON(idx >= __end_of_fixed_addresses)` と mm/vmscan.c の 1 つ) に残る。どちらも引数の値を関数の中へ伝えないと畳めない
+
 ### 4.4 コード生成とレジスタの割当て
 
 中間表現を置かず，型付きの AST から直接アセンブリを出す。理由は次のとおりである。
@@ -226,8 +231,10 @@ Kbuild の記録 (rv32-stone) で呼ばれる形を持つ。
 | `objcopy` | `-O binary`・`-j <節>`・`-G <記号>` (指定以外の大域記号を局所にする)・`-S` |
 | `nm` | 既定の書式と `-n` (`System.map` を作る `scripts/mksysmap`) |
 | `objdump` | `-h` (`lib-ksyms` の台本を作る sed が節の名前を拾う) |
-| `ar` | ar17 に `T` (thin)・`D`・`P`・`s` / `S` を足す |
+| `ar` | `T` (thin)・`D`・`P`・`s` / `S`・長い名前 |
 | `ncc` | 3 章のドライバ |
+
+`objcopy`・`nm`・`objdump` は 1 つの道具 nobj1 ([stage018/nobj1.c](../stage018/nobj1.c)) に，`ar` は nar1 ([stage018/nar1.c](../stage018/nar1.c)) にした。ar17 に足す予定だったが，thin・長い名前・記号表はどれも ar17 の作り (16 バイトの名前・記号表なし) の外にあり，書き直す量になるので別の道具にした。ドライバ `ncc` は，ホストから駆動する間は [tools/kb18cc.sh](../tools/kb18cc.sh) (前処理はホストの cpp，8 章) で代える。
 
 ## 7. 検証
 
@@ -260,8 +267,8 @@ Kbuild の記録 (rv32-stone) で呼ばれる形を持つ。
 | M2 | nld1 の基本 (`-T` の最小形・`ET_EXEC`) と素の実行環境 | `.S` だけの試験が QEMU で走る。**完了** (13 章) |
 | M3 | ncc1 の C89 と psABI | 7 章の 2・3 が通る。**完了** (14 章) |
 | M4 | ncc1 の GNU 拡張・組込み・inline asm | 374 単位すべてが訳され，nas1 を通る。**完了** (15 章) |
-| M5 | nld1 のリンカ台本・`-r`・書庫・`-shared`，周辺の道具 | ホストから駆動した Kbuild で `vmlinux` ができる |
-| M6 | SBI・initramfs の init・起動 | 完了条件 3 |
+| M5 | nld1 のリンカ台本・`-r`・書庫・`-shared`，周辺の道具 | ホストから駆動した Kbuild で `vmlinux` ができる。**完了** (16 章) |
+| M6 | SBI・initramfs の init・起動 | 完了条件 3。**完了** (17 章。ホストから駆動) |
 
 M6 までをホストから駆動して終えた後，stone の OS の中で回すための作業 (pp・OS・libc・sh・mk・bc・getconf) に移る。M1 と M3 の前半は互いに依存しないが，試験の実行に nas1 と nld1 が要るので M1・M2 を先にする。
 
@@ -396,6 +403,97 @@ Linux の単位が見つけた ncc1 の誤りのうち，黙って誤ったも�
 - 一時値のレジスタ (s1〜s11) が尽きた時の退避。374 単位では尽きなかった
 - レジスタに載る 64 bit の asm の出力，計算した goto
 - 11 章の 3 (cc15as で組んだ ncc1 の速さ) の測定。stone の OS のファイルシステムに入る大きさに分けて測る
+
+## 16. M5 の到達点 (2026-10-21)
+
+ホストの make で Kbuild を回し，gcc・ld・ar・nm・objcopy・objdump をすべて我々のもの (ホストの cc で組んだ ncc1・nas1・nld1・nar1・nobj1) に差し替えて，rv32-stone の `vmlinux`・`vdso.so`・`System.map` ができる (`sh tools/kb18.sh run <出力> allnoconfig KCONFIG_ALLCONFIG=stage019/rv32-stone.config`)。前処理はホストの cpp で行う (8 章)。Kbuild が組んで走らせるホストの補助プログラム (fixdep・modpost など) はホストの cc のままである。modpost は nld1 -r の `vmlinux.o` を読んで section mismatch を検査し，誤りを出さない。
+
+### 16.1 足したもの
+
+| 道具 | 内容 |
+|---|---|
+| nld1 | 書庫と thin の書庫 (`--whole-archive` の中はすべて，外は未定義の参照を定義するメンバを引き込む。`--start-group` の区別はしない)・`-r` (節を名前でまとめ，再配置と局所の記号を残す。COMMON は COMMON のまま)・`--just-symbols`・`-shared` (`.hash`・`.gnu.hash`・`.dynsym`・`.dynstr`・`.gnu.version`・`.gnu.version_d`・`.dynamic` を作る。動的な再配置は作らない)・`PHDRS` (`FILEHDR`・`PHDRS`・`FLAGS`・`:phdr` の引継ぎ)・`VERSION` (節点 1 つ)・`SIZEOF_HEADERS`・`EXTERN`・`--build-id` (SHA-1)・`-s`。入力が定義した記号への台本の代入は台本が勝つ (`_start = .;`)。未定義の参照はすべて出してから止める |
+| nar1 | 6.3 の `ar`。thin の書庫に thin の書庫を足すと中のメンバを展開する |
+| nobj1 | 6.3 の `nm`・`objcopy`・`objdump`。`nm` と `objdump -h` は GNU binutils と同じ書式で出す (Kbuild の sed が読む) |
+| tools/kb18.sh・kb18cc.sh | Kbuild を我々の道具で回す。kb18cc.sh は gcc の命令行を読み，`-E` をホストの cpp に，`-c` / `-S` を cpp + ncc1 (+ nas1) に，結合を nld1 に渡す。問合せには GCC 4.6.4 として答える |
+
+### 16.2 Linux の結合が見つけた ncc1 の誤りと不足
+
+M4 の判定 (374 単位が訳されて nas1 を通る) では見えず，結合と modpost で初めて見えたもの。
+
+- **宣言子の中の属性を捨てていた** (誤り): `static char * __init f(...)` の `__init` (`section(".init.text")`) が効かず，`__init` の関数が `.text` に置かれていた。宣言子の中の属性を宣言に付けるようにした
+- **gnu89 の `inline` を extern inline と取り違えていた** (誤り): `gnu_inline` 属性の付いた (extern の無い) `inline` の関数の外部の定義を出していなかった
+- **展開しないことによる差**: GCC が展開して呼ぶ側の節に入れる `static inline` の関数が `.text` に残り，`.init.text` を参照する (modpost の section mismatch)。参照するのがすべて同じ節の関数なら，その節に置くようにした。また，GCC が展開した後に畳む枝に残る未定義の参照は 4.3 の畳込みで除いた
+- **64 bit の 2 の冪での除算**: `__udivdi3` などを呼んでいた。Linux は libgcc を結合しないので，シフトとマスクで作るようにした (GCC と同じ)
+- **到達の判定**: 到達しない `if` の中の `else` の入口と，到達しない繰返しの先頭を到達するとしていた。入口に合わせるようにした (到達しない枝の中の参照が残っていた)
+
+### 16.3 試験
+
+| 検査 | 内容 |
+|---|---|
+| 書庫 | stone の nar1 が記号表付きの書庫と，長い名前のメンバを入れ子にした thin の書庫を作り，nld1 がそれぞれから結合したものが走る。verify 層の `ar t`・`nm -s` が読む |
+| -r | 2 つの .o を 1 つにまとめ，それを結合したものが走る |
+| -shared | vdso と同じ形の台本 ([tests/stage018/nld1/dso.lds](../tests/stage018/nld1/dso.lds)) の出力の program header・動的な節・動的な記号・版の定義が期待どおり ([verify/nld1dyn.sh](../verify/nld1dyn.sh))。build-id が，中身を 0 にした出力の SHA-1 (ホストの `sha1sum`) と一致する |
+| --just-symbols・objcopy | `objcopy -G` で残した記号だけが絶対値の記号になる。`-S` で記号表を除く。`-O binary`・`nm -n`・`objdump -h` が verify 層の binutils と同じ |
+| ホスト版との一致 | nar1・nld1 (-r・-shared) が，ホストの cc で組んだものと同じ出力を出す |
+| C の試験 | `pow2.c` (64 bit の 2 の冪での除算・剰余)，`dce.c` に 16.2 の畳込みの形 (定数を返す関数・空の関数と引数だけが参照する表・`a && 0`・定数の局所の変数・1 度だけの代入) を足した |
+| Kbuild | Linux のソースと conf があれば，Kbuild を回して `vmlinux`・`System.map` ができ，入口が `_start` である |
+
+### 16.4 まだ無いもの
+
+- `--start-group` / `--end-group` の範囲 (すべての書庫を 1 つの組として扱う)，`PHDRS` の `AT`，`VERSION` の複数の節点
+- 動的な再配置 (vdso には要らない)
+- 起動 (M6。17 章で完了)
+
+## 17. M6 の到達点 (2026-10-21)
+
+16 章の Kbuild で組んだ `arch/riscv/boot/Image` が，我々の SBI の上で QEMU virt (rv32) で起動し，initramfs の init (ncc1 で組んだ静的な ELF) が syscall を確かめて電源を切る (`sh tools/boot18.sh build tmp/kb18-stone`，`sh tools/boot18.sh run tmp/kb18-stone`)。2 章の完了条件 3 を，ホストから駆動して満たした。
+
+```
+stone sbi: hart 0x00000000 dtb 0x87e00000 next 0x80400000
+Linux version 5.4.302+ (root@vm) (gcc version 4.6.4 (stone)) ...
+Kernel command line: earlycon=sbi console=hvc0 rdinit=/init
+...
+Run /init as init process
+init: stone の init が走った
+init: ok   write が書いた長さを返す
+init: pid 1
+...
+init: すべて期待どおり。電源を切る
+reboot: Power down
+stone sbi: shutdown
+```
+
+### 17.1 SBI
+
+[stage018/sbi1.c](../stage018/sbi1.c) と [stage018/sbi1s.s](../stage018/sbi1s.s)。QEMU の `-bios` として M モードで走る。
+
+- **入口**: reset vector から a0 = hartid，a1 = 機器木，a2 = fw_dynamic_info で入る。fw_dynamic_info の `next_addr` (QEMU が Image を置いた番地。rv32 では 0x8040_0000) へ，a0・a1 をそのまま渡して S モードで `mret` する
+- **M モードの設定**: 例外 (命令の番地の不整列・breakpoint・U の ecall・ページフォールト) と S の割込みを S へ委ねる。`mcounteren` で S と U に cycle・time・instret を開く。PMP の 1 項で全体を開く (QEMU は PMP の項が無いと S の読み書きを止める)
+- **呼出し**: Linux 5.4 が使う SBI v0.1 の 9 つ (set_timer・console_putchar・console_getchar・clear_ipi・send_ipi・remote_fence_i・remote_sfence_vma[_asid]・shutdown)。set_timer は CLINT の mtimecmp に書き，M の timer 割込みを S の timer 割込み (mip.STIP) に移す。console は UART (16550)，shutdown は test finisher に書く
+- **その他の trap**: 内容を出して異常の終了コードで止める
+
+### 17.2 init と initramfs
+
+[stage018/init1.c](../stage018/init1.c) は libc を使わず，ecall で syscall を直に呼ぶ (レジスタを指定した変数と inline asm。M4)。write・getpid (1)・uname (Linux / riscv32)・openat・read (/init 自身の ELF の頭)・close を確かめて，reboot(POWER_OFF) で電源を切る。[stage018/init1.lds](../stage018/init1.lds) は PHDRS で ELF の頭を含む命令の段と書込みのできる段を分け，ファイルの位置と番地を 4 KiB を法として揃える (Linux の ELF の読込みが要る)。
+
+initramfs は Kbuild がホストの cc で組んだ `usr/gen_init_cpio` で作り，QEMU の `-initrd` で渡す (`CONFIG_INITRAMFS_SOURCE` は空のまま)。
+
+### 17.3 Kbuild に足したもの
+
+`arch/riscv/boot/Image` を組むために，nobj1 の objcopy に `-R <節>` を足した (`-O binary -R .note -R .note.gnu.build-id -R .comment -S`)。
+
+### 17.4 試験
+
+| 検査 | 内容 |
+|---|---|
+| 組む | SBI・init・initramfs を組む |
+| ホスト版との一致 | stone の ncc1 が SBI と init の `.s` をホスト版と同じに出す |
+| 起動 | QEMU が終了コード 0 で止まる。カーネルの版の行と `Run /init` が出る。init の 8 つの確かめがすべて通り，SBI の shutdown に届く |
+
+### 17.5 まだ無いもの (Stage 19)
+
+1〜3 はホストから駆動して確かめた (2 章)。stone の OS の中で全体を回すことは Stage 19 の完了条件として残る。前処理 (pp の `-I` / `-MMD` など)・make・sh・Kbuild の補助プログラムを stone の OS の上で揃える作業である ([stage019-linux.md](stage019-linux.md))。
 
 ## 一次資料
 

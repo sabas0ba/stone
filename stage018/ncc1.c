@@ -900,6 +900,7 @@ struct sym {
     int referenced;
     int emitted;
     int isinline;
+    int noextdef;           /* extern inline (gnu89): 外部の定義を出さない */
     struct node *body;      /* 関数の本体 */
     struct ient *init;      /* 静的な初期化子 */
     int hasinit;
@@ -912,6 +913,9 @@ struct sym {
     struct sym *params;     /* 関数の仮引数 (記号) */
     int isparam;
     int addrtaken;
+    int nwrites;            /* 代入・増減・asm の出力の数 (初期化を除く) */
+    struct node *cinit;     /* 局所のスカラーの初期化子 (値の決まる条件のため) */
+    int cassign;            /* cinit は最上位の 1 度だけの代入の右辺 */
     int isstaticlocal;
     struct sym *fnext;      /* 出力を待つ static の並び */
     struct sym *alias_of;   /* 局所の extern 宣言: ファイルの有効範囲の記号 */
@@ -919,6 +923,11 @@ struct sym {
     int byref;              /* 番地で渡された構造体の仮引数 (置き場はポインタ) */
     const char *file;
     int line;
+    /* static inline の関数の節を呼ぶ側に合わせるため (emit_unit) */
+    struct sym **refby;     /* 参照した関数 (0 はデータからの参照) */
+    int nrefby;
+    struct buf code;        /* 節の指示を除いた関数の出力 */
+    const char *effsec;     /* 出力する節 (0 なら .text) */
 };
 
 /* 有効範囲 */
@@ -1159,6 +1168,10 @@ static int eval_int(struct node *n, i64 *v);
 static int eval_addr(struct node *n, const char **label, i64 *addend);
 static struct name *label_name(struct name *n);
 static void parse_attrs(struct attrs *a);
+static void note_write(struct node *lv);
+/* 宣言子の中の属性 (static char * __init f(...) の __init など) を受ける先。
+ * 宣言が宣言子を読む間だけ指す。GCC は宣言子の中の section などを宣言に付ける */
+static struct attrs *declat;
 static struct node *compound_stmt(int newscope);
 static void declaration(int global, struct node ***tail);
 static struct ient *parse_initializer(struct type **ty, int isstatic);
@@ -1606,8 +1619,12 @@ static struct type *struct_decl(int kind)
                 struct attrs ma;
                 memset(&ma, 0, sizeof ma);
                 m->bw = -1;
-                if (!ispunct_(':'))
+                if (!ispunct_(':')) {
+                    struct attrs *outer = declat;
+                    declat = &ma;
                     mt = declarator(d.ty, &mn);
+                    declat = outer;
+                }
                 if (accept_p(':')) {
                     i64 w = const_expr();
                     if (w < 0 || w > tsize(mt) * 8)
@@ -1791,7 +1808,7 @@ static struct type *suffixes(struct type *base)
 
 static struct type *declarator(struct type *base, struct name **name)
 {
-    struct attrs dummy;
+    struct attrs dummy, *at = declat ? declat : &dummy;
     memset(&dummy, 0, sizeof dummy);
     *name = 0;
     while (accept_p('*')) {
@@ -1805,13 +1822,13 @@ static struct type *declarator(struct type *base, struct name **name)
             else if (accept_kw(K_RESTRICT))
                 ;
             else if (iskw(K_ATTRIBUTE))
-                parse_attrs(&dummy);
+                parse_attrs(at);
             else
                 break;
         }
         base = qualify(base, q);
     }
-    parse_attrs(&dummy);
+    parse_attrs(at);
     /* ( が入れ子の宣言子か，引数の並びか。型名や ) が続けば引数の並び */
     if (ispunct_('(') && !is_typename(peekn(1)) && !(peekn(1)->kind == T_PUNCT
                                                     && peekn(1)->punct == ')')) {
@@ -1865,7 +1882,13 @@ static struct param *param_list(int *variadic, int *proto)
         declspec(&d, 1);
         if (!d.ty)
             d.ty = &ty_int;
-        t = declarator(d.ty, &pn);
+        {
+            /* 仮引数の宣言子の属性は仮引数のもの (外の宣言には付けない) */
+            struct attrs *outer = declat;
+            declat = &d.at;
+            t = declarator(d.ty, &pn);
+            declat = outer;
+        }
         parse_attrs(&d.at);
         if (d.at.mode)
             t = apply_mode(t, d.at.mode);
@@ -1895,7 +1918,13 @@ static struct type *typename_(void)
     declspec(&d, 0);
     if (!d.ty)
         perr("型名が要る");
-    t = declarator(d.ty, &n);
+    {
+        /* 型名の中の属性は外の宣言に付けない (宣言子の中の sizeof など) */
+        struct attrs *outer = declat;
+        declat = 0;
+        t = declarator(d.ty, &n);
+        declat = outer;
+    }
     if (n)
         perr("型名に名前がある");
     return t;
@@ -1951,6 +1980,15 @@ static i64 const_expr(void)
     if (!eval_int(n, &v))
         error_tok(tok(), "整数定数式でない", 0);
     return v;
+}
+
+/* 左辺値への書込みを変数に数える (構造体の成員への書込みは変数への書込み) */
+static void note_write(struct node *lv)
+{
+    while (lv && (lv->op == N_MEMBER || (lv->op == N_CAST && lv->val2 == 1)))
+        lv = lv->a;
+    if (lv && lv->op == N_VAR)
+        lv->sym->nwrites++;
 }
 
 static int is_lvalue(struct node *n)
@@ -2550,6 +2588,7 @@ static struct node *postfix_tail(struct node *n)
                 perr("++ / -- の被演算子が左辺値でない");
             m = mknode(N_POSTINC, n->ty);
             m->a = n;
+            note_write(n);
             m->val = isptr(n->ty) ? tsize(n->ty->base) : 1;
             if (isptr(n->ty) && n->ty->base->kind == TY_VOID)
                 m->val = 1;
@@ -2583,6 +2622,7 @@ static struct node *unary_expr(void)
                 perr("++ / -- の被演算子が左辺値でない");
             m = mknode(N_PREINC, e->ty);
             m->a = e;
+            note_write(e);
             m->val = isptr(e->ty) ? tsize(e->ty->base) : 1;
             if (isptr(e->ty) && e->ty->base->kind == TY_VOID)
                 m->val = 1;
@@ -2876,6 +2916,7 @@ static struct node *assign_expr(void)
     if (l->ty->kind == TY_ARRAY || l->ty->kind == TY_FUNC)
         perr("配列や関数には代入できない");
     r = assign_expr();
+    note_write(l);
     if (op == 0) {
         n = mknode(N_ASSIGN, unqual(l->ty));
         n->a = l;
@@ -3021,6 +3062,7 @@ static struct node *builtin_call(struct name *nm)
         expect_p(')');
         n = mknode(N_ASSIGN, unqual(d->ty));
         n->a = d;
+        note_write(d);
         n->b = conv(e, d->ty);
         return mkvoid(n);
     }
@@ -3676,6 +3718,8 @@ static struct asmop *asm_operands(int output)
         expect_p('(');
         o->expr = expr();
         expect_p(')');
+        if (output)
+            note_write(o->expr);
         if (output && !is_lvalue(o->expr))
             perr("asm の出力が左辺値でない");
         tail->next = o;
@@ -4040,7 +4084,9 @@ static void declaration(int global, struct node ***tail)
         struct name *n;
         struct type *t;
         struct attrs at = d.at;
+        declat = &at;
         t = declarator(d.ty, &n);
+        declat = 0;
         parse_attrs(&at);
         if (!n)
             perr("宣言の名前が要る");
@@ -4064,12 +4110,11 @@ static void declaration(int global, struct node ***tail)
             struct sym *s = global_sym(n, SY_FUNC, t, sc, &at);
             if (d.isinline) {
                 s->isinline = 1;
-                /* gnu89: extern inline は外部の定義を出さない */
+                /* gnu89 (と gnu_inline 属性): extern inline は外部の定義を出さない。
+                 * extern の無い inline は普通の外部の定義を出す */
                 if (d.sclass == SC_EXTERN)
-                    s->at.gnu_inline = 1;
+                    s->noextdef = 1;
             }
-            if (at.gnu_inline && d.isinline && d.sclass == SC_EXTERN)
-                s->at.gnu_inline = 1;
             bind_alias(s);
             if (global && ispunct_('{')) {
                 funcdef(s, t);
@@ -4126,6 +4171,9 @@ static void declaration(int global, struct node ***tail)
                 in->init = parse_initializer(&it, 0);
                 s->ty = it;
                 in->sym = s;
+                if (isscalar(it) && in->init && !in->init->next && in->init->off == 0
+                    && !in->init->bf)
+                    s->cinit = in->init->expr;
                 **tail = in;
                 *tail = &in->next;
             }
@@ -4538,6 +4586,10 @@ static void gen_init(struct node *n);
 static int eval_addr(struct node *n, const char **label, i64 *addend);
 static int goto_label(struct name *n);
 static void place(int l);
+static int call_value(struct node *c, i64 *v, struct node **pre);
+static int pure_expr(struct node *n);
+static int empty_inline(struct sym *f);
+static void find_single_assign(struct node *body);
 
 /* sp / gp / tp を指定した変数 (枠を持たず，そのレジスタを直に読む) */
 static int is_fixed_reg(struct sym *s)
@@ -4552,6 +4604,15 @@ static void mark_ref(struct sym *s)
 {
     if (s->alias_of)
         s = s->alias_of;
+    if (s->kind == SY_FUNC && s->sclass == SC_STATIC && s->isinline) {
+        int i;
+        for (i = 0; i < s->nrefby && s->refby[i] != curfn; i++)
+            ;
+        if (i == s->nrefby) {
+            s->refby = xrealloc(s->refby, (long)(s->nrefby + 1) * (long)sizeof(struct sym *));
+            s->refby[s->nrefby++] = curfn;
+        }
+    }
     if (s->referenced)
         return;
     s->referenced = 1;
@@ -4701,6 +4762,86 @@ static void gen_shift64(int op, struct val a, int n)
         emit("%s %s, %s, t0", op == 'u' ? "srl" : "sra", hi, hi);
     }
     emit_label(lend);
+}
+
+/* 64 bit の値 a を 2 の冪 d で割る (op が N_DIV) か剰余を取る (N_MOD)。
+ * 結果は a に置く。GCC と同じく実行時支援 (__udivdi3 など) を呼ばない。
+ * Linux は libgcc を結合しないので，2 の冪での除算はこれでないと組めない
+ * (drivers/of/fdt.c の size / SZ_1M など)。符号付きは 0 の方へ丸める */
+static void divpow2_64(int op, int uns, struct val a, i64 d)
+{
+    const char *lo = R(a.lo), *hi = R(a.hi);
+    int k = 0;
+    i64 mlo, mhi;
+    while (((i64)1 << k) < d)
+        k++;
+    if (k == 0) {
+        if (op == N_MOD) {
+            emit("li %s, 0", lo);
+            emit("li %s, 0", hi);
+        }
+        return;
+    }
+    mlo = k >= 32 ? 0xffffffffLL : ((i64)1 << k) - 1;
+    mhi = k > 32 ? ((i64)1 << (k - 32)) - 1 : 0;
+    if (uns) {
+        if (op == N_MOD) {
+            if (k < 32) {
+                emit("li t0, %L", mlo);
+                emit("and %s, %s, t0", lo, lo);
+                emit("li %s, 0", hi);
+            } else {
+                emit("li t0, %L", mhi);
+                emit("and %s, %s, t0", hi, hi);
+            }
+            return;
+        }
+        if (k < 32) {
+            emit("srli %s, %s, %d", lo, lo, k);
+            emit("slli t0, %s, %d", hi, 32 - k);
+            emit("or %s, %s, t0", lo, lo);
+            emit("srli %s, %s, %d", hi, hi, k);
+        } else {
+            emit("srli %s, %s, %d", lo, hi, k - 32);
+            emit("li %s, 0", hi);
+        }
+        return;
+    }
+    /* 符号付き: 負なら d - 1 を足してから切り捨てる (t2:t1 に a + 偏り) */
+    emit("srai t0, %s, 31", hi);
+    emit("li t3, %L", mlo);
+    emit("and t3, t0, t3");
+    emit("li t4, %L", mhi);
+    emit("and t4, t0, t4");
+    emit("add t1, %s, t3", lo);
+    emit("sltu t3, t1, t3");
+    emit("add t2, %s, t4", hi);
+    emit("add t2, t2, t3");
+    if (op == N_DIV) {
+        if (k < 32) {
+            emit("srli %s, t1, %d", lo, k);
+            emit("slli t0, t2, %d", 32 - k);
+            emit("or %s, %s, t0", lo, lo);
+            emit("srai %s, t2, %d", hi, k);
+        } else {
+            emit("srai %s, t2, %d", lo, k - 32);
+            emit("srai %s, t2, 31", hi);
+        }
+        return;
+    }
+    /* 剰余: a - ((a + 偏り) の下位 k bit を 0 にしたもの) */
+    if (k < 32) {
+        emit("li t0, %L", ~mlo & 0xffffffffLL);
+        emit("and t1, t1, t0");
+    } else {
+        emit("li t1, 0");
+        emit("li t0, %L", ~mhi & 0xffffffffLL);
+        emit("and t2, t2, t0");
+    }
+    emit("sltu t0, %s, t1", lo);
+    emit("sub %s, %s, t1", lo, lo);
+    emit("sub %s, %s, t2", hi, hi);
+    emit("sub %s, %s, t0", hi, hi);
 }
 
 /* a op b (どちらも 64 bit)。結果は a に置く。b は解放する */
@@ -4951,6 +5092,46 @@ static struct val gen_call(struct node *n)
     for (p = ft->params; p; p = p->next)
         nparams++;
     hidden = (rt->kind == TY_STRUCT || rt->kind == TY_UNION) && rc.byref;
+    if (is_direct_call(n->a, &direct) && (direct->at.error
+                                          || (direct->alias_of && direct->alias_of->at.error))) {
+        /* error 属性の関数の呼出しが除去されずに残った (BUILD_BUG_ON など)。
+         * GCC は inline 展開と定数の伝播の後に残ったものを誤りにするので，
+         * GCC で組める単位に残るものは到達しない。参照を出さず ebreak に
+         * する (docs/stage018-ncc.md 4.3)。件数を測るため警告を出す */
+        fprintf(stderr, "ncc1: %s:%d: 警告: error 属性の関数の呼出しを到達しないものとした: %s\n",
+                curfile, curline, direct->name->s);
+        if (reachable)
+            emit("ebreak");
+        if (rt->kind == TY_VOID)
+            return noval();
+        if (rt->kind == TY_STRUCT || rt->kind == TY_UNION)
+            fatal_at(curfile, curline, "構造体を返す error 属性の関数は扱わない", direct->name->s);
+        res.lo = alloc_reg();
+        emit("li %s, 0", R(res.lo));
+        if (is64(rt)) {
+            res.hi = alloc_reg();
+            emit("li %s, 0", R(res.hi));
+        }
+        return res;
+    }
+    if (is_direct_call(n->a, &direct)) {
+        /* 引数に副作用が無く，値が定数に決まるか本体が空の inline の関数は
+         * 呼ばない。GCC の展開と同じく，引数だけが参照する static のデータ
+         * (tty_ldisc.c の register_sysctl_table(tty_root_table) の表) も出さない */
+        i64 cv;
+        struct node *pre, *a;
+        if (call_value(n, &cv, &pre) && !pre) {
+            struct node *k = mknode(N_NUM, rt);
+            k->val = cv;
+            return gen(k);
+        }
+        if (rt->kind == TY_VOID && empty_inline(direct)) {
+            for (a = n->b; a && pure_expr(a); a = a->next)
+                ;
+            if (!a)
+                return noval();
+        }
+    }
     if (!is_direct_call(n->a, &direct))
         fv = gen(n->a);
     else
@@ -5157,12 +5338,19 @@ static struct val gen_rmw(struct node *lhs, int op, struct type *ctype, struct n
         old = bf ? load_bitfield(c, lhs->mem, lt) : load(c, lt);
     }
     if (rhs) {
+        i64 dv;
         cur = convert(old, lt, ctype);
-        b = gen(rhs);
-        if (isptr(ctype))
-            cur = binary(op, &ty_int, cur, b);
-        else
-            cur = binary(op, ctype, cur, b);
+        if ((op == N_DIV || op == N_MOD) && is64(ctype) && eval_int(rhs, &dv) && dv > 0
+            && (dv & (dv - 1)) == 0) {
+            /* x /= 2 の冪 (64 bit): 実行時支援を呼ばない (divpow2_64) */
+            divpow2_64(op, isunsignedt(ctype), cur, dv);
+        } else {
+            b = gen(rhs);
+            if (isptr(ctype))
+                cur = binary(op, &ty_int, cur, b);
+            else
+                cur = binary(op, ctype, cur, b);
+        }
         cur = convert(cur, ctype, lt);
     } else {
         /* ++ / --: 古い値を残して新しい値を作る */
@@ -5468,10 +5656,18 @@ static struct val gen(struct node *n)
         a = gen(n->a);
         return convert(a, n->a->ty, n->ty);
     case N_ADD: case N_SUB: case N_MUL: case N_DIV: case N_MOD: case N_AND:
-    case N_OR: case N_XOR: case N_SHL: case N_SHR:
+    case N_OR: case N_XOR: case N_SHL: case N_SHR: {
+        i64 dv;
+        if ((n->op == N_DIV || n->op == N_MOD) && is64(n->ty) && eval_int(n->b, &dv)
+            && dv > 0 && (dv & (dv - 1)) == 0) {
+            a = gen(n->a);
+            divpow2_64(n->op, isunsignedt(n->ty), a, dv);
+            return a;
+        }
         a = gen(n->a);
         b = gen(n->b);
         return binary(n->op, isptr(n->ty) ? &ty_int : n->ty, a, b);
+    }
     case N_PSUB: {
         a = gen(n->a);
         b = gen(n->b);
@@ -5625,6 +5821,279 @@ static struct val gen(struct node *n)
 }
 
 /* ==== 文の生成 ==== */
+
+/* 文の中に外から跳び込めるラベル (goto のラベル・case・default) があるか */
+static int has_label(struct node *n)
+{
+    for (; n; n = n->next) {
+        if (n->op == S_LABEL || n->op == S_CASE || n->op == S_DEFAULT)
+            return 1;
+        if (n->op >= S_BLOCK && (has_label(n->a) || has_label(n->b) || has_label(n->c)
+                                 || has_label(n->d)))
+            return 1;
+    }
+    return 0;
+}
+
+/* 条件の値が決まるか。ICE でなくても，&& の片側が偽・|| の片側が真に決まれば
+ * 全体が決まる (GCC が畳む `if (x && 0)` の形。kernel/sys.c の
+ * `... && IS_ENABLED(CONFIG_POSIX_TIMERS)` など)。決まれば 1 を返し，値を *v に，
+ * 値を決める前に評価する式 (副作用のため。無ければ 0) を *pre に置く */
+/* 副作用の無い式か (呼出し・代入・増減・文式・volatile の読出しを含まない)。
+ * 値を使わない引数を評価せずに済ませてよいかを決める */
+static int pure_expr(struct node *n)
+{
+    if (!n)
+        return 1;
+    if (n->ty && (n->ty->qual & Q_VOLATILE))
+        return 0;
+    switch (n->op) {
+    case N_NUM: case N_STR: case N_VAR: case N_LABELADDR:
+        return 1;
+    case N_ADDR: case N_MEMBER: case N_DEREF: case N_CAST: case N_NOT: case N_BNOT:
+    case N_NEG:
+        return pure_expr(n->a);
+    case N_ADD: case N_SUB: case N_MUL: case N_AND: case N_OR: case N_XOR: case N_SHL:
+    case N_SHR: case N_EQ: case N_NE: case N_LT: case N_LE: case N_GT: case N_GE:
+    case N_LAND: case N_LOR: case N_PSUB: case N_COMMA:
+        return pure_expr(n->a) && pure_expr(n->b);
+    case N_COND:
+        return pure_expr(n->a) && pure_expr(n->b) && pure_expr(n->c);
+    }
+    return 0;
+}
+
+static int cond_fold(struct node *c, i64 *v, struct node **pre);
+
+/* 関数が引数に依らず定数を返すか。本体が `return <ICE>;`，またはその前に
+ * 副作用無く値の決まる `if (c) return <ICE>;` が並ぶもの (設定の無い時の
+ * static inline の代わり: pmd_trans_huge・dma_alloc_need_uncached など)。
+ * GCC は展開して呼ぶ側の条件を畳む */
+static int const_depth;
+
+/* return の値が定数に決まるか。値が 0 / 1 の式 (論理演算・比較・_Bool への
+ * 変換) は真偽が決まれば値も決まる。副作用のある部分を含むものは除く */
+static int return_value(struct node *e, i64 *v)
+{
+    struct node *pre;
+    if (eval_int(e, v))
+        return 1;
+    if ((e->ty->kind == TY_BOOL || e->op == N_LAND || e->op == N_LOR || e->op == N_NOT
+         || (e->op >= N_EQ && e->op <= N_GE)) && cond_fold(e, v, &pre) && !pre)
+        return 1;
+    return 0;
+}
+
+static int const_return(struct sym *f, i64 *v)
+{
+    struct node *st;
+    int r = 0;
+    if (f->alias_of)
+        f = f->alias_of;
+    if (f->kind != SY_FUNC || !f->body || !f->isinline || f->at.weak || const_depth > 8)
+        return 0;
+    const_depth++;
+    for (st = f->body->a; st; st = st->next) {
+        i64 c;
+        struct node *pre, *br;
+        if (st->op == S_NULL)
+            continue;
+        if (st->op == S_RETURN) {
+            r = st->a && return_value(st->a, v);
+            break;
+        }
+        if (st->op != S_IF || !cond_fold(st->a, &c, &pre) || pre)
+            break;
+        br = c ? st->b : st->c;
+        if (!br)
+            continue;
+        if (br->op == S_BLOCK && br->a && !br->a->next)
+            br = br->a;
+        if (br->op == S_RETURN && br->a)
+            r = return_value(br->a, v);
+        break;
+    }
+    const_depth--;
+    return r;
+}
+
+/* 式や文が変数 v を参照するか */
+static int refs_sym(struct node *n, struct sym *v)
+{
+    for (; n; n = n->next) {
+        struct ient *e;
+        struct asmop *o;
+        if (n->op == N_VAR && (n->sym == v || n->sym->alias_of == v))
+            return 1;
+        if (refs_sym(n->a, v) || refs_sym(n->b, v) || refs_sym(n->c, v) || refs_sym(n->d, v))
+            return 1;
+        for (e = n->init; e; e = e->next)
+            if (refs_sym(e->expr, v))
+                return 1;
+        for (o = n->asmout; o; o = o->next)
+            if (refs_sym(o->expr, v))
+                return 1;
+        for (o = n->asmin; o; o = o->next)
+            if (refs_sym(o->expr, v))
+                return 1;
+        /* 式の中の n->next は呼出しの引数の並び，文では後続の文 */
+    }
+    return 0;
+}
+
+/* 関数の本体の最上位の文の `v = 式;` で 1 度だけ書かれ，それより前の文が
+ * 読まない局所のスカラーは，その式の値を持つ (truncate.c の
+ * `dax = dax_mapping(mapping);` の後の `if (dax)`)。cond_fold が使う */
+static void find_single_assign(struct node *body)
+{
+    struct node *st;
+    for (st = body ? body->a : 0; st; st = st->next) {
+        struct node *e = st->op == S_EXPR ? st->a : 0;
+        struct sym *v;
+        struct node *q;
+        if (e && e->op == N_CAST && e->ty->kind == TY_VOID)
+            e = e->a;
+        if (!e || e->op != N_ASSIGN || e->a->op != N_VAR)
+            continue;
+        v = e->a->sym;
+        if (v->global || v->isstaticlocal || v->isparam || v->addrtaken || v->nwrites != 1
+            || v->cinit || !isscalar(v->ty) || (v->ty->qual & Q_VOLATILE))
+            continue;
+        for (q = body->a; q != st; q = q->next) {
+            struct node *save = q->next;
+            int r;
+            q->next = 0;
+            r = refs_sym(q, v);
+            q->next = save;
+            if (r)
+                break;
+        }
+        if (q == st && !refs_sym(e->b, v)) {
+            v->cinit = e->b;
+            v->cassign = 1;
+        }
+    }
+}
+
+/* 本体の空の inline 関数か (static inline void f(...) {}) */
+static int empty_inline(struct sym *f)
+{
+    struct node *st;
+    if (f->alias_of)
+        f = f->alias_of;
+    if (f->kind != SY_FUNC || !f->body || !f->isinline || f->at.weak)
+        return 0;
+    for (st = f->body->a; st; st = st->next)
+        if (st->op != S_NULL)
+            return 0;
+    return 1;
+}
+
+/* 呼出しの値が定数に決まるか。引数に副作用が無ければ *pre は 0 (呼ばずに
+ * 済む)，あれば呼出し自身 */
+static int call_value(struct node *c, i64 *v, struct node **pre)
+{
+    struct sym *f;
+    struct node *a;
+    int pure = 1;
+    if (c->op != N_CALL || !is_direct_call(c->a, &f) || !isscalar(c->ty) || !const_return(f, v))
+        return 0;
+    for (a = c->b; a; a = a->next)
+        if (!pure_expr(a))
+            pure = 0;
+    *pre = pure ? 0 : c;
+    return 1;
+}
+
+static struct node *comma_of(struct node *a, struct node *b)
+{
+    struct node *n;
+    if (!a)
+        return b;
+    if (!b)
+        return a;
+    n = mknode(N_COMMA, b->ty);
+    n->a = a;
+    n->b = b;
+    return n;
+}
+
+static int cond_fold(struct node *c, i64 *v, struct node **pre)
+{
+    i64 v1, v2;
+    struct node *p1, *p2;
+    *pre = 0;
+    if (eval_int(c, v)) {
+        *v = *v != 0;
+        return 1;
+    }
+    /* _Bool か狭めないキャストなら真偽は変わらない */
+    if (c->op == N_CAST && isscalar(c->ty) && isscalar(c->a->ty)
+        && (c->ty->kind == TY_BOOL || tsize(c->ty) >= tsize(c->a->ty)) && cond_fold(c->a, v, pre))
+        return 1;
+    if (call_value(c, v, pre)) {
+        *v = *v != 0;
+        return 1;
+    }
+    /* 定数で初期化し，書き込まず番地も取らない局所の変数 (bool dax = dax_mapping(m)) */
+    if (c->op == N_VAR && !c->sym->global && !c->sym->isstaticlocal && !c->sym->isparam
+        && !c->sym->addrtaken && c->sym->nwrites == (c->sym->cassign ? 1 : 0) && c->sym->cinit
+        && !(c->sym->ty->qual & Q_VOLATILE) && const_depth < 8) {
+        int ok;
+        const_depth++;
+        ok = cond_fold(c->sym->cinit, v, &p1) && !p1;
+        const_depth--;
+        if (ok)
+            return 1;
+    }
+    /* x != 0 / x == 0 は x の真偽で決まる (1 && x は x != 0 に畳まれている) */
+    if ((c->op == N_NE || c->op == N_EQ) && isscalar(c->a->ty)) {
+        struct node *x = c->a, *k = c->b;
+        if (!eval_int(k, &v2)) {
+            x = c->b;
+            k = c->a;
+        }
+        if (eval_int(k, &v2) && v2 == 0 && cond_fold(x, &v1, pre)) {
+            *v = c->op == N_NE ? v1 : !v1;
+            return 1;
+        }
+    }
+    /* x & 0 は 0 (x は評価する) */
+    if (c->op == N_AND && ((eval_int(c->b, &v2) && v2 == 0) || (eval_int(c->a, &v2) && v2 == 0))) {
+        struct node *x = eval_int(c->b, &v1) && v1 == 0 ? c->a : c->b;
+        *v = 0;
+        *pre = pure_expr(x) ? 0 : x;
+        return 1;
+    }
+    if (c->op == N_NOT && cond_fold(c->a, &v1, pre)) {
+        *v = !v1;
+        return 1;
+    }
+    if (c->op == N_LAND || c->op == N_LOR) {
+        int stop = c->op == N_LOR;      /* 右を評価せずに決まる値 */
+        int l = cond_fold(c->a, &v1, &p1);
+        if (l && v1 == stop) {
+            *v = stop;
+            *pre = p1;
+            return 1;
+        }
+        if (cond_fold(c->b, &v2, &p2)) {
+            if (v2 == stop && !p2) {
+                /* a && 0 / a || 1: a は評価し (副作用があれば)，値は決まる */
+                *v = stop;
+                *pre = l ? p1 : pure_expr(c->a) ? 0 : c->a;
+                return 1;
+            }
+            if (l) {
+                /* 左が決まって右へ進み，右も決まる */
+                *v = v2;
+                *pre = comma_of(p1, p2);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
 
 struct loopctx {
     int brk;
@@ -6050,9 +6519,13 @@ static void gen_stmt(struct node *n)
         return;
     case S_IF: {
         i64 c;
-        if (eval_int(n->a, &c)) {
+        struct node *pre;
+        if (cond_fold(n->a, &c, &pre)) {
             /* 定数の条件: 選ばれない側は到達しない (中のラベルからだけ入れる) */
-            int save = reachable, lend = newlabel();
+            int save, lend = newlabel();
+            if (pre && reachable)
+                free_val(gen(pre));
+            save = reachable;
             if (c) {
                 gen_stmt(n->b);
                 if (n->c) {
@@ -6076,18 +6549,24 @@ static void gen_stmt(struct node *n)
             return;
         }
         {
-            int lelse = newlabel(), lend = newlabel();
-            if (reachable)
+            /* 入口が到達しなければ，else の入口も合流点も (中のラベルからを除き)
+             * 到達しない。到達しない枝の中の if の else から参照を出さない */
+            int lelse = newlabel(), lend = newlabel(), entry = reachable, after;
+            if (entry)
                 branch_false(n->a, lelse);
             gen_stmt(n->b);
+            after = reachable;
             if (n->c) {
                 jump(lend);
-                place(lelse);
+                emit_label(lelse);
+                reachable = entry;
                 gen_stmt(n->c);
-                place(lend);
-            } else {
-                place(lelse);
                 emit_label(lend);
+                reachable |= after;
+            } else {
+                emit_label(lelse);
+                emit_label(lend);
+                reachable = after || entry;
             }
         }
         return;
@@ -6114,7 +6593,11 @@ static void gen_stmt(struct node *n)
             reachable = save;
             return;
         }
-        place(ltop);
+        /* 入口が到達せず，本体に外から入るラベルも無ければ繰返し全体が到達しない */
+        if (!reachable && !has_label(body))
+            emit_label(ltop);
+        else
+            place(ltop);
         if (!constcond && reachable) {
             branch_false(cond, lend);
             lc.brk_used = 1;
@@ -6136,7 +6619,7 @@ static void gen_stmt(struct node *n)
         enter_loop(&lc, lend, lcont);
         /* do ... while (0) の先頭へは戻らない。入口が到達しなければ本体も
          * 到達しない */
-        if (constcond && !c)
+        if ((constcond && !c) || (!reachable && !has_label(n->b)))
             emit_label(ltop);
         else
             place(ltop);
@@ -6160,7 +6643,10 @@ static void gen_stmt(struct node *n)
         struct node *c, *def = 0;
         int lend = newlabel();
         i64 sv;
-        int isconst = eval_int(n->a, &sv);
+        struct node *pre = 0;
+        int isconst = eval_int(n->a, &sv) || call_value(n->a, &sv, &pre);
+        if (isconst && pre && reachable)
+            free_val(gen(pre));
         for (c = n->cases; c; c = c->nextcase) {
             c->label = newlabel();
             c->targeted = !isconst;
@@ -6380,6 +6866,7 @@ static void gen_body(struct sym *f)
         i64 sz = tsize(s->ty);
         s->off = alloc_slot(sz > 0 ? sz : 1, talign(s->ty));
     }
+    find_single_assign(f->body);
     gen_stmt(f->body);
     place(retlabel);
 }
@@ -6405,40 +6892,37 @@ static void gen_function(struct sym *f)
     memset(&fb, 0, sizeof fb);
     frame = (fhead + fdepth + maxout + 15) / 16 * 16;
     first = V + 8;
-    if (f->at.section)
-        bprintf(&out, "\t.section %s,\"ax\",@progbits\n", f->at.section);
-    else
-        bputs(&out, "\t.text\n");
-    bputs(&out, "\t.balign 4\n");
+    /* 節の指示は emit_unit が付ける (static inline の節は呼ぶ側で決まる) */
+    bputs(&f->code, "\t.balign 4\n");
     if (f->sclass != SC_STATIC) {
-        bprintf(&out, "\t.%s %s\n", f->at.weak ? "weak" : "globl", symlabel(f));
+        bprintf(&f->code, "\t.%s %s\n", f->at.weak ? "weak" : "globl", symlabel(f));
         if (f->at.hidden)
-            bprintf(&out, "\t.hidden %s\n", symlabel(f));
+            bprintf(&f->code, "\t.hidden %s\n", symlabel(f));
     }
-    bprintf(&out, "\t.type %s, @function\n", symlabel(f));
-    bprintf(&out, "%s:\n", symlabel(f));
-    bprintf(&out, "\taddi sp, sp, -%L\n", first);
-    bprintf(&out, "\tsw ra, %L(sp)\n", first - 4 - V);
-    bprintf(&out, "\tsw s0, %L(sp)\n", first - 8 - V);
-    bprintf(&out, "\taddi s0, sp, %L\n", first);
+    bprintf(&f->code, "\t.type %s, @function\n", symlabel(f));
+    bprintf(&f->code, "%s:\n", symlabel(f));
+    bprintf(&f->code, "\taddi sp, sp, -%L\n", first);
+    bprintf(&f->code, "\tsw ra, %L(sp)\n", first - 4 - V);
+    bprintf(&f->code, "\tsw s0, %L(sp)\n", first - 8 - V);
+    bprintf(&f->code, "\taddi s0, sp, %L\n", first);
     if (frame - first <= 2048)
-        bprintf(&out, "\taddi sp, sp, -%L\n", frame - first);
+        bprintf(&f->code, "\taddi sp, sp, -%L\n", frame - first);
     else {
-        bprintf(&out, "\tli t0, %L\n", frame - first);
-        bputs(&out, "\tsub sp, sp, t0\n");
+        bprintf(&f->code, "\tli t0, %L\n", frame - first);
+        bputs(&f->code, "\tsub sp, sp, t0\n");
     }
     for (i = 0; i < NPOOL; i++)
         if (poolever[i])
-            bprintf(&out, "\tsw %s, %s(s0)\n", poolname[i], i64str(-(V + 12 + 4 * i), num));
-    bput(&out, body.p ? body.p : "", body.n);
+            bprintf(&f->code, "\tsw %s, %s(s0)\n", poolname[i], i64str(-(V + 12 + 4 * i), num));
+    bput(&f->code, body.p ? body.p : "", body.n);
     for (i = 0; i < NPOOL; i++)
         if (poolever[i])
-            bprintf(&out, "\tlw %s, %s(s0)\n", poolname[i], i64str(-(V + 12 + 4 * i), num));
-    bprintf(&out, "\tlw ra, %L(s0)\n", -(V + 4));
-    bputs(&out, "\tmv sp, s0\n");
-    bprintf(&out, "\tlw s0, %L(sp)\n", -(V + 8));
-    bputs(&out, "\tret\n");
-    bprintf(&out, "\t.size %s, .-%s\n", symlabel(f), symlabel(f));
+            bprintf(&f->code, "\tlw %s, %s(s0)\n", poolname[i], i64str(-(V + 12 + 4 * i), num));
+    bprintf(&f->code, "\tlw ra, %L(s0)\n", -(V + 4));
+    bputs(&f->code, "\tmv sp, s0\n");
+    bprintf(&f->code, "\tlw s0, %L(sp)\n", -(V + 8));
+    bputs(&f->code, "\tret\n");
+    bprintf(&f->code, "\t.size %s, .-%s\n", symlabel(f), symlabel(f));
     free(body.p);
     curfn = 0;
 }
@@ -6717,6 +7201,58 @@ static void emit_strings(void)
 
 /* ==== 単位の出力: 参照されたものだけを出す (docs/stage018-ncc.md 4.3) ==== */
 
+/* 関数の出力を節の指示を付けて並べる。
+ *
+ * static inline の関数は GCC なら呼ぶ側へ展開され，呼ぶ側の節 (__init の
+ * .init.text など) に入る。我々は展開しないので，その関数を参照するのが
+ * すべて同じ節の関数なら，その節に置く。データから参照されるもの，節の
+ * 違う関数から参照されるものは .text に置く。呼ぶ側も static inline なら
+ * その節が決まってから決まるので，変わらなくなるまで繰り返す。こうしないと
+ * .text の関数が .init.text を参照し，modpost が section mismatch として
+ * 止める (pgtable_init が pgtable_cache_init を呼ぶ所など) */
+static void place_functions(void)
+{
+    struct sym *s;
+    int changed = 1;
+    for (s = globals; s; s = s->gnext)
+        if (s->kind == SY_FUNC && s->emitted && s->code.p)
+            s->effsec = s->at.section;
+    while (changed) {
+        changed = 0;
+        for (s = globals; s; s = s->gnext) {
+            const char *sec = 0;
+            int i, ok = 1;
+            if (s->kind != SY_FUNC || !s->code.p || s->at.section || s->sclass != SC_STATIC
+                || !s->isinline || s->nrefby == 0)
+                continue;
+            for (i = 0; i < s->nrefby && ok; i++) {
+                struct sym *c = s->refby[i];
+                if (!c || !c->effsec)
+                    ok = 0;
+                else if (!sec)
+                    sec = c->effsec;
+                else if (strcmp(sec, c->effsec) != 0)
+                    ok = 0;
+            }
+            if (!ok)
+                sec = 0;
+            if ((sec == 0) != (s->effsec == 0) || (sec && strcmp(sec, s->effsec) != 0)) {
+                s->effsec = sec;
+                changed = 1;
+            }
+        }
+    }
+    for (s = globals; s; s = s->gnext) {
+        if (s->kind != SY_FUNC || !s->code.p)
+            continue;
+        if (s->effsec)
+            bprintf(&out, "\t.section %s,\"ax\",@progbits\n", s->effsec);
+        else
+            bputs(&out, "\t.text\n");
+        bput(&out, s->code.p, s->code.n);
+    }
+}
+
 static void emit_unit(void)
 {
     struct sym *s;
@@ -6729,7 +7265,7 @@ static void emit_unit(void)
     /* 根: 外に見える定義と used の付いたもの */
     for (s = globals; s; s = s->gnext) {
         if (s->kind == SY_FUNC && s->defined && s->body) {
-            if ((s->sclass != SC_STATIC && !(s->isinline && s->at.gnu_inline)) || s->at.used)
+            if ((s->sclass != SC_STATIC && !s->noextdef) || s->at.used)
                 mark_ref(s);
         } else if (s->kind == SY_VAR && (s->hasinit || s->tentative) && !s->isstaticlocal) {
             if (s->sclass != SC_STATIC || s->at.used)
@@ -6763,7 +7299,7 @@ static void emit_unit(void)
                         bprintf(&out, "\t.weak %s\n", symlabel(s));
                     continue;
                 }
-                if (s->isinline && s->at.gnu_inline && s->sclass != SC_STATIC) {
+                if (s->noextdef && s->sclass != SC_STATIC) {
                     /* extern inline (gnu89) は外部の定義を出さない */
                     s->emitted = 1;
                     continue;
@@ -6789,6 +7325,7 @@ static void emit_unit(void)
             }
         }
     } while (progress);
+    place_functions();
     emit_strings();
 }
 

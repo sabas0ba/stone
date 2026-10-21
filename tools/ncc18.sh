@@ -1,7 +1,7 @@
 #!/bin/sh
 # ncc1 の試験の駆動 (docs/stage018-ncc.md 7 章)。
 #
-#   ncc18.sh host                    nas1・nld1・ncc1 をホストの cc で組む (tmp/nas1/host/)
+#   ncc18.sh host                    nas1・nld1・ncc1・nar1・nobj1 をホストの cc で組む (tmp/nas1/host/)
 #   ncc18.sh expect [<test.c>...]    ホストの gcc で試験を組んで走らせ，期待 (.expect) を作る
 #   ncc18.sh run <test.c>            ホスト版の ncc1・nas1・nld1 で組み，QEMU で走らせる
 #   ncc18.sh check [<test.c>...]     run の出力を .expect と比べる (既定は tests/stage018/c/*.c)
@@ -24,11 +24,11 @@ die() { echo "ncc18.sh: $*" >&2; exit 1; }
 
 build_host() {
     mkdir -p "$work/host"
-    for p in nas1 nld1 ncc1; do
+    for p in nas1 nld1 ncc1 nar1 nobj1; do
         "$HOSTCC" -std=c89 -pedantic -Wno-long-long -Wall -Wextra -Werror -O1 \
             -o "$work/host/$p" "stage018/$p.c"
     done
-    echo "built $work/host/{nas1,nld1,ncc1}" >&2
+    echo "built $work/host/{nas1,nld1,ncc1,nar1,nobj1}" >&2
 }
 
 tests() {

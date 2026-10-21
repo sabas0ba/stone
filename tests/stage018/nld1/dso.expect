@@ -1,0 +1,28 @@
+type DYN
+phdr LOAD offset=0x0 vaddr=0x0 filesz=0x824 memsz=0x824 flags=RE
+phdr DYNAMIC offset=0x1fc vaddr=0x1fc filesz=0x60 memsz=0x60 flags=R
+phdr NOTE offset=0x1d8 vaddr=0x1d8 filesz=0x24 memsz=0x24 flags=R
+phdr GNU_EH_FRAME offset=0x0 vaddr=0x0 filesz=0x0 memsz=0x0 flags=R
+dynamic SONAME libtest.so.1
+dynamic HASH .hash
+dynamic GNU_HASH .gnu.hash
+dynamic STRTAB .dynstr
+dynamic SYMTAB .dynsym
+dynamic STRSZ 52
+dynamic SYMENT 16
+dynamic VERSYM .gnu.version
+dynamic VERDEF .gnu.version_d
+dynamic VERDEFNUM 2
+dynamic NULL 0x0
+dynsym - NOTYPE LOCAL UND
+dynsym dso_alpha@@TEST_1.0 FUNC GLOBAL 9
+dynsym dso_beta@@TEST_1.0 FUNC GLOBAL 9
+dynsym TEST_1.0 OBJECT GLOBAL ABS
+dynsym dso_gamma@@TEST_1.0 FUNC GLOBAL 9
+versym 0 *local*
+versym 2 TEST_1.0
+versym 2 TEST_1.0
+versym 2 TEST_1.0
+versym 2 TEST_1.0
+verdef 1 BASE libtest.so.1
+verdef 2 none TEST_1.0
