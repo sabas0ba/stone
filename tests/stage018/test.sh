@@ -1,7 +1,8 @@
 #!/bin/bash
 # Stage 18 の検査。設計は docs/stage018-ncc.md。
 #
-# 第 1 部 (M1) はアセンブラ nas1 である。見るのは
+# 第 1 部 (M1) はアセンブラ nas1，第 2 部 (M2) はリンカ nld1 と素の実行環境
+# である。見るのは
 #
 #   1. cc15as で組んだ nas1 が stone の OS (kernel29) の上で走ること
 #   2. 命令の符号化が ISA の文面から書いた期待と一致すること
@@ -10,6 +11,10 @@
 #   4. 誤った入力を誤りとして止めること
 #   5. ホストの cc で組んだ nas1 と同じ .o を出すこと (同 7 章の 5)
 #   6. Linux 5.4 の .S の単位を組み立てられること
+#   7. stone の OS の上で nld1 が結合した実行形式が，QEMU の上で素のまま走り，
+#      別の .o の記号への再配置がすべて正しく当たっていること
+#   8. リンカ台本の割付けが，台本から手で数えた期待と一致すること
+#   9. nld1 も，誤りを止め，ホストの cc で組んだものと同じ出力を出すこと
 #
 # 6 は Linux のソースと Kbuild の記録 (tools/linux19.sh spre) が要るので，
 # 無ければ飛ばし，飛ばしたことを出す。
@@ -42,6 +47,13 @@ printf 'x:\nx:\n' > "$out/bad/dup.s"
 # 空の入力 (Kbuild の lib-ksyms は echo | $(CC) -x assembler - を組む)
 printf '\n' > "$out/empty.s"
 
+# nld1 の誤った入力 (第 2 部)。どれも nas1 は通り，結合で止まるべきもの
+mkdir -p "$out/ldbad"
+printf ' .globl _start\n_start:\n call nowhere\n' > "$out/ldbad/ld_undef.s"
+printf ' .globl _start\n_start:\n .globl twice\ntwice:\n ret\n' > "$out/ldbad/ld_dup.s"
+printf ' .globl _start\n_start:\n beq zero, zero, faraway\n .bss\n .zero 8192\nfaraway:\n' > "$out/ldbad/ld_far.s"
+printf ' .globl _start\n_start:\nlab:\n addi a0, a0, %%pcrel_lo(lab)\n' > "$out/ldbad/ld_lo.s"
+
 # Linux の .S の単位 (あれば)
 lx=tmp/linux19/kblog-stone/asm/out
 linux=()
@@ -57,7 +69,9 @@ printf '\177ELFvdso' > "$out/inc/arch/riscv/kernel/vdso/vdso.so"
 
 NAS18_INC="$out/inc" sh tools/nas18.sh run "$out/stone" \
     tests/stage018/nas1/insn.s tests/stage018/nas1/elf.s "$out/empty.s" \
-    "$out"/bad/*.s "${linux[@]}" 2> "$out/run.err"
+    tests/stage018/rt/start.s tests/stage018/rt/io.s \
+    tests/stage018/nld1/main.s tests/stage018/nld1/other.s tests/stage018/nld1/lds.s \
+    "$out"/ldbad/*.s "$out"/bad/*.s "${linux[@]}" 2> "$out/run.err"
 [ -s "$out/stone/insn.o" ] && [ -s "$out/stone/elf.o" ]
 report $? "run: kernel29 の上で nas1 が試験の入力を組み立てる"
 [ -s "$out/stone/empty.o" ]
@@ -98,6 +112,81 @@ if command -v "${HOSTCC:-gcc}" > /dev/null 2>&1; then
     done
 else
     echo "skip ホストの cc が無い (HOSTCC)"
+fi
+
+section "nld1: stone の OS の上で結合する (docs/stage018-ncc.md 10 章の M2)"
+
+[ "$(od -An -c -N 4 tmp/build/nld1 | tr -d ' ')" = '177ELF' ]
+report $? "build: nld1 が OS の実行形式 (ELF) として組まれている"
+
+# 結合は 1 回の起動でまとめて行う。入力は上で stone の nas1 が組んだ .o
+ld="$out/ld"
+rm -rf "$ld"
+mkdir -p "$ld/root"
+cp tmp/build/nld1 "$ld/root/nld1"
+for b in start io main other lds ld_undef ld_dup ld_far ld_lo; do
+    [ -f "$out/stone/$b.o" ] && cp "$out/stone/$b.o" "$ld/root/"
+done
+cp tests/stage018/nld1/lds.lds "$ld/root/"
+printf 'SECTIONS { .text : { *(.text) } ASSERT(0, "boom") }\n' > "$ld/root/assert.lds"
+cat > "$ld/root/go.sh" <<'GO'
+nld1 -o t.elf start.o io.o main.o other.o
+echo "rc t $?"
+nld1 -T lds.lds -o lds.elf lds.o
+echo "rc lds $?"
+nld1 -o undef.elf ld_undef.o
+echo "rc undef $?"
+nld1 -o dup.elf ld_dup.o other.o
+echo "rc dup $?"
+nld1 -o far.elf ld_far.o
+echo "rc far $?"
+nld1 -o lo.elf ld_lo.o
+echo "rc lo $?"
+nld1 -T assert.lds -o assert.elf lds.o
+echo "rc assert $?"
+GO
+sh tools/os18.sh run "$ld/root" "$ld/out"
+grep -q '^rc t 0$' "$ld/out.console" && [ -s "$ld/out/t.elf" ]
+report $? "link: 起動・出力・本体の 4 つの .o を既定の台本で結合する"
+grep -q '^rc lds 0$' "$ld/out.console" && [ -s "$ld/out/lds.elf" ]
+report $? "link: リンカ台本 (-T) で結合する"
+
+section "nld1: 素の実行環境で走る (別の .o の記号への再配置)"
+
+sh tools/env.sh qemu "$ld/out/t.elf" < /dev/null > "$out/t.out" 2>&1
+r=$?
+diff -u tests/stage018/nld1/main.expect "$out/t.out" > "$out/t.diff"
+d=$?
+[ $d -eq 0 ] || head -30 "$out/t.diff"
+[ $r -eq 0 ] && [ $d -eq 0 ]
+report $? "run: CALL_PLT・PCREL・HI20/LO12・JAL・BRANCH・32・ADD/SUB・weak・COMMON・台本の記号がすべて正しい (終了コード 0)"
+
+section "nld1: リンカ台本"
+
+sh verify/nld1elf.sh "$ld/out/lds.elf" .data .rodata > "$out/lds.got" 2> "$out/lds.err"
+diff -u tests/stage018/nld1/lds.expect "$out/lds.got" > "$out/lds.diff"
+r=$?
+[ $r -eq 0 ] || head -40 "$out/lds.diff"
+report $r "lds: AT・ALIGN・SORT・KEEP・/DISCARD/・PROVIDE・BYTE/SHORT/LONG・ADDR/SIZEOF/LOADADDR・orphan の置き場所が期待どおり"
+
+section "nld1: 誤った入力を止める"
+
+for b in undef dup far lo assert; do
+    grep -q "^rc $b [1-9]" "$ld/out.console" && [ ! -f "$ld/out/$b.elf" ]
+    report $? "bad: $b を誤りとして止める"
+done
+
+section "nld1: ホストの cc で組んだものと同じ出力を出す"
+
+if [ -x tmp/nas1/host/nld1 ]; then
+    tmp/nas1/host/nld1 -o "$out/host-t.elf" "$out"/stone/start.o "$out"/stone/io.o \
+        "$out"/stone/main.o "$out"/stone/other.o && cmp -s "$out/host-t.elf" "$ld/out/t.elf"
+    report $? "same: t.elf"
+    tmp/nas1/host/nld1 -T tests/stage018/nld1/lds.lds -o "$out/host-lds.elf" \
+        "$out"/stone/lds.o && cmp -s "$out/host-lds.elf" "$ld/out/lds.elf"
+    report $? "same: lds.elf"
+else
+    echo "skip ホスト版が無い (ホストの cc が無い)"
 fi
 
 section "nas1: Linux 5.4 の .S の単位"
