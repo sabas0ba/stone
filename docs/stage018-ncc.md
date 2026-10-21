@@ -257,7 +257,7 @@ Kbuild の記録 (rv32-stone) で呼ばれる形を持つ。
 |---|---|---|
 | M1 | nas1 | 7 章の 1 が通る。Linux の `.S` の単位 (ホストの cpp で前処理したもの) が組み立てられる。**完了** (12 章) |
 | M2 | nld1 の基本 (`-T` の最小形・`ET_EXEC`) と素の実行環境 | `.S` だけの試験が QEMU で走る。**完了** (13 章) |
-| M3 | ncc1 の C89 と psABI | 7 章の 2・3 が通る |
+| M3 | ncc1 の C89 と psABI | 7 章の 2・3 が通る。**完了** (14 章) |
 | M4 | ncc1 の GNU 拡張・組込み・inline asm | 374 単位すべてが訳され，nas1 を通る |
 | M5 | nld1 のリンカ台本・`-r`・書庫・`-shared`，周辺の道具 | ホストから駆動した Kbuild で `vmlinux` ができる |
 | M6 | SBI・initramfs の init・起動 | 完了条件 3 |
@@ -329,6 +329,34 @@ nld1 ([stage018/nld1.c](../stage018/nld1.c)，約 2,200 行) と素の実行環�
 | リンカ台本 (`lds.s` + `lds.lds`) | 節の番地と大きさ・PT_LOAD の VMA / LMA・記号の値・中身が，台本から手で数えた期待 (`lds.expect`) と verify 層の readelf の読みで一致 ([verify/nld1elf.sh](../verify/nld1elf.sh)) |
 | 誤った入力 | 未定義の記号・多重定義・届かない分岐・対応する `%pcrel_hi` の無い `%pcrel_lo`・成り立たない `ASSERT` の 5 種を止める |
 | ホスト版との一致 | 2 つの結合で，ホストの gcc で組んだ nld1 と同じ実行形式を出す |
+
+## 14. M3 の到達点 (2026-10-21)
+
+ncc1 ([stage018/ncc1.c](../stage018/ncc1.c)，約 5,800 行) を書いた。4 章の段の構成のとおり，字句解析・構文解析と型付け・定数の畳込み・AST からの直接の生成・参照された static の選別を持つ。`sh tools/build.sh stage018` が cc15as で組み，試験は stone の OS の上で ncc1・nas1・nld1 を 1 回の起動で通し，できた実行形式を QEMU で素のまま走らせる。開発中はホスト版で回す ([tools/ncc18.sh](../tools/ncc18.sh))。
+
+### 14.1 範囲
+
+| 項目 | 持つもの |
+|---|---|
+| 言語 | C89 のすべて (K&R の関数定義を除く)。`long long`・`_Bool`・`inline`・`//` の注釈・文の後の宣言・`for` の中の宣言・指定付き初期化子 (`.x`・`[i]`・`[a ... b]`・`name:`)・中括弧の省略・無名の構造体と共用体の成員・`case a ... b`・文式 `({ })`・`typeof`・`__extension__`・`_Static_assert`・`__alignof__`・`__label__`・大域の `asm("...")` |
+| 属性 | `aligned`・`packed`・`section`・`weak`・`alias`・`used`・`unused`・`mode`・`gnu_inline`・`visibility("hidden")`・`asm("名前")`。他は読み捨てる |
+| 組込み関数 | `__builtin_va_start` / `va_arg` / `va_end` / `va_copy`・`expect`・`constant_p`・`offsetof`・`types_compatible_p`・`choose_expr`・`unreachable`・`trap` |
+| 生成 | 4.4〜4.6 のとおり。一時値は s1〜s11，フレームは s0 起点，引数は呼出しごとの領域で評価してから a0〜a7 とスタックへ割り付ける。64 bit の除算・剰余だけを実行時支援の呼出しにする |
+| 除去 | 4.3 の 2 つ (定数条件の枝・参照されない static) |
+
+浮動小数点・asm 文・レジスタを指定した変数・複合リテラル・計算した goto は持たない (浮動小数点と計算した goto は 9 章のとおり範囲外，残りは M4)。`__builtin_constant_p` は整数定数式だけを 1 とする (4.8)。最適化をするホストの gcc は値の分かっている局所の変数も 1 とするので，試験はこの差に依らない形に書いた。
+
+### 14.2 試験
+
+| 検査 | 結果 |
+|---|---|
+| C の試験 ([tests/stage018/c](../tests/stage018/c)) 9 本 | 32 bit 以下の演算と変換・64 bit の演算・制御構造と再帰・ポインタと配列と関数へのポインタ・構造体 (配置・ビットフィールド・packed・共用体・無名の成員・値渡しと値返し)・初期化子・可変長引数と多数の引数・到達しない枝の除去・その他 (2 KiB を超えるフレーム・列挙・文式・組込み関数・64 bit の switch・深い式)。stone の OS の上で訳して組んだものが，ホストの gcc (`-funsigned-char`) と同じ出力を出す |
+| psABI (`abi.c` + `abi.s`) | psABI の文面から手で書いたアセンブリと C が呼び合う: 64 bit の対・a7 とスタックの分割・可変長の偶数番の対と，対が残らない時のスタックへの移動・2×XLEN 以下と超える構造体の値渡しと値返し (隠れた引数)・狭い整数の拡張。期待は文面から手で書いた |
+| 試験の libc ([tests/stage018/rt/libc.c](../tests/stage018/rt/libc.c)) | printf・memcpy・64 bit の除算の支援を ncc1 で訳したもの。前処理器の指令を使わない |
+| 誤った入力 | 構文の誤り・宣言の無い名前・構造体からスカラーへの変換・定義の無い static 関数の参照・浮動小数点の 5 種を止める |
+| ホスト版との一致 | 試験の 10 本 (libc を含む) で，cc15as で組んだ ncc1 がホストの gcc で組んだ ncc1 と同じ `.s` を出す |
+
+試験が見つけた ncc1 の誤りは 1 件で，構造体の値をスカラーに代入しても止めていなかった。試験の側の誤りが 3 件あった (評価の順の決まっていない式 2 件，最適化に依る `__builtin_constant_p`)。
 
 ## 一次資料
 
