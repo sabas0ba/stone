@@ -40,12 +40,13 @@ tests() {
 }
 
 # 期待はホストの gcc で作る。試験は libc の printf だけを使う。
-# 組になる .s を持つ試験 (abi.c) はホストで組めないので，期待を手で書く
+# 組になる .s を持つ試験 (abi.c) と RISC-V の inline asm を書く試験 (asm.c) は
+# ホストで組めないので，期待を手で書く。後者は本文に「期待は手で書く」と書く
 expect() {
     mkdir -p "$work/expect"
     tests "$@" | while IFS= read -r t; do
         b=$(basename "$t" .c)
-        if [ -f "${t%.c}.s" ]; then
+        if [ -f "${t%.c}.s" ] || grep -q '期待は手で書く' "$t"; then
             echo "skip: $t (期待は手で書く)" >&2
             continue
         fi

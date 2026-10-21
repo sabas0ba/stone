@@ -985,7 +985,7 @@ enum {
     N_OR, N_XOR, N_EQ, N_NE, N_LT, N_LE, N_GT, N_GE, N_LAND, N_LOR, N_NOT, N_BNOT,
     N_NEG, N_ASSIGN, N_OPASSIGN, N_PREINC, N_POSTINC, N_ADDR, N_DEREF, N_MEMBER,
     N_CALL, N_CAST, N_COND, N_COMMA, N_PSUB, N_STMTEXPR, N_VASTART, N_VAARG, N_VAEND,
-    N_VACOPY, N_LABELADDR, N_BUILTIN, N_INITLIST,
+    N_VACOPY, N_LABELADDR, N_BUILTIN, N_INITLIST, N_COMPLIT,
     /* 文 */
     S_BLOCK = 100, S_EXPR, S_IF, S_WHILE, S_DO, S_FOR, S_SWITCH, S_CASE, S_DEFAULT,
     S_BREAK, S_CONTINUE, S_RETURN, S_GOTO, S_LABEL, S_NULL, S_INIT, S_ASM
@@ -1031,8 +1031,20 @@ struct node {
     int targeted;           /* S_CASE / S_DEFAULT: switch から跳んでくる */
     struct name *lname;     /* S_GOTO / S_LABEL */
     char *asmtext;          /* S_ASM */
+    struct asmop *asmout;   /* S_ASM: 出力の被演算子 */
+    struct asmop *asmin;    /* S_ASM: 入力の被演算子 */
+    char **clobbers;
+    int nclobber;
     const char *file;
     int line;
+};
+
+/* asm 文の被演算子 */
+struct asmop {
+    char *constraint;
+    struct name *name;      /* [name] */
+    struct node *expr;
+    struct asmop *next;
 };
 
 static struct node *mknode(int op, struct type *ty)
@@ -1144,6 +1156,8 @@ static int is_typename(struct token *t);
 static i64 const_expr(void);
 static struct node *conv(struct node *n, struct type *ty);
 static int eval_int(struct node *n, i64 *v);
+static int eval_addr(struct node *n, const char **label, i64 *addend);
+static struct name *label_name(struct name *n);
 static void parse_attrs(struct attrs *a);
 static struct node *compound_stmt(int newscope);
 static void declaration(int global, struct node ***tail);
@@ -1942,7 +1956,7 @@ static i64 const_expr(void)
 static int is_lvalue(struct node *n)
 {
     return n->op == N_VAR || n->op == N_DEREF || n->op == N_MEMBER || n->op == N_STR
-        || (n->op == N_CAST && n->val2 == 1 && is_lvalue(n->a));
+        || n->op == N_COMPLIT || (n->op == N_CAST && n->val2 == 1 && is_lvalue(n->a));
 }
 
 /* 配列はポインタに，関数は関数へのポインタに */
@@ -2110,6 +2124,9 @@ static int is_nullptr(struct node *n)
     i64 v;
     if (n->op == N_CAST && n->ty->kind == TY_PTR && n->ty->base->kind == TY_VOID)
         n = n->a;
+    /* (void *)<整数定数式> は畳まれて void * の定数になっている */
+    if (n->op == N_NUM && n->ty->kind == TY_PTR && n->ty->base->kind == TY_VOID)
+        return n->val == 0;
     return isint(n->ty) && eval_int(n, &v) && v == 0;
 }
 
@@ -2389,6 +2406,9 @@ static struct node *funcall(struct node *f)
 
 static struct node *stmt_expr(void);
 static struct node *builtin_call(struct name *n);
+static void add_local(struct sym *s);
+static struct sym *global_sym(struct name *n, int kind, struct type *ty, int sclass,
+                              struct attrs *at);
 
 static struct node *primary_expr(void)
 {
@@ -2458,9 +2478,51 @@ static struct node *primary_expr(void)
     return 0;
 }
 
+static struct node *postfix_tail(struct node *n);
+
 static struct node *postfix_expr(void)
 {
-    struct node *n = primary_expr();
+    return postfix_tail(primary_expr());
+}
+
+/* 複合リテラル (型){初期化子}。関数の中では無名の局所変数，外では静的な変数 */
+static int ncomplit;
+
+static struct node *compound_literal(struct type *t)
+{
+    struct sym *s;
+    struct node *n;
+    struct ient *init;
+    char lab[32];
+    init = parse_initializer(&t, curfn == 0);
+    s = xmalloc(sizeof(struct sym));
+    s->kind = SY_VAR;
+    s->ty = t;
+    s->file = curfile;
+    s->line = curline;
+    if (!curfn) {
+        sprintf(lab, "__compound_literal.%d", ncomplit++);
+        s->label = xstrdup(lab);
+        s->name = intern(lab, (long)strlen(lab));
+        s->isstaticlocal = 1;
+        s->sclass = SC_STATIC;
+        s->init = init;
+        s->hasinit = 1;
+        s->defined = 1;
+        *gtail = s;
+        gtail = &s->gnext;
+        return mkvar(s);
+    }
+    s->name = intern("(複合リテラル)", (long)strlen("(複合リテラル)"));
+    add_local(s);
+    n = mknode(N_COMPLIT, t);
+    n->sym = s;
+    n->init = init;
+    return n;
+}
+
+static struct node *postfix_tail(struct node *n)
+{
     for (;;) {
         if (accept_p('[')) {
             struct node *i = expr();
@@ -2528,10 +2590,16 @@ static struct node *unary_expr(void)
                 m->val = -m->val;
             return m;
         }
+        case P_ANDAND: {
+            /* GNU のラベルの番地 &&label (_THIS_IP_)。計算した goto は持たない */
+            struct node *n;
+            advance();
+            n = mknode(N_LABELADDR, ptrto(&ty_void));
+            n->lname = label_name(expect_ident());
+            return n;
+        }
         case '&':
             advance();
-            if (accept_p(P_ANDAND))
-                perr("ラベルの番地 (&&label) は扱わない");
             return mkaddr(cast_expr());
         case '*':
             advance();
@@ -2581,7 +2649,7 @@ static struct node *unary_expr(void)
             ty = typename_();
             expect_p(')');
             if (ispunct_('{'))
-                perr("複合リテラルは扱わない");
+                return sizeof_type(postfix_tail(compound_literal(ty))->ty);
             return sizeof_type(ty);
         }
         return sizeof_type(unary_expr()->ty);
@@ -2613,10 +2681,14 @@ static struct node *cast_expr(void)
         t = typename_();
         expect_p(')');
         if (ispunct_('{'))
-            perr("複合リテラルは扱わない");
+            return postfix_tail(compound_literal(t));
         e = cast_expr();
-        if (t->kind == TY_STRUCT || t->kind == TY_UNION)
+        if (t->kind == TY_STRUCT || t->kind == TY_UNION) {
+            /* 同じ型へのキャストは何もしない (GCC の拡張) */
+            if (compatible(unqual(e->ty), unqual(t)))
+                return e;
             perr("構造体へのキャストは扱わない");
+        }
         e = decay(e);
         if (t->kind != TY_VOID && !isscalar(e->ty))
             perr("スカラーでないもののキャスト");
@@ -2673,21 +2745,58 @@ static struct node *bin_expr(int minprec)
     }
 }
 
+/* 式の中に weak の記号があるか (その番地は 0 でありうる) */
+static int has_weak(struct node *n)
+{
+    if (!n)
+        return 0;
+    if (n->op == N_VAR)
+        return n->sym->at.weak || (n->sym->alias_of && n->sym->alias_of->at.weak);
+    return has_weak(n->a) || has_weak(n->b) || has_weak(n->c);
+}
+
+/* 記号の番地と空ポインタの比較 (f == (T)0 など) を畳む。2 つの記号の比較と
+ * weak の記号は畳まない */
+static int addr_cmp(struct node *c, i64 *v)
+{
+    const char *la, *lb;
+    i64 xa, xb;
+    int eq;
+    if (c->op != N_EQ && c->op != N_NE)
+        return 0;
+    if (has_weak(c->a) || has_weak(c->b))
+        return 0;
+    if (!eval_addr(c->a, &la, &xa) || !eval_addr(c->b, &lb, &xb))
+        return 0;
+    if (la && lb && la == lb)
+        eq = xa == xb;
+    else if (la && !lb && xb == 0)
+        eq = 0;
+    else if (!la && lb && xa == 0)
+        eq = 0;
+    else
+        return 0;
+    *v = (c->op == N_EQ) == eq;
+    return 1;
+}
+
 static struct node *cond_expr(void)
 {
     struct node *c = bin_expr(1), *a, *b, *n;
     struct type *t;
     i64 cv;
+    int elvis = 0;
     if (!accept_p('?'))
         return c;
     c = decay(c);
     if (!isscalar(c->ty))
         perr("?: の条件がスカラーでない");
     if (ispunct_(':')) {
-        /* GNU の x ?: y */
-        perr("?: の中を省いた形は扱わない");
-    }
-    a = decay(expr());
+        /* GNU の x ?: y: x を 1 度だけ評価し，0 でなければその値 */
+        a = c;
+        elvis = 1;
+    } else
+        a = decay(expr());
     expect_p(':');
     b = decay(cond_expr());
     if (isarith(a->ty) && isarith(b->ty)) {
@@ -2721,12 +2830,16 @@ static struct node *cond_expr(void)
         perr("?: の 2 つの値の型が合わない");
         t = 0;
     }
-    if (eval_int(c, &cv) && t->kind != TY_STRUCT && t->kind != TY_UNION)
+    if ((eval_int(c, &cv) || addr_cmp(c, &cv)) && t->kind != TY_STRUCT && t->kind != TY_UNION)
         return cv ? a : b;
     n = mknode(N_COND, t);
     n->a = c;
     n->b = a;
     n->c = b;
+    if (elvis) {
+        n->val2 = 1;
+        n->a = 0;           /* 条件は b (変換した x) の値そのもの */
+    }
     return n;
 }
 
@@ -2821,6 +2934,7 @@ static struct node *builtin_offsetof(void)
 {
     struct type *t;
     i64 off = 0;
+    struct node *dyn = 0;
     t = typename_();
     expect_p(',');
     for (;;) {
@@ -2836,18 +2950,27 @@ static struct node *builtin_offsetof(void)
             off += o;
             t = m->ty;
         } else if (accept_p('[')) {
-            i64 i = const_expr();
+            struct node *ie = expr();
+            i64 i;
             expect_p(']');
             if (t->kind != TY_ARRAY)
                 perr("offsetof の添字が配列でない");
             t = t->base;
-            off += i * tsize(t);
+            if (eval_int(ie, &i))
+                off += i * tsize(t);
+            else {
+                /* 定数でない添字 (GCC は実行時の式として受ける) */
+                struct node *m = binop(N_MUL, conv(ie, &ty_uint), mknum(tsize(t), &ty_uint));
+                dyn = dyn ? binop(N_ADD, dyn, m) : m;
+            }
         } else
             break;
         if (ispunct_(')'))
             break;
     }
     expect_p(')');
+    if (dyn)
+        return binop(N_ADD, mknum(off, &ty_uint), dyn);
     return mknum(off, &ty_uint);
 }
 
@@ -2946,6 +3069,134 @@ static struct node *builtin_call(struct name *nm)
         expect_p(')');
         return c ? a : b;
     }
+    {
+        /* ライブラリ関数に当たる組込み関数は，同じ名前の関数を呼ぶ */
+        static const char *libs[] = {
+            "memcpy", "memset", "memmove", "memcmp", "strlen", "strcmp", "strncmp",
+            "strcpy", "strncpy", "strcat", "strchr", "strrchr", "strstr", "strnlen",
+            "abort", "printf", "puts", "putchar", "malloc", "free", "exit", 0
+        };
+        int i;
+        for (i = 0; libs[i]; i++)
+            if (strcmp(s, libs[i]) == 0) {
+                struct name *ln = intern(libs[i], (long)strlen(libs[i]));
+                struct sym *ls = ln->gsym;
+                advance();
+                if (!ls) {
+                    struct type *ft = newtype(TY_FUNC, 1, 1);
+                    struct attrs na;
+                    memset(&na, 0, sizeof na);
+                    ft->proto = 0;
+                    if (strncmp(s, "mem", 3) == 0 && strcmp(s, "memcmp") != 0)
+                        ft->base = ptrto(&ty_void);
+                    else if (strcmp(s, "strlen") == 0 || strcmp(s, "strnlen") == 0)
+                        ft->base = &ty_uint;
+                    else if (strncmp(s, "str", 3) == 0 && strcmp(s, "strcmp") != 0
+                             && strcmp(s, "strncmp") != 0)
+                        ft->base = ptrto(&ty_char);
+                    else if (strcmp(s, "malloc") == 0)
+                        ft->base = ptrto(&ty_void);
+                    else if (strcmp(s, "abort") == 0 || strcmp(s, "free") == 0
+                             || strcmp(s, "exit") == 0)
+                        ft->base = &ty_void;
+                    else
+                        ft->base = &ty_int;
+                    ls = global_sym(ln, SY_FUNC, ft, SC_EXTERN, &na);
+                }
+                return mkvar(ls);
+            }
+    }
+    if (strcmp(s, "return_address") == 0 || strcmp(s, "frame_address") == 0) {
+        i64 lv;
+        advance();
+        expect_p('(');
+        lv = const_expr();
+        expect_p(')');
+        n = mknode(N_BUILTIN, ptrto(&ty_void));
+        n->val = s[0] == 'r' ? 2 : 3;
+        n->val2 = lv;
+        return n;
+    }
+    if (strcmp(s, "extract_return_addr") == 0 || strcmp(s, "frob_return_addr") == 0) {
+        advance();
+        expect_p('(');
+        e = assign_expr();
+        expect_p(')');
+        return conv(e, ptrto(&ty_void));
+    }
+    if (strcmp(s, "object_size") == 0) {
+        i64 t;
+        advance();
+        expect_p('(');
+        assign_expr();
+        expect_p(',');
+        t = const_expr();
+        expect_p(')');
+        return mknum(t < 2 ? -1 : 0, &ty_uint);
+    }
+    if (strcmp(s, "prefetch") == 0) {
+        advance();
+        expect_p('(');
+        e = assign_expr();
+        while (accept_p(','))
+            assign_expr();
+        expect_p(')');
+        return mkvoid(e);
+    }
+    {
+        /* ビット演算: clz / ctz / popcount / ffs / parity (l / ll) と bswap16/32/64 */
+        static const char *bits[] = { "clz", "ctz", "popcount", "ffs", "parity", "clrsb", 0 };
+        int i;
+        for (i = 0; bits[i]; i++) {
+            long bl = (long)strlen(bits[i]);
+            if (strncmp(s, bits[i], bl) == 0 && (s[bl] == 0 || strcmp(s + bl, "l") == 0
+                                                  || strcmp(s + bl, "ll") == 0)) {
+                int wide = strcmp(s + bl, "ll") == 0;
+                advance();
+                expect_p('(');
+                e = assign_expr();
+                expect_p(')');
+                e = conv(e, wide ? &ty_ullong : &ty_uint);
+                if (e->op == N_NUM) {
+                    u64 v = (u64)e->val;
+                    int w = wide ? 64 : 32, k, r = 0;
+                    if (!wide)
+                        v &= 0xffffffffULL;
+                    switch (i) {
+                    case 0: for (k = w - 1; k >= 0 && !((v >> k) & 1); k--) r++; break;
+                    case 1: for (k = 0; k < w && !((v >> k) & 1); k++) r++; break;
+                    case 2: case 4: for (k = 0; k < w; k++) r += (int)((v >> k) & 1); if (i == 4) r &= 1; break;
+                    case 3: if (v) { for (k = 0; !((v >> k) & 1); k++) ; r = k + 1; } break;
+                    default: goto runtime;
+                    }
+                    return mknum(r, &ty_int);
+                }
+            runtime:
+                n = mknode(N_BUILTIN, &ty_int);
+                n->val = 10 + i;
+                n->a = e;
+                return n;
+            }
+        }
+        if (strcmp(s, "bswap16") == 0 || strcmp(s, "bswap32") == 0 || strcmp(s, "bswap64") == 0) {
+            struct type *t = s[5] == '1' ? &ty_ushort : s[5] == '3' ? &ty_uint : &ty_ullong;
+            advance();
+            expect_p('(');
+            e = conv(assign_expr(), t);
+            expect_p(')');
+            if (e->op == N_NUM) {
+                u64 v = (u64)e->val, r = 0;
+                int k, nb = (int)t->size;
+                for (k = 0; k < nb; k++)
+                    r |= ((v >> (8 * k)) & 0xff) << (8 * (nb - 1 - k));
+                return mknum((i64)r, t);
+            }
+            n = mknode(N_BUILTIN, t);
+            n->val = 20;
+            n->a = e;
+            return n;
+        }
+    }
     if (strcmp(s, "unreachable") == 0 || strcmp(s, "trap") == 0) {
         advance();
         expect_p('(');
@@ -2957,6 +3208,14 @@ static struct node *builtin_call(struct name *nm)
     return 0;
 }
 
+/* 文式の最後の文がラベルの付いた式文 (L: e;) なら，その式文 */
+static struct node *labeled_expr(struct node *s)
+{
+    while (s && s->op == S_LABEL)
+        s = s->a;
+    return s && s->op == S_EXPR ? s : 0;
+}
+
 /* ({ ... }) の値は最後の式文の値 */
 static struct node *stmt_expr(void)
 {
@@ -2965,7 +3224,8 @@ static struct node *stmt_expr(void)
         last = s;
     n = mknode(N_STMTEXPR, &ty_void);
     n->a = b;
-    if (last && last->op == S_EXPR) {
+    last = labeled_expr(last);
+    if (last) {
         last->a = decay(last->a);
         n->ty = last->a->ty;
     }
@@ -3059,6 +3319,20 @@ static i64 init_string(struct ilist *l, struct type *ty, i64 off)
     return s->str->len + 1;
 }
 
+/* 複合リテラルなら 1 を返し，その初期化子を *ip に置く (空なら 0) */
+static int complit_init(struct node *e, struct ient **ip)
+{
+    if (e->op == N_COMPLIT) {
+        *ip = e->init;
+        return 1;
+    }
+    if (e->op == N_VAR && e->sym->label && strncmp(e->sym->label, "__compound_literal.", 19) == 0) {
+        *ip = e->sym->init;
+        return 1;
+    }
+    return 0;
+}
+
 /* 1 つの対象を初期化する。戻り値は配列の要素の数 (大きさを決めるため) */
 static i64 init_value(struct ilist *l, struct type *ty, i64 off, struct member *bf,
                       struct node *pending)
@@ -3083,8 +3357,18 @@ static i64 init_value(struct ilist *l, struct type *ty, i64 off, struct member *
     }
     if (isaggr(ty)) {
         struct node *e = pending ? pending : assign_expr();
-        if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ARRAY)
             && compatible(unqual(e->ty), unqual(ty))) {
+            struct ient *ci;
+            if (complit_init(e, &ci)) {
+                /* 複合リテラルの初期化子をその位置に取り込む (静的な初期化子で
+                 * GCC が受ける形) */
+                for (; ci; ci = ci->next)
+                    iadd(l, off + ci->off, ci->ty, ci->expr, ci->bf);
+                return 1;
+            }
+            if (ty->kind == TY_ARRAY)
+                perr("配列を配列で初期化した");
             iadd(l, off, ty, e, 0);
             return 1;
         }
@@ -3160,10 +3444,17 @@ static i64 init_braced(struct ilist *l, struct type *ty, i64 off)
                 init_designated(l, ty, off);
                 idx = hi + 1;
             } else {
-                if (ty->len >= 0 && idx >= ty->len)
-                    perr("配列の初期化子が多すぎる");
-                init_value(l, ty->base, off + idx * esz, 0, 0);
-                idx++;
+                if (ty->len >= 0 && idx >= ty->len) {
+                    /* 余る初期化子は読んで捨てる (GCC は警告に留める。長さ 0 の
+                     * 配列に { 0 } を与える形がある) */
+                    struct ilist junk;
+                    junk.head = 0;
+                    junk.tail = &junk.head;
+                    init_value(&junk, ty->base, 0, 0, 0);
+                } else {
+                    init_value(l, ty->base, off + idx * esz, 0, 0);
+                    idx++;
+                }
             }
             if (idx > count)
                 count = idx;
@@ -3250,6 +3541,7 @@ static struct ient *parse_initializer(struct type **ty, int isstatic)
 /* ==== 文 ==== */
 
 static struct node *stmt(void);
+static struct node *asm_stmt(void);
 
 struct swctx {
     struct node *sw;
@@ -3288,16 +3580,44 @@ static void static_assert_decl(void)
         perr("_Static_assert が成り立たない");
 }
 
+/* __label__ で宣言した局所のラベル。ブロックの中ではその名前を関数の中で
+ * 一意な名前に付け替える (同じマクロの文式が 1 つの関数に何度も展開される) */
+struct llabel {
+    struct name *name;
+    struct name *uniq;
+    int depth;
+    struct llabel *next;
+};
+
+static struct llabel *llabels;
+static int lldepth, llseq;
+
+static struct name *label_name(struct name *n)
+{
+    struct llabel *l;
+    for (l = llabels; l; l = l->next)
+        if (l->name == n)
+            return l->uniq;
+    return n;
+}
+
 static struct node *compound_stmt(int newscope)
 {
     struct node *b = mkstmt(S_BLOCK), **tail = &b->a;
     expect_p('{');
     if (newscope)
         push_scope();
+    lldepth++;
     while (accept_kw(K_LABEL)) {
-        /* __label__ は局所のラベルの宣言。ラベルは関数ごとに持つので読み捨てる */
         for (;;) {
-            expect_ident();
+            struct llabel *l = xmalloc(sizeof(struct llabel));
+            char buf[96];
+            l->name = expect_ident();
+            sprintf(buf, "%.60s.%d", l->name->s, ++llseq);
+            l->uniq = intern(buf, (long)strlen(buf));
+            l->depth = lldepth;
+            l->next = llabels;
+            llabels = l;
             if (!accept_p(','))
                 break;
         }
@@ -3322,6 +3642,9 @@ static struct node *compound_stmt(int newscope)
     }
     if (newscope)
         pop_scope();
+    while (llabels && llabels->depth == lldepth)
+        llabels = llabels->next;
+    lldepth--;
     return b;
 }
 
@@ -3336,6 +3659,70 @@ static struct node *cond_of(void)
     return c;
 }
 
+/* asm の被演算子の並び ("制約" (式), ...) */
+static struct asmop *asm_operands(int output)
+{
+    struct asmop head, *tail = &head;
+    head.next = 0;
+    if (ispunct_(':') || ispunct_(')') || ispunct_(P_SHL))
+        return 0;
+    for (;;) {
+        struct asmop *o = xmalloc(sizeof(struct asmop));
+        if (accept_p('[')) {
+            o->name = expect_ident();
+            expect_p(']');
+        }
+        o->constraint = string_arg();
+        expect_p('(');
+        o->expr = expr();
+        expect_p(')');
+        if (output && !is_lvalue(o->expr))
+            perr("asm の出力が左辺値でない");
+        tail->next = o;
+        tail = o;
+        if (!accept_p(','))
+            break;
+    }
+    return head.next;
+}
+
+/* asm [volatile] ("テンプレート" : 出力 : 入力 : clobber) */
+static struct node *asm_stmt(void)
+{
+    struct node *s = mkstmt(S_ASM);
+    advance();
+    for (;;) {
+        if (accept_kw(K_VOLATILE) || accept_kw(K_INLINE))
+            continue;
+        if (tok()->kind == T_KW && tok()->id->kw == K_GOTO)
+            perr("asm goto は扱わない");
+        break;
+    }
+    expect_p('(');
+    s->asmtext = string_arg();
+    if (accept_p(':')) {
+        s->asmout = asm_operands(1);
+        if (accept_p(':')) {
+            s->asmin = asm_operands(0);
+            if (accept_p(':')) {
+                while (tok()->kind == T_STR) {
+                    s->clobbers = xrealloc(s->clobbers, (long)(s->nclobber + 1) * (long)sizeof(char *));
+                    s->clobbers[s->nclobber++] = string_arg();
+                    if (!accept_p(','))
+                        break;
+                }
+                if (accept_p(':'))
+                    perr("asm goto のラベルは扱わない");
+            }
+        }
+    } else if (ispunct_(P_SHL)) {
+        perr("asm の :: の形は扱わない");
+    }
+    expect_p(')');
+    expect_p(';');
+    return s;
+}
+
 static struct node *stmt(void)
 {
     struct token *t = tok();
@@ -3347,11 +3734,13 @@ static struct node *stmt(void)
     if (t->kind == T_IDENT && peekn(1)->kind == T_PUNCT && peekn(1)->punct == ':') {
         struct attrs at;
         s = mkstmt(S_LABEL);
-        s->lname = t->id;
+        s->lname = label_name(t->id);
         advance();
         advance();
         memset(&at, 0, sizeof at);
-        parse_attrs(&at);
+        /* ラベルの後ろの属性。asm はここでは文 (asm ラベルではない) */
+        if (iskw(K_ATTRIBUTE))
+            parse_attrs(&at);
         if (ispunct_('}'))
             s->a = mkstmt(S_NULL);
         else
@@ -3497,12 +3886,11 @@ static struct node *stmt(void)
             if (ispunct_('*'))
                 perr("計算した goto は扱わない");
             s = mkstmt(S_GOTO);
-            s->lname = expect_ident();
+            s->lname = label_name(expect_ident());
             expect_p(';');
             return s;
         case K_ASM:
-            perr("asm 文は M4 で扱う");
-            break;
+            return asm_stmt();
         }
     }
     s = exprstmt(expr());
@@ -3726,6 +4114,11 @@ static void declaration(int global, struct node ***tail)
             struct sym *s = bind(n, SY_VAR, t);
             s->sclass = d.sclass;
             s->at = at;
+            if (at.asmlabel) {
+                /* register T x asm("a0"): asm の被演算子の時だけ指定のレジスタに置く */
+                s->at.regname = at.asmlabel;
+                s->at.asmlabel = 0;
+            }
             add_local(s);
             if (accept_p('=')) {
                 struct type *it = t;
@@ -3805,6 +4198,33 @@ static int newlabel(void)
     return nlabel++;
 }
 
+/* 関数が長く，条件分岐 (±4 KiB) が届かないかもしれない。gen_function が
+ * 本体の長さを見て決め，長ければ本体を作り直す */
+static int longbr;
+
+/* 文や式の間を跳ぶ条件分岐 op args, .L<l>。longbr なら反転した分岐で
+ * j (±1 MiB) を飛び越す。命令列の中で閉じた短い分岐は emit で直に出す */
+static void emit_br(const char *op, const char *args, int l)
+{
+    static const char *pair[] = {
+        "beq", "bne", "blt", "bge", "bltu", "bgeu", "bgt", "ble", "bgtu", "bleu",
+        "beqz", "bnez", "bltz", "bgez", "bgtz", "blez", 0
+    };
+    int i, skip;
+    if (!longbr) {
+        emit("%s %s, .L%d", op, args, l);
+        return;
+    }
+    for (i = 0; pair[i] && strcmp(pair[i], op) != 0; i++)
+        ;
+    if (!pair[i])
+        fatal_at(curfile, curline, "内部の誤り: 知らない分岐", op);
+    skip = newlabel();
+    emit("%s %s, .L%d", pair[i ^ 1], args, skip);
+    emit("j .L%d", l);
+    emit_label(skip);
+}
+
 /* 式の一時値の溜まり: s1〜s11 (callee-saved なので呼出しをまたいでも残る) */
 #define NPOOL 11
 static const char *poolname[NPOOL] = {
@@ -3834,6 +4254,8 @@ static void free_reg(int r)
 
 static const char *R(int r)
 {
+    if (r < 0)
+        fatal_at(curfile, curline, "値の無い式の値を使った", 0);
     return poolname[r];
 }
 
@@ -4112,6 +4534,18 @@ static void gen_stmt(struct node *n);
 static int reachable;
 
 static struct sym *pending;             /* 出力を待つ static の並び */
+static void gen_init(struct node *n);
+static int eval_addr(struct node *n, const char **label, i64 *addend);
+static int goto_label(struct name *n);
+static void place(int l);
+
+/* sp / gp / tp を指定した変数 (枠を持たず，そのレジスタを直に読む) */
+static int is_fixed_reg(struct sym *s)
+{
+    const char *r = s->at.regname;
+    return r && (strcmp(r, "sp") == 0 || strcmp(r, "gp") == 0 || strcmp(r, "tp") == 0
+                 || strcmp(r, "x2") == 0 || strcmp(r, "x3") == 0 || strcmp(r, "x4") == 0);
+}
 
 /* 記号を参照した。static なら出力の対象に加える */
 static void mark_ref(struct sym *s)
@@ -4151,6 +4585,15 @@ static int gen_addr(struct node *n)
         r = gen_addr(n->a);
         if (n->val)
             addi_big(R(r), R(r), n->val);
+        return r;
+    }
+    case N_COMPLIT: {
+        struct val cv = gen(n);
+        if (n->ty->kind == TY_ARRAY || n->ty->kind == TY_STRUCT || n->ty->kind == TY_UNION)
+            return cv.lo;
+        free_val(cv);
+        r = alloc_reg();
+        addi_big(R(r), "s0", n->sym->off);
         return r;
     }
     case N_STR:
@@ -4783,15 +5226,183 @@ static struct val gen_stmtexpr(struct node *n)
 {
     struct node *s;
     struct val v = noval();
+    int entry = reachable;
     for (s = n->a->a; s; s = s->next) {
-        if (!s->next && s->op == S_EXPR && n->ty->kind != TY_VOID) {
-            if (!reachable)
-                fatal_at(s->file, s->line, "文式の値が到達しない", 0);
+        if (!s->next && labeled_expr(s) && n->ty->kind != TY_VOID) {
+            for (; s->op == S_LABEL; s = s->a)
+                place(goto_label(s->lname));
+            /* ({ ...; return x; 0; }) のように値が到達しないこともある。値を
+             * 受ける側の命令のために，到達しなくても値は作る */
             v = gen(s->a);
             break;
         }
         gen_stmt(s);
     }
+    /* 式の途中で到達しなくなったことを外へ持ち出さない。?: や && の合流点は
+     * emit_label で置くので，ここで落とすと後ろの文が消える */
+    reachable |= entry;
+    return v;
+}
+
+/* 32 bit の値 r の clz / ctz / popcount を out に (t0・t1 を使う) */
+static void bitop32(int kind, const char *r, const char *out)
+{
+    int ltop = newlabel(), lend = newlabel();
+    emit("mv t0, %s", r);
+    switch (kind) {
+    case 0:     /* clz: 0 なら 32 */
+        emit("li %s, 32", out);
+        emit("beqz t0, .L%d", lend);
+        emit("li %s, 0", out);
+        emit_label(ltop);
+        emit("bltz t0, .L%d", lend);
+        emit("slli t0, t0, 1");
+        emit("addi %s, %s, 1", out, out);
+        emit("j .L%d", ltop);
+        break;
+    case 1:     /* ctz: 0 なら 32 */
+        emit("li %s, 32", out);
+        emit("beqz t0, .L%d", lend);
+        emit("li %s, 0", out);
+        emit_label(ltop);
+        emit("andi t1, t0, 1");
+        emit("bnez t1, .L%d", lend);
+        emit("srli t0, t0, 1");
+        emit("addi %s, %s, 1", out, out);
+        emit("j .L%d", ltop);
+        break;
+    default:    /* popcount */
+        emit("li %s, 0", out);
+        emit_label(ltop);
+        emit("beqz t0, .L%d", lend);
+        emit("andi t1, t0, 1");
+        emit("add %s, %s, t1", out, out);
+        emit("srli t0, t0, 1");
+        emit("j .L%d", ltop);
+        break;
+    }
+    emit_label(lend);
+}
+
+static struct val gen_builtin(struct node *n)
+{
+    struct val v = noval(), a;
+    i64 V = fn_variadic ? 32 : 0;
+    switch (n->val) {
+    case 0:
+        return v;
+    case 1:
+        emit("ebreak");
+        return v;
+    case 2:     /* return_address */
+        v.lo = alloc_reg();
+        if (n->val2 == 0)
+            memop("lw", R(v.lo), -(V + 4), "s0");
+        else
+            emit("li %s, 0", R(v.lo));
+        return v;
+    case 3:     /* frame_address */
+        v.lo = alloc_reg();
+        if (n->val2 == 0)
+            emit("mv %s, s0", R(v.lo));
+        else
+            emit("li %s, 0", R(v.lo));
+        return v;
+    case 20: {  /* bswap */
+        int sz = (int)tsize(n->ty), k;
+        a = gen(n->a);
+        v.lo = alloc_reg();
+        if (sz == 8)
+            v.hi = alloc_reg();
+        /* 下位の語のバイトを逆に (64 bit は語も入れ替える) */
+        for (k = 0; k < (sz == 2 ? 2 : 4); k++) {
+            const char *dst = sz == 8 ? R(v.hi) : R(v.lo);
+            emit("srli t0, %s, %d", R(a.lo), 8 * k);
+            emit("andi t0, t0, 255");
+            emit("slli t0, t0, %d", 8 * ((sz == 2 ? 2 : 4) - 1 - k));
+            if (k == 0)
+                emit("mv %s, t0", dst);
+            else
+                emit("or %s, %s, t0", dst, dst);
+        }
+        if (sz == 8)
+            for (k = 0; k < 4; k++) {
+                emit("srli t0, %s, %d", R(a.hi), 8 * k);
+                emit("andi t0, t0, 255");
+                emit("slli t0, t0, %d", 8 * (3 - k));
+                if (k == 0)
+                    emit("mv %s, t0", R(v.lo));
+                else
+                    emit("or %s, %s, t0", R(v.lo), R(v.lo));
+            }
+        free_val(a);
+        return v;
+    }
+    }
+    if (n->val >= 10 && n->val <= 15) {
+        int kind = (int)n->val - 10, wide = is64(n->a->ty);
+        a = gen(n->a);
+        v.lo = alloc_reg();
+        if (kind == 3) {
+            /* ffs = x ? ctz(x) + 1 : 0 */
+            int lz = newlabel(), le = newlabel();
+            if (wide) {
+                emit("or t2, %s, %s", R(a.lo), R(a.hi));
+                emit("beqz t2, .L%d", lz);
+                bitop32(1, R(a.lo), R(v.lo));
+                emit("li t2, 32");
+                emit("bne %s, t2, .L%d", R(v.lo), le);
+                bitop32(1, R(a.hi), "t2");
+                emit("add %s, %s, t2", R(v.lo), R(v.lo));
+                emit_label(le);
+            } else {
+                emit("beqz %s, .L%d", R(a.lo), lz);
+                bitop32(1, R(a.lo), R(v.lo));
+            }
+            emit("addi %s, %s, 1", R(v.lo), R(v.lo));
+            {
+                int lend = newlabel();
+                emit("j .L%d", lend);
+                emit_label(lz);
+                emit("li %s, 0", R(v.lo));
+                emit_label(lend);
+            }
+            free_val(a);
+            return v;
+        }
+        if (kind > 4)
+            fatal_at(n->file, n->line, "扱わない組込み関数", "clrsb");
+        if (!wide) {
+            bitop32(kind == 4 ? 2 : kind, R(a.lo), R(v.lo));
+        } else if (kind == 0) {
+            int lhi = newlabel(), le = newlabel();
+            emit("bnez %s, .L%d", R(a.hi), lhi);
+            bitop32(0, R(a.lo), R(v.lo));
+            emit("addi %s, %s, 32", R(v.lo), R(v.lo));
+            emit("j .L%d", le);
+            emit_label(lhi);
+            bitop32(0, R(a.hi), R(v.lo));
+            emit_label(le);
+        } else if (kind == 1) {
+            int llo = newlabel(), le = newlabel();
+            emit("bnez %s, .L%d", R(a.lo), llo);
+            bitop32(1, R(a.hi), R(v.lo));
+            emit("addi %s, %s, 32", R(v.lo), R(v.lo));
+            emit("j .L%d", le);
+            emit_label(llo);
+            bitop32(1, R(a.lo), R(v.lo));
+            emit_label(le);
+        } else {
+            bitop32(2, R(a.lo), R(v.lo));
+            bitop32(2, R(a.hi), "t2");
+            emit("add %s, %s, t2", R(v.lo), R(v.lo));
+        }
+        if (kind == 4)
+            emit("andi %s, %s, 1", R(v.lo), R(v.lo));
+        free_val(a);
+        return v;
+    }
+    fatal_at(n->file, n->line, "扱わない組込み関数", 0);
     return v;
 }
 
@@ -4815,7 +5426,31 @@ static struct val gen(struct node *n)
             v.lo = gen_addr(n);
             return v;
         }
+        if (n->op == N_VAR && is_fixed_reg(n->sym)) {
+            /* sp / gp / tp を指定した変数は，読むたびにそのレジスタから */
+            v.lo = alloc_reg();
+            emit("mv %s, %s", R(v.lo), n->sym->at.regname);
+            return v;
+        }
         return load(gen_addr(n), n->ty);
+    case N_COMPLIT: {
+        struct node in;
+        memset(&in, 0, sizeof in);
+        in.op = S_INIT;
+        in.sym = n->sym;
+        in.init = n->init;
+        gen_init(&in);
+        if (n->ty->kind == TY_ARRAY || n->ty->kind == TY_STRUCT || n->ty->kind == TY_UNION) {
+            v.lo = alloc_reg();
+            addi_big(R(v.lo), "s0", n->sym->off);
+            return v;
+        }
+        {
+            int r = alloc_reg();
+            addi_big(R(r), "s0", n->sym->off);
+            return load(r, n->ty);
+        }
+    }
     case N_DEREF:
         return load(gen_addr(n), n->ty);
     case N_MEMBER:
@@ -4900,13 +5535,38 @@ static struct val gen(struct node *n)
         v.lo = r;
         return v;
     }
+    case N_LABELADDR:
+        v.lo = alloc_reg();
+        emit("lla %s, .L%d", R(v.lo), goto_label(n->lname));
+        return v;
     case N_COND: {
         int lelse = newlabel(), lend = newlabel(), c;
         struct val res = noval();
         int big = is64(n->ty);
+        if (n->val2 == 1) {
+            /* x ?: y */
+            struct val x = gen(n->b);
+            res.lo = alloc_reg();
+            emit("mv %s, %s", R(res.lo), R(x.lo));
+            if (big) {
+                res.hi = alloc_reg();
+                emit("mv %s, %s", R(res.hi), R(x.hi));
+            }
+            c = truth(x, n->ty);
+            emit_br("bnez", R(c), lend);
+            free_reg(c);
+            b = gen(n->c);
+            emit("mv %s, %s", R(res.lo), R(b.lo));
+            if (big)
+                emit("mv %s, %s", R(res.hi), R(b.hi));
+            free_val(b);
+            emit_label(lend);
+            (void)lelse;
+            return res;
+        }
         a = gen(n->a);
         c = truth(a, n->a->ty);
-        emit("beqz %s, .L%d", R(c), lelse);
+        emit_br("beqz", R(c), lelse);
         free_reg(c);
         if (n->ty->kind != TY_VOID) {
             res.lo = alloc_reg();
@@ -4958,9 +5618,7 @@ static struct val gen(struct node *n)
     case N_STMTEXPR:
         return gen_stmtexpr(n);
     case N_BUILTIN:
-        if (n->val == 1)
-            emit("ebreak");
-        return noval();
+        return gen_builtin(n);
     }
     fatal_at(n->file, n->line, "生成できない式", 0);
     return v;
@@ -4970,11 +5628,31 @@ static struct val gen(struct node *n)
 
 struct loopctx {
     int brk;
-    int cont;
+    int cont;           /* switch では -1 (continue は外の繰返しへ) */
+    int brk_used;       /* 到達する break があった */
+    int cont_used;      /* 到達する continue があった */
     struct loopctx *up;
 };
 
+/* 繰返しや switch の後ろのラベル。落ちてくるか break で来るときだけ到達する */
+static void place_exit(int l, int used)
+{
+    emit_label(l);
+    if (used)
+        reachable = 1;
+}
+
 static struct loopctx *curloop;
+
+static void enter_loop(struct loopctx *lc, int brk, int cont)
+{
+    lc->brk = brk;
+    lc->cont = cont;
+    lc->brk_used = 0;
+    lc->cont_used = 0;
+    lc->up = curloop;
+    curloop = lc;
+}
 
 /* goto のラベル (名前ごとに番号) */
 struct glabel {
@@ -5017,7 +5695,7 @@ static void branch_false(struct node *c, int lfalse)
 {
     struct val v = gen(c);
     int r = truth(v, c->ty);
-    emit("beqz %s, .L%d", R(r), lfalse);
+    emit_br("beqz", R(r), lfalse);
     free_reg(r);
 }
 
@@ -5066,6 +5744,289 @@ static void gen_init(struct node *n)
     }
 }
 
+/* ---- inline asm (docs/stage018-ncc.md 4.7) ---- */
+
+struct asmslot {
+    struct asmop *op;
+    int out;                /* 出力 */
+    int inout;              /* + (読んで書く) */
+    int reg;                /* 溜まりのレジスタ (-1 なし) */
+    int addr;               /* 番地を置いたレジスタ (メモリの被演算子・出力の書き戻し) */
+    const char *fixed;      /* レジスタを指定した変数の a0 など */
+    char text[64];          /* テンプレートに入れる文字列 */
+    int isconst;
+    i64 cval;
+    int bf;
+};
+
+static int asm_seq;
+
+static const char *strip_mods(const char *c)
+{
+    while (*c == '=' || *c == '+' || *c == '&' || *c == '%')
+        c++;
+    return c;
+}
+
+static struct sym *regvar_of(struct node *e)
+{
+    if (e->op == N_VAR && e->sym->at.regname && !is_fixed_reg(e->sym))
+        return e->sym;
+    return 0;
+}
+
+/* テンプレートの %N / %[name] / %zN / %% を置き換えて出す */
+static void asm_subst(const char *t, struct asmslot *slots, int nslot)
+{
+    struct buf b;
+    memset(&b, 0, sizeof b);
+    while (*t) {
+        int zmod = 0, idx = -1;
+        if (*t != '%') {
+            bput(&b, t, 1);
+            t++;
+            continue;
+        }
+        t++;
+        if (*t == '%') {
+            bput(&b, "%", 1);
+            t++;
+            continue;
+        }
+        if (*t == '=') {
+            char num[16];
+            sprintf(num, "%d", asm_seq);
+            bputs(&b, num);
+            t++;
+            continue;
+        }
+        if (*t == 'z' || *t == 'c' || *t == 'a') {
+            zmod = *t == 'z';
+            t++;
+        }
+        if (*t == '[') {
+            const char *e = strchr(t, ']');
+            int i;
+            if (!e)
+                fatal_at(curfile, curline, "asm の %[ が閉じていない", 0);
+            for (i = 0; i < nslot; i++)
+                if (slots[i].op->name && (long)strlen(slots[i].op->name->s) == e - t - 1
+                    && strncmp(slots[i].op->name->s, t + 1, e - t - 1) == 0)
+                    idx = i;
+            t = e + 1;
+        } else if (*t >= '0' && *t <= '9') {
+            idx = 0;
+            while (*t >= '0' && *t <= '9')
+                idx = idx * 10 + (*t++ - '0');
+        }
+        if (idx < 0 || idx >= nslot)
+            fatal_at(curfile, curline, "asm の被演算子の番号が範囲外", 0);
+        if (zmod && slots[idx].isconst && slots[idx].cval == 0)
+            bputs(&b, "zero");
+        else
+            bputs(&b, slots[idx].text);
+    }
+    if (b.p) {
+        /* 1 行ずつ字下げして出す */
+        char *line = b.p;
+        for (;;) {
+            char *nl = strchr(line, '\n');
+            if (nl)
+                *nl = 0;
+            emit("%s", line);
+            if (!nl)
+                break;
+            line = nl + 1;
+        }
+        free(b.p);
+    }
+}
+
+static void gen_asm(struct node *n)
+{
+    struct asmop *o;
+    struct asmslot *slots;
+    int nslot = 0, nout = 0, i, k;
+    for (o = n->asmout; o; o = o->next)
+        nslot++;
+    nout = nslot;
+    for (o = n->asmin; o; o = o->next)
+        nslot++;
+    slots = xmalloc((long)(nslot + 1) * (long)sizeof(struct asmslot));
+    asm_seq++;
+    i = 0;
+    for (o = n->asmout; o; o = o->next, i++) {
+        slots[i].op = o;
+        slots[i].out = 1;
+        slots[i].inout = strchr(o->constraint, '+') != 0;
+    }
+    for (o = n->asmin; o; o = o->next, i++)
+        slots[i].op = o;
+    /* clobber: 溜まりのレジスタなら prologue で退避する */
+    for (k = 0; k < n->nclobber; k++) {
+        int j;
+        for (j = 0; j < NPOOL; j++)
+            if (strcmp(n->clobbers[k], poolname[j]) == 0) {
+                if (poolbusy[j])
+                    fatal_at(curfile, curline, "asm が生きている一時値のレジスタを壊す", n->clobbers[k]);
+                poolever[j] = 1;
+            }
+    }
+    /* 被演算子を評価する。レジスタを指定した変数は後で載せる */
+    for (i = 0; i < nslot; i++) {
+        struct asmslot *sl = &slots[i];
+        const char *c = strip_mods(sl->op->constraint);
+        struct node *e = sl->op->expr;
+        struct sym *rv = regvar_of(e);
+        i64 cv;
+        sl->reg = -1;
+        sl->addr = -1;
+        if (rv)
+            sl->fixed = rv->at.regname;
+        if (sl->out) {
+            if (strchr(c, 'm') && (!strchr(c, 'r') || is64(e->ty) || isaggr(e->ty))) {
+                /* =m (rm でレジスタに載らない型も): 番地を渡す */
+                sl->addr = gen_addr(e);
+                sprintf(sl->text, "0(%s)", R(sl->addr));
+                continue;
+            }
+            if (strchr(c, 'A')) {
+                sl->addr = gen_addr(e);
+                sprintf(sl->text, "(%s)", R(sl->addr));
+                continue;
+            }
+            if (is64(e->ty) || isaggr(e->ty))
+                fatal_at(curfile, curline, "asm の出力の型は 32 bit 以下のスカラーに限る", 0);
+            sl->bf = is_bitfield(e);
+            if (!sl->fixed) {
+                if (sl->bf) {
+                    sl->addr = gen_addr(e->a);
+                    if (e->val)
+                        addi_big(R(sl->addr), R(sl->addr), e->val);
+                } else
+                    sl->addr = gen_addr(e);
+            }
+            if (sl->inout) {
+                if (sl->fixed) {
+                    struct val v = gen(e);
+                    sl->reg = v.lo;
+                } else {
+                    int c2 = alloc_reg();
+                    struct val v;
+                    emit("mv %s, %s", R(c2), R(sl->addr));
+                    v = sl->bf ? load_bitfield(c2, e->mem, e->ty) : load(c2, e->ty);
+                    sl->reg = v.lo;
+                }
+            } else
+                sl->reg = alloc_reg();
+            strcpy(sl->text, sl->fixed ? sl->fixed : R(sl->reg));
+            continue;
+        }
+        /* 入力 */
+        if (c[0] >= '0' && c[0] <= '9') {
+            /* 出力と同じ被演算子 (一致の制約) */
+            int t = c[0] - '0';
+            struct val v = gen(e);
+            if (t >= nout || slots[t].reg < 0)
+                fatal_at(curfile, curline, "asm の一致の制約の先がレジスタでない", 0);
+            emit("mv %s, %s", R(slots[t].reg), R(v.lo));
+            free_val(v);
+            strcpy(sl->text, slots[t].text);
+            continue;
+        }
+        if (eval_int(e, &cv) && (strchr(c, 'i') || strchr(c, 'n') || strchr(c, 'I')
+                                 || strchr(c, 'K') || strchr(c, 'J'))) {
+            if (strchr(c, 'J') && cv == 0) {
+                strcpy(sl->text, "zero");
+                sl->isconst = 1;
+                continue;
+            }
+            if (strchr(c, 'i') || strchr(c, 'n') || (strchr(c, 'I') && cv >= -2048 && cv <= 2047)
+                || (strchr(c, 'K') && cv >= 0 && cv <= 31)) {
+                i64str(cv, sl->text);
+                sl->isconst = 1;
+                sl->cval = cv;
+                continue;
+            }
+        }
+        if (strchr(c, 'i') && !strchr(c, 'r')) {
+            const char *l;
+            i64 add;
+            if (eval_addr(e, &l, &add) && l) {
+                char num[32];
+                sprintf(sl->text, "%.40s%s%s", l, add > 0 ? "+" : "", add ? i64str(add, num) : "");
+                sl->isconst = 1;
+                continue;
+            }
+            fatal_at(curfile, curline, "asm の i の被演算子が定数でない", 0);
+        }
+        if ((strchr(c, 'm') && (!strchr(c, 'r') || is64(e->ty) || isaggr(e->ty)))
+            || strchr(c, 'A')) {
+            sl->addr = gen_addr(e);
+            sprintf(sl->text, strchr(c, 'A') ? "(%s)" : "0(%s)", R(sl->addr));
+            continue;
+        }
+        if (strchr(c, 'J') && eval_int(e, &cv) && cv == 0) {
+            strcpy(sl->text, "zero");
+            sl->isconst = 1;
+            continue;
+        }
+        if (isaggr(e->ty))
+            fatal_at(curfile, curline, "asm の入力の型はスカラーに限る", 0);
+        {
+            /* 64 bit の値は下位の語のレジスタを渡す。GCC はレジスタの対を
+             * 割り当てて %N に下位のレジスタを出す。上位のレジスタを暗に使う
+             * asm は扱わない */
+            struct val v = gen(e);
+            if (v.hi >= 0)
+                free_reg(v.hi);
+            sl->reg = v.lo;
+            strcpy(sl->text, sl->fixed ? sl->fixed : R(sl->reg));
+        }
+    }
+    /* レジスタを指定した変数を asm の直前に載せる (間に他の命令を挟まない) */
+    for (i = 0; i < nslot; i++) {
+        struct asmslot *sl = &slots[i];
+        if (sl->fixed && sl->reg >= 0 && (!sl->out || sl->inout))
+            emit("mv %s, %s", sl->fixed, R(sl->reg));
+    }
+    asm_subst(n->asmtext, slots, nslot);
+    /* 出力を書き戻す */
+    for (i = 0; i < nout; i++) {
+        struct asmslot *sl = &slots[i];
+        struct node *e = sl->op->expr;
+        if (sl->reg < 0)
+            continue;
+        if (sl->fixed) {
+            struct val v;
+            int a = gen_addr(e);
+            v.lo = alloc_reg();
+            v.hi = -1;
+            emit("mv %s, %s", R(v.lo), sl->fixed);
+            store(a, v, e->ty);
+            free_reg(a);
+            free_val(v);
+            continue;
+        }
+        {
+            struct val v;
+            v.lo = sl->reg;
+            v.hi = -1;
+            if (tsize(e->ty) < 4 && e->ty->kind != TY_BOOL)
+                normalize(v.lo, e->ty);
+            if (sl->bf)
+                store_bitfield(sl->addr, e->mem, v);
+            else
+                store(sl->addr, v, e->ty);
+        }
+    }
+    for (i = 0; i < nslot; i++) {
+        free_reg(slots[i].reg);
+        free_reg(slots[i].addr);
+    }
+    free(slots);
+}
+
 /* 枝に到達しない時でも，中のラベルは到達しうる (goto の行き先) */
 static void gen_stmt(struct node *n)
 {
@@ -5095,17 +6056,21 @@ static void gen_stmt(struct node *n)
             if (c) {
                 gen_stmt(n->b);
                 if (n->c) {
+                    int after = reachable;
                     jump(lend);
                     gen_stmt(n->c);
+                    reachable |= after;
                 }
             } else {
+                int after;
                 reachable = 0;
                 gen_stmt(n->b);
-                if (reachable)
-                    jump(lend);
+                after = reachable;
+                jump(lend);
                 reachable = save;
                 if (n->c)
                     gen_stmt(n->c);
+                reachable |= after;
             }
             emit_label(lend);
             return;
@@ -5137,55 +6102,57 @@ static void gen_stmt(struct node *n)
         int constcond = !cond || eval_int(cond, &c);
         if (n->op == S_FOR && n->a)
             gen_stmt(n->a);
-        lc.brk = lend;
-        lc.cont = lcont;
-        lc.up = curloop;
-        curloop = &lc;
+        enter_loop(&lc, lend, lcont);
         if (constcond && !c) {
             /* while (0): 本体は到達しない */
             int save = reachable;
             reachable = 0;
             gen_stmt(body);
             curloop = lc.up;
-            place(lcont);
+            emit_label(lcont);
             emit_label(lend);
             reachable = save;
             return;
         }
         place(ltop);
-        if (!constcond)
+        if (!constcond && reachable) {
             branch_false(cond, lend);
+            lc.brk_used = 1;
+        }
         gen_stmt(body);
-        place(lcont);
+        place_exit(lcont, lc.cont_used);
         if (n->op == S_FOR && n->c && reachable)
             free_val(gen(n->c));
         jump(ltop);
         curloop = lc.up;
-        place(lend);
+        place_exit(lend, lc.brk_used);
         return;
     }
     case S_DO: {
         struct loopctx lc;
         int ltop = newlabel(), lcont = newlabel(), lend = newlabel();
         i64 c;
-        lc.brk = lend;
-        lc.cont = lcont;
-        lc.up = curloop;
-        curloop = &lc;
-        place(ltop);
+        int constcond = eval_int(n->a, &c);
+        enter_loop(&lc, lend, lcont);
+        /* do ... while (0) の先頭へは戻らない。入口が到達しなければ本体も
+         * 到達しない */
+        if (constcond && !c)
+            emit_label(ltop);
+        else
+            place(ltop);
         gen_stmt(n->b);
-        place(lcont);
-        if (eval_int(n->a, &c)) {
+        place_exit(lcont, lc.cont_used);
+        if (constcond) {
             if (c)
                 jump(ltop);
         } else if (reachable) {
             struct val v = gen(n->a);
             int r = truth(v, n->a->ty);
-            emit("bnez %s, .L%d", R(r), ltop);
+            emit_br("bnez", R(r), ltop);
             free_reg(r);
         }
         curloop = lc.up;
-        place(lend);
+        place_exit(lend, lc.brk_used);
         return;
     }
     case S_SWITCH: {
@@ -5198,6 +6165,7 @@ static void gen_stmt(struct node *n)
             c->label = newlabel();
             c->targeted = !isconst;
         }
+        enter_loop(&lc, lend, -1);
         if (reachable) {
             if (isconst) {
                 /* 定数の選択式: 合う case へ直に跳ぶ。他の case は到達しない */
@@ -5212,6 +6180,8 @@ static void gen_stmt(struct node *n)
                     hit = def;
                 if (hit)
                     hit->targeted = 1;
+                else
+                    lc.brk_used = 1;
                 jump(hit ? hit->label : lend);
             } else {
                 struct val v = gen(n->a);
@@ -5229,29 +6199,29 @@ static void gen_stmt(struct node *n)
                         emit("xor t0, t0, %s", R(v.lo));
                         emit("xor t1, t1, %s", R(v.hi));
                         emit("or t0, t0, t1");
-                        emit("beqz t0, .L%d", c->label);
+                        emit_br("beqz", "t0", c->label);
                     } else if (c->val == c->val2) {
+                        char args[32];
                         emit("li t0, %L", c->val);
-                        emit("beq %s, t0, .L%d", R(v.lo), c->label);
+                        sprintf(args, "%s, t0", R(v.lo));
+                        emit_br("beq", args, c->label);
                     } else {
                         emit("li t0, %L", c->val);
                         emit("sub t0, %s, t0", R(v.lo));
                         emit("li t1, %L", (i64)((u64)(c->val2 - c->val) & 0xffffffffULL));
-                        emit("bleu t0, t1, .L%d", c->label);
+                        emit_br("bleu", "t0, t1", c->label);
                     }
                 }
                 free_val(v);
+                if (!def)
+                    lc.brk_used = 1;
                 jump(def ? def->label : lend);
             }
         }
         reachable = 0;
-        lc.brk = lend;
-        lc.cont = curloop ? curloop->cont : -1;
-        lc.up = curloop;
-        curloop = &lc;
         gen_stmt(n->b);
         curloop = lc.up;
-        place(lend);
+        place_exit(lend, lc.brk_used);
         return;
     }
     case S_CASE:
@@ -5267,6 +6237,8 @@ static void gen_stmt(struct node *n)
         struct loopctx *l = curloop;
         if (!l)
             fatal_at(n->file, n->line, "break の行き先が無い", 0);
+        if (reachable)
+            l->brk_used = 1;
         jump(l->brk);
         return;
     }
@@ -5276,6 +6248,8 @@ static void gen_stmt(struct node *n)
             l = l->up;
         if (!l)
             fatal_at(n->file, n->line, "continue の行き先が無い", 0);
+        if (reachable)
+            l->cont_used = 1;
         jump(l->cont);
         return;
     }
@@ -5302,6 +6276,10 @@ static void gen_stmt(struct node *n)
         }
         jump(retlabel);
         return;
+    case S_ASM:
+        if (reachable)
+            gen_asm(n);
+        return;
     case S_GOTO:
         jump(goto_label(n->lname));
         return;
@@ -5315,14 +6293,24 @@ static void gen_stmt(struct node *n)
 
 /* ==== 関数の出力 ==== */
 
-static void gen_function(struct sym *f)
+/* 本体の命令の行の数から長さの上限を見積もり，条件分岐 (±4 KiB) が必ず
+ * 届くかを返す。1 行は高々 2 命令 (li・lla・call などの展開) とする */
+static int body_fits_branch(struct buf *b)
+{
+    long i, lines = 0;
+    for (i = 0; i < b->n; i++)
+        if (b->p[i] == '\n')
+            lines++;
+    return lines * 8 < 4000;
+}
+
+/* 関数の本体 (プロローグとエピローグを除く) を fb に作る */
+static void gen_body(struct sym *f)
 {
     struct sym *s;
     struct argcls rc = classify(f->ty->base);
     int regi = 0, i;
-    i64 stk = 0, frame, V, first;
-    struct buf body;
-    char num[32];
+    i64 stk = 0, V;
 
     fb.n = 0;
     if (fb.p)
@@ -5394,6 +6382,23 @@ static void gen_function(struct sym *f)
     }
     gen_stmt(f->body);
     place(retlabel);
+}
+
+static void gen_function(struct sym *f)
+{
+    int i;
+    i64 frame, V, first;
+    struct buf body;
+    char num[32];
+
+    /* まず短い分岐で作り，本体が長ければ長い分岐で作り直す */
+    longbr = 0;
+    gen_body(f);
+    if (!body_fits_branch(&fb)) {
+        longbr = 1;
+        gen_body(f);
+    }
+    V = fn_variadic ? 32 : 0;
 
     /* ここまでの本体を取っておき，プロローグを前に付けて出す */
     body = fb;
@@ -5524,11 +6529,36 @@ static void put_le(unsigned char *img, i64 off, i64 v, int size)
         img[off + i] = (unsigned char)(((u64)v >> (8 * i)) & 0xff);
 }
 
+/* [off, off+size) に重なる再配置を外す。後の初期化子が前のものを上書きするため */
+static void drop_relocs(struct dreloc **rl, i64 off, i64 size)
+{
+    while (*rl) {
+        if ((*rl)->off < off + size && (*rl)->off + 4 > off)
+            *rl = (*rl)->next;
+        else
+            rl = &(*rl)->next;
+    }
+}
+
+/* 再配置を位置の順に差し込む */
+static void add_reloc(struct dreloc **rl, i64 off, const char *label, i64 addend)
+{
+    struct dreloc *r = xmalloc(sizeof(struct dreloc));
+    drop_relocs(rl, off, 4);
+    while (*rl && (*rl)->off < off)
+        rl = &(*rl)->next;
+    r->off = off;
+    r->label = label;
+    r->addend = addend;
+    r->next = *rl;
+    *rl = r;
+}
+
 static void emit_data(struct sym *s)
 {
     i64 size = tsize(s->ty), i;
     unsigned char *img = xmalloc(size + 8);
-    struct dreloc *rl = 0, **rt = &rl;
+    struct dreloc *rl = 0;
     struct ient *e;
     int zero = 1, isconst = 0;
     const char *lab = symlabel(s);
@@ -5550,10 +6580,12 @@ static void emit_data(struct sym *s)
             i64 n = str->len + 1;
             if (e->ty->len >= 0 && n > e->ty->len)
                 n = e->ty->len;
+            drop_relocs(&rl, e->off, n);
             for (i = 0; i < n; i++)
                 img[e->off + i] = i < str->len ? (unsigned char)str->s[i] : 0;
             continue;
         }
+        drop_relocs(&rl, e->off, e->bf ? tsize(e->bf->ty) : tsize(e->ty));
         if (e->bf) {
             u64 cur = 0, mask;
             int sz = (int)tsize(e->bf->ty);
@@ -5577,11 +6609,8 @@ static void emit_data(struct sym *s)
                 put_le(img, e->off, v, 4);
                 continue;
             }
-            *rt = xmalloc(sizeof(struct dreloc));
-            (*rt)->off = e->off;
-            (*rt)->label = l;
-            (*rt)->addend = v;
-            rt = &(*rt)->next;
+            put_le(img, e->off, 0, 4);
+            add_reloc(&rl, e->off, l, v);
             continue;
         }
         fatal_at(curfile, curline, "静的な初期化子が定数でない", s->name->s);

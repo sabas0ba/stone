@@ -272,6 +272,7 @@ for b in $ctests; do
     [ $r -eq 0 ] || head -20 "$out/c-$b.diff"
     case "$b" in
     abi) what="psABI の文面から手で書いたアセンブリと呼び合う (64 bit の対・a7 とスタックの分割・可変長の偶数番とスタック・構造体の値渡しと値返し・狭い整数の拡張)" ;;
+    asm) what="inline asm の被演算子 (64 bit の値・記憶域・jump 擬似命令) を手で書いた期待と比べる" ;;
     *) what="ホストの gcc と同じ出力" ;;
     esac
     report $r "run: $b ($what)"
@@ -298,6 +299,22 @@ if command -v "${HOSTCC:-gcc}" > /dev/null 2>&1; then
     done
 else
     echo "skip ホストの cc が無い (HOSTCC)"
+fi
+
+section "ncc1: Linux 5.4 の C の単位 (docs/stage018-ncc.md 10 章の M4)"
+
+# 前処理した .i は 404 MB あり，stone の OS のファイルシステムに入らない。
+# ホストの cc で組んだ ncc1 と nas1 で通す (同じ .s を出すことは上の節で見る)
+kbtree=tmp/kblog-stone
+if [ -d tmp/linux19/kblog-stone/out ] && [ -x tmp/nas1/host/ncc1 ] && [ -d "$kbtree" ]; then
+    sh tools/linux19.sh ncc "$kbtree" > "$out/linux-ncc.log" 2>&1
+    sed -n 's/^ncc: /   /p' "$out/linux-ncc.log"
+    n=$(find tmp/linux19/kblog-stone/out -name '*.i' | wc -l | tr -d ' ')
+    ok=$(grep -lx 0 tmp/linux19/kblog-stone/ncc/*.rc | wc -l | tr -d ' ')
+    [ "$n" -gt 0 ] && [ "$ok" -eq "$n" ]
+    report $? "linux: rv32-stone の C の単位をすべて ncc1 で訳し，nas1 で組み立てる"
+else
+    echo "skip Linux の C の単位が無い (sh tools/fetch.sh linux54，sh tools/kbuildlog.sh run，sh tools/linux19.sh pre)。**この節は検査していない**"
 fi
 
 section "nas1: Linux 5.4 の .S の単位"

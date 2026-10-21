@@ -7,6 +7,7 @@
 #   linux19.sh all <kbout>          全単位を通して表に足していく (途中から再開できる)
 #   linux19.sh scan <kbout>         前処理した単位の中の拡張の使われ方を数える
 #   linux19.sh spre <kbout>         .S の単位を前処理だけする (nas1 の入力。docs/stage018-ncc.md 10 章の M1)
+#   linux19.sh ncc <kbout>          前処理した全単位をホストの ncc1 と nas1 に通す (同 M4)
 #
 # <kbout> は tools/kbuildlog.sh run の出力先 (Kbuild の objtree) である。
 # 単位ごとの命令行はそこの kblog/tools.log にある。
@@ -30,6 +31,7 @@ work=""
 predef="$repo_root/stage019/predef-rv32-gcc46.h"
 ccinc="$repo_root/stage019/include"
 cc15="tmp/build/cc15as.bin"
+ncc_host="$repo_root/tmp/nas1/host"
 HOSTCC=${HOSTCC:-gcc}
 
 die() { echo "linux19.sh: $*" >&2; exit 1; }
@@ -240,6 +242,44 @@ __label__|__label__
 EOF
 }
 
+# 前処理した 1 単位をホストで組んだ ncc1 と nas1 に通す。結果は
+# <work>/ncc/<key>.{s,o,err,rc}。rc は ncc1 の終了コード，ncc1 が通れば
+# nas1 の終了コードを 100 足して重ねる (0 は両方通った)
+ncc_one() {
+    key=$1
+    d="$work/ncc"
+    rm -f "$d/$key.s" "$d/$key.o"
+    set +e
+    (ulimit -v 2000000; timeout 60 "$ncc_host/ncc1" -o "$d/$key.s" "$work/out/$key.i") 2> "$d/$key.err"
+    rc=$?
+    if [ $rc -eq 0 ]; then
+        "$ncc_host/nas1" -o "$d/$key.o" "$d/$key.s" 2>> "$d/$key.err"
+        r2=$?
+        [ $r2 -eq 0 ] || rc=$((100 + r2))
+    fi
+    set -e
+    echo $rc > "$d/$key.rc"
+}
+
+# 前処理した全単位を ncc1 と nas1 に通し，終了コードと最初の誤りの数を出す
+# (docs/stage018-ncc.md 10 章の M4)。ncc1 と nas1 は tools/ncc18.sh host が
+# 組んだものを使う
+ncc_all() {
+    [ -d "$work/out" ] || die "前処理した単位が無い (sh tools/linux19.sh pre)"
+    [ -x "$ncc_host/ncc1" ] && [ -x "$ncc_host/nas1" ] || die "ncc1 / nas1 が無い (sh tools/ncc18.sh host)"
+    rm -rf "$work/ncc"
+    mkdir -p "$work/ncc"
+    find "$work/out" -name '*.i' | sed 's|.*/||; s|\.i$||' | sort \
+        | xargs -P "${JOBS:-8}" -I{} sh "$0" ncc-one "$kbabs" {}
+    total=$(find "$work/ncc" -name '*.rc' | wc -l | tr -d ' ')
+    ok=$(grep -lx 0 "$work/ncc"/*.rc | wc -l | tr -d ' ')
+    echo "ncc: 通った $ok / $total ($work/ncc)"
+    cat "$work/ncc"/*.rc | sort | uniq -c | sort -rn
+    for f in "$work/ncc"/*.err; do
+        head -n 1 "$f"
+    done | sed 's/^[^:]*: [^:]*:[0-9]*: //' | sort | uniq -c | sort -rn | head -n 30
+}
+
 # <kbout> を絶対経路にし，作業の置き場をそれに結び付ける
 use_tree() {
     [ -d "$1" ] || die "objtree が無い: $1"
@@ -256,8 +296,10 @@ one) [ $# -ge 3 ] || die "one <kbout> <obj>"; one "$kbabs" "$3" ;;
 all) [ $# -ge 2 ] || die "all <kbout>"; all "$kbabs" ;;
 scan) [ $# -ge 2 ] || die "scan <kbout>"; scan ;;
 spre) [ $# -ge 2 ] || die "spre <kbout>"; spre_all "$kbabs" ;;
+ncc) [ $# -ge 2 ] || die "ncc <kbout>"; ncc_all ;;
+ncc-one) [ $# -ge 3 ] || die "ncc-one <kbout> <key>"; ncc_one "$3" ;;
 *)
-    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan <kbout> | spre <kbout>}" >&2
+    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan <kbout> | spre <kbout> | ncc <kbout>}" >&2
     exit 2
     ;;
 esac

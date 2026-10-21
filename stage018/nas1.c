@@ -12,7 +12,7 @@
  *
  * 再配置の方針:
  *   - 分岐と jal は，同じ節の weak でない記号ならその場で解決する
- *   - call / tail は常に R_RISCV_CALL_PLT を出す
+ *   - call / tail は常に R_RISCV_CALL_PLT を，jump は常に R_RISCV_CALL を出す
  *   - %pcrel_hi / %pcrel_lo は常に再配置にする。%pcrel_lo は auipc のラベルを
  *     指すので，そのラベルは .L で始まっても記号表に載せる
  *   - 局所の記号への再配置は節の記号 + 位置に置き換える
@@ -56,6 +56,7 @@
 #define R_RISCV_64 2
 #define R_RISCV_BRANCH 16
 #define R_RISCV_JAL 17
+#define R_RISCV_CALL 18
 #define R_RISCV_CALL_PLT 19
 #define R_RISCV_PCREL_HI20 23
 #define R_RISCV_PCREL_LO12_I 24
@@ -1688,6 +1689,25 @@ static int instruction(const char *name, char *args)
         }
         emit32(enc_u(0x17, rt, 0));
         emit32(enc_i(0x67, 0, rd, rt, 0));
+        return 1;
+    }
+    if (strcmp(name, "jump") == 0) {
+        /* jump <先>, <一時レジスタ>: auipc rt; jalr zero, rt */
+        int rt;
+        struct val v;
+        needargs(n, 2, name);
+        rt = reg(a[1]);
+        evalstr(a[0], &v);
+        nosub(&v, a[0]);
+        if (v.mod)
+            fatal("修飾子は使えない", a[0]);
+        if (pass == 2) {
+            if (!v.s)
+                fatal("跳ぶ先が定数である", a[0]);
+            addrel(off, R_RISCV_CALL, v.s, v.c);
+        }
+        emit32(enc_u(0x17, rt, 0));
+        emit32(enc_i(0x67, 0, 0, rt, 0));
         return 1;
     }
     if (strcmp(name, "fence") == 0) {
