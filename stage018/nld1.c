@@ -430,8 +430,14 @@ static void readobj(const char *name)
                     continue;
                 }
                 if (ls->shndx == SHN_COMMON) {
-                    if (g->defined)
+                    /* 強い定義は COMMON に勝ち，COMMON は weak の定義に勝つ */
+                    if (g->defined && !g->weak)
                         continue;
+                    if (g->defined) {
+                        g->defined = 0;
+                        g->weak = 0;
+                        g->sec = 0;
+                    }
                     if (ls->size > g->common)
                         g->common = ls->size;
                     if (ls->value > g->calign)
@@ -440,7 +446,7 @@ static void readobj(const char *name)
                 }
                 if (g->defined && !g->weak && ls->bind != STB_WEAK)
                     fatal("記号の多重定義", ls->name);
-                if (g->defined && ls->bind == STB_WEAK)
+                if ((g->defined || g->common) && ls->bind == STB_WEAK)
                     continue;
                 g->defined = 1;
                 g->weak = ls->bind == STB_WEAK;
@@ -1105,15 +1111,25 @@ static void parse_script(const char *text, const char *name)
                         accept(';');
                         continue;
                     }
-                    n = patname();
-                    skipws();
-                    if (*sp == '=' || (sp[1] == '=' && strchr("+-*/&|", *sp))) {
-                        sp = save;
-                        n = exprname();
-                        append(&tail, assignment(n));
-                        accept(';');
-                        continue;
+                    /* 名前の後ろが代入の演算子 (= += -= *= /= %= &= |= ^= <<= >>=)
+                     * なら記号への代入，そうでなければ出力節 */
+                    if (isnamec(*sp)) {
+                        const char *q = sp;
+                        while (isnamec(*q))
+                            q++;
+                        while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r')
+                            q++;
+                        if ((q[0] == '=' && q[1] != '=')
+                            || (q[1] == '=' && q[0] && strchr("+-*/%&|^", q[0]))
+                            || ((q[0] == '<' || q[0] == '>') && q[1] == q[0] && q[2] == '=')) {
+                            n = exprname();
+                            append(&tail, assignment(n));
+                            accept(';');
+                            continue;
+                        }
                     }
+                    sp = save;
+                    n = patname();
                     append(&tail, output_section(n));
                 }
             }
@@ -1593,6 +1609,27 @@ static void layout(void)
             o->size = (dot - o->vma) & 0xffffffffUL;
         }
     }
+}
+
+/* 割付けの結果 (出力節の番地・大きさと台本の記号の値) の要約。
+ * 回ごとの値の変化を見るのに使う */
+static u32 layout_digest(void)
+{
+    u32 h = 2166136261UL;
+    struct stmt *s;
+    int k;
+    struct gsym *g;
+    for (s = top; s; s = s->next)
+        if (s->kind == S_OSEC) {
+            h = ((h ^ s->os->vma) * 16777619UL) & 0xffffffffUL;
+            h = ((h ^ s->os->lma) * 16777619UL) & 0xffffffffUL;
+            h = ((h ^ s->os->size) * 16777619UL) & 0xffffffffUL;
+        }
+    for (k = 0; k < 4096; k++)
+        for (g = gtab[k]; g; g = g->next)
+            if (g->defined == 2)
+                h = ((h ^ g->value) * 16777619UL) & 0xffffffffUL;
+    return h;
 }
 
 /* ---- 再配置 ---- */
@@ -2165,6 +2202,7 @@ int main(int argc, char **argv)
     char *script;
     int i, k;
     u32 entry = 0;
+    int hasentry = 0;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (strcmp(a, "-o") == 0 && i + 1 < argc)
@@ -2175,8 +2213,12 @@ int main(int argc, char **argv)
             scriptfile = a + 2;
         else if (strcmp(a, "-e") == 0 && i + 1 < argc)
             entryname = argv[++i];
+        else if ((strcmp(a, "-z") == 0 || strcmp(a, "-m") == 0 || strcmp(a, "-L") == 0
+                  || strcmp(a, "-soname") == 0 || strcmp(a, "-h") == 0 || strcmp(a, "-Map") == 0
+                  || strcmp(a, "-u") == 0 || strcmp(a, "-y") == 0) && i + 1 < argc)
+            i++;    /* 別の引数を取る選択肢 (-z noexecstack など) は引数ごと無視する */
         else if (a[0] == '-')
-            ;   /* -melf32lriscv / -z noexecstack などは無視する */
+            ;   /* -melf32lriscv / --no-warn-rwx-segments などは無視する */
         else
             readobj(a);
     }
@@ -2198,21 +2240,33 @@ int main(int argc, char **argv)
             if (s->kind == S_OSEC && !s->os->discard)
                 osec_attrs(s->os);
     }
-    /* 前方の参照 (後ろの記号や SIZEOF) が落ち着くまで割付けを繰り返す */
-    for (k = 1; k <= 4; k++) {
-        lpass = k;
-        final = k == 4;
+    /* 前方の参照 (後ろの記号や SIZEOF) が落ち着くまで割付けを繰り返す。
+     * 値が変わらなくなったら，ASSERT と未定義の検査のためにもう 1 回回す */
+    {
+        u32 prev = 0, cur;
+        for (k = 1;; k++) {
+            lpass = k;
+            layout();
+            cur = layout_digest();
+            if (k > 1 && cur == prev)
+                break;
+            if (k >= 64)
+                fatal("台本の記号の値が定まらない (循環した定義)", 0);
+            prev = cur;
+        }
+        final = 1;
         layout();
     }
     fill_sections();
     if (entryname) {
         struct gsym *g = gsym(entryname, 0);
-        if (g && g->defined)
+        if (g && g->defined) {
             entry = symaddr(g);
-        else if (scriptfile || strcmp(entryname, "_start") != 0)
+            hasentry = 1;
+        } else if (scriptfile || strcmp(entryname, "_start") != 0)
             fatal("入口の記号が無い", entryname);
     }
-    if (!entry) {
+    if (!hasentry) {
         struct osec *t = findosec(".text");
         if (t)
             entry = t->vma;

@@ -75,6 +75,7 @@ NAS18_INC="$out/inc" sh tools/nas18.sh run "$out/stone" \
     tests/stage018/nas1/insn.s tests/stage018/nas1/elf.s "$out/empty.s" \
     tests/stage018/rt/start.s tests/stage018/rt/io.s \
     tests/stage018/nld1/main.s tests/stage018/nld1/other.s tests/stage018/nld1/lds.s \
+    tests/stage018/nld1/lds2.s tests/stage018/nld1/cw1.s tests/stage018/nld1/cw2.s \
     "$out"/ldbad/*.s "$out"/bad/*.s "${linux[@]}" 2> "$out/run.err"
 [ -s "$out/stone/insn.o" ] && [ -s "$out/stone/elf.o" ]
 report $? "run: kernel29 の上で nas1 が試験の入力を組み立てる"
@@ -128,16 +129,22 @@ ld="$out/ld"
 rm -rf "$ld"
 mkdir -p "$ld/root"
 cp tmp/build/nld1 "$ld/root/nld1"
-for b in start io main other lds ld_undef ld_dup ld_far ld_lo; do
+for b in start io main other lds lds2 cw1 cw2 ld_undef ld_dup ld_far ld_lo; do
     [ -f "$out/stone/$b.o" ] && cp "$out/stone/$b.o" "$ld/root/"
 done
-cp tests/stage018/nld1/lds.lds "$ld/root/"
+cp tests/stage018/nld1/lds.lds tests/stage018/nld1/lds2.lds "$ld/root/"
 printf 'SECTIONS { .text : { *(.text) } ASSERT(0, "boom") }\n' > "$ld/root/assert.lds"
 cat > "$ld/root/go.sh" <<'GO'
 nld1 -o t.elf start.o io.o main.o other.o
 echo "rc t $?"
 nld1 -T lds.lds -o lds.elf lds.o
 echo "rc lds $?"
+nld1 -z noexecstack -m elf32lriscv -T lds2.lds -o lds2.elf lds2.o
+echo "rc lds2 $?"
+nld1 -o cwa.elf cw1.o cw2.o
+echo "rc cwa $?"
+nld1 -o cwb.elf cw2.o cw1.o
+echo "rc cwb $?"
 nld1 -o undef.elf ld_undef.o
 echo "rc undef $?"
 nld1 -o dup.elf ld_dup.o other.o
@@ -172,6 +179,15 @@ diff -u tests/stage018/nld1/lds.expect "$out/lds.got" > "$out/lds.diff"
 r=$?
 [ $r -eq 0 ] || head -40 "$out/lds.diff"
 report $r "lds: AT・ALIGN・SORT・KEEP・/DISCARD/・PROVIDE・BYTE/SHORT/LONG・ADDR/SIZEOF/LOADADDR・orphan の置き場所が期待どおり"
+grep -q '^rc lds2 0$' "$ld/out.console" \
+    && sh verify/nld1elf.sh "$ld/out/lds2.elf" .data > "$out/lds2.got" 2> /dev/null \
+    && diff -u tests/stage018/nld1/lds2.expect "$out/lds2.got"
+report $? "lds2: 5 段の前方の参照が収束し，SECTIONS 直下の複合代入をすべて受け，値 0 の入口を保つ (-z の引数も読み飛ばす)"
+for e in cwa cwb; do
+    grep -q "^rc $e 0\$" "$ld/out.console" \
+        && sh verify/nld1elf.sh "$ld/out/$e.elf" 2> /dev/null | grep -q '^symbol cw 0x[0-9a-f]* GLOBAL \.bss$'
+    report $? "common: COMMON が weak の定義に勝つ ($e: 結合の順を替えても同じ)"
+done
 
 section "nld1: 誤った入力を止める"
 
