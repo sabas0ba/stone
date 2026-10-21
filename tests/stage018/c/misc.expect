@@ -1,0 +1,16 @@
+bigframe 1124385 161170
+enum 0 5 6 2147483647 -3
+sizeof enum 4 4
+table 7 12
+lookup two none
+stmtexpr 21
+builtin 1 0 1 10
+char 255 255 66
+esc tab	here\ "q" AB
+comma 12
+sw64 1 2 3 0
+deep -138 -801
+pp 11 2 15
+condstruct 1 2
+varshift 67108864 -2 33554432
+rc 0

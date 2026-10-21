@@ -1,0 +1,21 @@
+ga 1 3 0 0 20
+gb 40 4
+gs abc 8 hello 6
+gp ptr
+gr rec 4 5 0 6 7
+grs a 1 0 b 4 8
+elided 1 2 3 4
+0 0 22 0 44 55 
+gd des 0 11 0 77
+09990060
+addr 30 4 7
+gll 123456789abcdef0 gsh -1 2 -3 guc 255 128 1 0
+gpad q -9
+zeros 0
+la 7 8 0 0
+ls local 6
+lp 0 3
+lr lr 3 4 0
+lm 1 2 0 3 0 0
+static 100 101
+rc 0

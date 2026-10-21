@@ -1,0 +1,13 @@
+arr 9 25 285
+grid 23 12 8
+swap 4 3
+pdiff 9 -7
+parith 36 25
+names beta mma 5
+fp 49 25 -5
+buf abcde c
+cmp 1 1
+null 1 1
+lit l literal
+sizeof 40 16 3
+rc 0

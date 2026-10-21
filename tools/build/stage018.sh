@@ -23,7 +23,7 @@ prog18_run() {
 }
 
 build_stage018() {
-    for p in nas1 nld1; do
+    for p in nas1 nld1 ncc1; do
         step "$p" "$p" \
             -- "stage018/$p.c" stage017/libc26/include/*.h \
                stage017/libc26/include/sys/*.h \
@@ -35,8 +35,8 @@ build_stage018() {
 }
 
 do_stage018() {
-    run_stage stage018 nas1 nld1 \
-        -- stage018/nas1.c stage018/nld1.c \
+    run_stage stage018 nas1 nld1 ncc1 \
+        -- stage018/nas1.c stage018/nld1.c stage018/ncc1.c \
            stage017/libc26/include/*.h stage017/libc26/include/sys/*.h \
            tmp/build/stage017.stamp tools/build/stage018.sh tools/bundle.sh \
            tools/ld18.sh

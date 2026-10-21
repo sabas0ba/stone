@@ -1,0 +1,9 @@
+sumv 10000000009
+sumv2 123456789015
+ten 385
+split 4294967333
+tail64 55
+vstruct 46
+mix 1 2 3 -4 five 6
+pad [   42] [42   ] [00042] [beef] [0000BEEF] [  a] [b  ]
+rc 0

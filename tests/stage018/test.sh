@@ -15,6 +15,10 @@
 #      別の .o の記号への再配置がすべて正しく当たっていること
 #   8. リンカ台本の割付けが，台本から手で数えた期待と一致すること
 #   9. nld1 も，誤りを止め，ホストの cc で組んだものと同じ出力を出すこと
+#  10. (M3) stone の OS の上で ncc1 が C を訳し，nas1 と nld1 で組んだものが
+#      QEMU の上でホストの gcc と同じ出力を出すこと (tests/stage018/c)
+#  11. psABI の文面から手で書いたアセンブリと C が呼び合えること (abi.s)
+#  12. ncc1 も，誤りを止め，ホストの cc で組んだものと同じ .s を出すこと
 #
 # 6 は Linux のソースと Kbuild の記録 (tools/linux19.sh spre) が要るので，
 # 無ければ飛ばし，飛ばしたことを出す。
@@ -187,6 +191,97 @@ if [ -x tmp/nas1/host/nld1 ]; then
     report $? "same: lds.elf"
 else
     echo "skip ホスト版が無い (ホストの cc が無い)"
+fi
+
+section "ncc1: stone の OS の上で C を訳して組む (docs/stage018-ncc.md 10 章の M3)"
+
+[ "$(od -An -c -N 4 tmp/build/ncc1 | tr -d ' ')" = '177ELF' ]
+report $? "build: ncc1 が OS の実行形式 (ELF) として組まれている"
+
+cc="$out/cc"
+rm -rf "$cc"
+mkdir -p "$cc/root"
+cp tmp/build/ncc1 tmp/build/nas1 tmp/build/nld1 "$cc/root/"
+cp tests/stage018/rt/start.s tests/stage018/rt/libc.c "$cc/root/"
+ctests=""
+for f in tests/stage018/c/*.c; do
+    ctests="$ctests $(basename "$f" .c)"
+    cp "$f" "$cc/root/"
+done
+cp tests/stage018/c/abi.s "$cc/root/abi_asm.s"
+# 誤った入力 (どれも ncc1 が止めるべきもの)
+printf 'int main(void) { return 0 }\n' > "$cc/root/bad_syntax.c"
+printf 'int main(void) { return undeclared_name; }\n' > "$cc/root/bad_undecl.c"
+printf 'struct s { int x; };\nint main(void) { struct s v; int i = v; return i; }\n' > "$cc/root/bad_type.c"
+printf 'static void f(void);\nint main(void) { f(); return 0; }\n' > "$cc/root/bad_static.c"
+printf 'int main(void) { float f = 1.5; return (int)f; }\n' > "$cc/root/bad_float.c"
+{
+    echo 'nas1 -o start.o start.s'
+    echo 'ncc1 -o libc.s libc.c'
+    echo 'echo "rc libc $?"'
+    echo 'nas1 -o libc.o libc.s'
+    echo 'nas1 -o abi_asm.o abi_asm.s'
+    for b in $ctests; do
+        extra=""
+        [ "$b" = abi ] && extra=" abi_asm.o"
+        echo "ncc1 -o $b.s $b.c"
+        echo "echo \"rc $b.ncc \$?\""
+        echo "nas1 -o $b.o $b.s"
+        echo "nld1 -o $b.elf start.o libc.o $b.o$extra"
+        echo "echo \"rc $b.link \$?\""
+    done
+    for b in bad_syntax bad_undecl bad_type bad_static bad_float; do
+        echo "ncc1 -o $b.s $b.c"
+        echo "echo \"rc $b \$?\""
+    done
+} > "$cc/root/go.sh"
+sh tools/os18.sh run "$cc/root" "$cc/out"
+grep -q '^rc libc 0$' "$cc/out.console"
+report $? "ncc1: 試験の libc (printf・memcpy・64 bit の除算の支援) を訳す"
+for b in $ctests; do
+    grep -q "^rc $b.ncc 0\$" "$cc/out.console" && grep -q "^rc $b.link 0\$" "$cc/out.console"
+    report $? "compile: $b.c を訳して組む"
+done
+
+section "ncc1: 素の実行環境で走り，ホストの gcc と同じ出力を出す"
+
+for b in $ctests; do
+    if sh tools/env.sh qemu "$cc/out/$b.elf" < /dev/null > "$out/c-$b.out" 2>&1; then
+        echo "rc 0" >> "$out/c-$b.out"
+    else
+        echo "rc $?" >> "$out/c-$b.out"
+    fi
+    diff -u "tests/stage018/c/$b.expect" "$out/c-$b.out" > "$out/c-$b.diff"
+    r=$?
+    [ $r -eq 0 ] || head -20 "$out/c-$b.diff"
+    case "$b" in
+    abi) what="psABI の文面から手で書いたアセンブリと呼び合う (64 bit の対・a7 とスタックの分割・可変長の偶数番とスタック・構造体の値渡しと値返し・狭い整数の拡張)" ;;
+    *) what="ホストの gcc と同じ出力" ;;
+    esac
+    report $r "run: $b ($what)"
+done
+
+section "ncc1: 誤った入力を止める"
+
+for b in bad_syntax bad_undecl bad_type bad_static bad_float; do
+    grep -q "^rc $b [1-9]" "$cc/out.console"
+    report $? "bad: $b.c を誤りとして止める"
+done
+
+section "ncc1: ホストの cc で組んだものと同じ .s を出す (docs/stage018-ncc.md 7 章の 5)"
+
+if command -v "${HOSTCC:-gcc}" > /dev/null 2>&1; then
+    sh tools/ncc18.sh host > /dev/null 2>&1
+    report $? "host: ホストの cc で -Werror のまま組める"
+    for b in libc $ctests; do
+        src="tests/stage018/c/$b.c"
+        [ "$b" = libc ] && src=tests/stage018/rt/libc.c
+        tmp/nas1/host/ncc1 -o "$out/host-$b.s" "$src" 2> /dev/null \
+            && cmp -s "$out/host-$b.s" "$cc/out/$b.s"
+        report $? "same: $b.s"
+    done
+else
+    echo "skip ホストの cc が無い (HOSTCC)"
 fi
 
 section "nas1: Linux 5.4 の .S の単位"

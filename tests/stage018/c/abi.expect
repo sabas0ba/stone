@@ -1,0 +1,7 @@
+add64 300000004
+split 1234567890abcdef
+small 34 big 18
+retbig 20 21 22 retpt 31 41
+vcall 1 1
+ncall 500000006 narrow 1
+rc 0
