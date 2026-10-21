@@ -256,7 +256,7 @@ Kbuild の記録 (rv32-stone) で呼ばれる形を持つ。
 | 部 | 内容 | 終わりの判定 |
 |---|---|---|
 | M1 | nas1 | 7 章の 1 が通る。Linux の `.S` の単位 (ホストの cpp で前処理したもの) が組み立てられる。**完了** (12 章) |
-| M2 | nld1 の基本 (`-T` の最小形・`ET_EXEC`) と素の実行環境 | `.S` だけの試験が QEMU で走る |
+| M2 | nld1 の基本 (`-T` の最小形・`ET_EXEC`) と素の実行環境 | `.S` だけの試験が QEMU で走る。**完了** (13 章) |
 | M3 | ncc1 の C89 と psABI | 7 章の 2・3 が通る |
 | M4 | ncc1 の GNU 拡張・組込み・inline asm | 374 単位すべてが訳され，nas1 を通る |
 | M5 | nld1 のリンカ台本・`-r`・書庫・`-shared`，周辺の道具 | ホストから駆動した Kbuild で `vmlinux` ができる |
@@ -303,6 +303,32 @@ Linux の `.S` を通すために，6.1 の範囲に次を足した。いずれ�
 ### 12.4 まだ無いもの
 
 `.incbin` は試験では置き換えた中身で試した (Linux の `vdso.so` と `initramfs_data.cpio` は nld1 と gen_init_cpio の後にできる)。Linux の inline asm の文字列は ncc1 ができてから通す (M4)。
+
+## 13. M2 の到達点 (2026-10-21)
+
+nld1 ([stage018/nld1.c](../stage018/nld1.c)，約 2,200 行) と素の実行環境 ([tests/stage018/rt](../tests/stage018/rt)) を書いた。nld1 も nas1 と同じく `sh tools/build.sh stage018` が cc15as で組み，試験は kernel29 の上で走らせる。kernel29 で 1 回起動して命令を並べて走らせる部分は [tools/os18.sh](../tools/os18.sh) にまとめた。
+
+### 13.1 nld1 の範囲
+
+| 項目 | 持つもの |
+|---|---|
+| 入力 | nas1 が出す ELF32 の `ET_REL`。COMMON の記号は擬似的な入力節 `COMMON` にまとめる |
+| リンカ台本 | `ENTRY`・`SECTIONS`・`.` と記号への代入 (複合代入を含む)・`PROVIDE` / `PROVIDE_HIDDEN` / `HIDDEN`・出力節の番地・`AT()`・`ALIGN()`・`(NOLOAD)`・入力節の指定 (ワイルドカード，`EXCLUDE_FILE`，`SORT`，`KEEP`)・`/DISCARD/`・`BYTE` / `SHORT` / `LONG` / `QUAD`・`ASSERT`。式は C の演算子と `ALIGN`・`ADDR`・`LOADADDR`・`SIZEOF`・`ALIGNOF`・`DEFINED`・`MAX` / `MIN`・`ABSOLUTE`・`CONSTANT`。`OUTPUT_ARCH` などは読み捨てる |
+| 既定の台本 | `-T` が無ければ，0x8000_0000 から `.text`・`.rodata`・`.data`・`.bss` を並べ，後ろに 64 KiB のスタック (`__stack_top`) を置く。既定の台本も同じ解析器で読む |
+| orphan | 台本が置かない割り付ける節は，同じ種類 (命令・読出し専用・書込み可・nobits) の最後の出力節の後ろに，同じ名前の出力節として置く。割り付けない節は出力しない |
+| 再配置 | 32・64・BRANCH・JAL・CALL / CALL_PLT・PCREL_HI20 / LO12_I / LO12_S・HI20 / LO12_I / LO12_S・ADD / SUB (8・16・32・64)。RELAX は読み捨て，ALIGN は誤りとする |
+| 出力 | `ET_EXEC`。大きさのある出力節ごとに PT_LOAD を 1 つ置く (`p_paddr` は LMA)。記号表は入力の局所の記号 (`.L` を除く) と大域の記号を持つ |
+
+書庫・`-r`・`--just-symbols`・`-shared`・`PHDRS`・`--build-id` は M5 で足す。
+
+### 13.2 試験
+
+| 検査 | 結果 |
+|---|---|
+| 別の .o の記号への再配置 (`tests/stage018/nld1/main.s` + `other.s`) | stone の OS の上で nld1 が結合した実行形式を QEMU で素のまま走らせ，CALL_PLT・PCREL (読み・書き)・HI20 / LO12 (読み・書き)・JAL・BRANCH・32 (関数の表)・ADD32 / SUB32・weak の上書き・weak の未定義 (0)・COMMON のまとめ・台本の記号の 14 項目がすべて正しい |
+| リンカ台本 (`lds.s` + `lds.lds`) | 節の番地と大きさ・PT_LOAD の VMA / LMA・記号の値・中身が，台本から手で数えた期待 (`lds.expect`) と verify 層の readelf の読みで一致 ([verify/nld1elf.sh](../verify/nld1elf.sh)) |
+| 誤った入力 | 未定義の記号・多重定義・届かない分岐・対応する `%pcrel_hi` の無い `%pcrel_lo`・成り立たない `ASSERT` の 5 種を止める |
+| ホスト版との一致 | 2 つの結合で，ホストの gcc で組んだ nld1 と同じ実行形式を出す |
 
 ## 一次資料
 
