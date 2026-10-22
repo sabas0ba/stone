@@ -195,3 +195,43 @@ mk・sh・sed などの道具は，これまでの世代と同じく，今の世
 ### 7.3 Stage 18 からの引継ぎ
 
 stage018-ncc.md 4.3 の変更 (除去されずに残った `error` 属性の関数の呼出しを `ebreak` にし警告を出す。rv32-stone では 2 箇所) は承認された (2026-10-22)。
+
+## 8. S1: 前処理器 npp1 (2026-10-22)
+
+`stage019/npp1.c`。C89 で書き，stage018 の道具と同じく cc15as と libc26 で組む (`tools/build/stage019.sh`)。pp21 (stage017) は sc の方言で書かれ，バンドルを入力に取り `-I` しか持たないので，広げずに新しく書いた。
+
+### 8.1 受けるもの
+
+GCC の cc1 の前処理の部分集合で，Linux 5.4 の rv32-stone が使うもの。
+
+- 選択肢: `-I`・`-isystem`・`-iquote`・`-include`・`-D`・`-U`・`-P`・`-x c|assembler-with-cpp`・`-MD <file>`・`-MMD <file>`・`-MF`・`-MT`・`-o`。`-nostdinc`・`-undef`・`-E` は読み捨てる (前もって定義するものは持たず，ドライバが `-include stage019/predef-rv32-gcc46.h` で与える)。知らない選択肢は誤り。入力 `-` は標準入力
+- 展開: 字句の列と hide set による展開 (Prosser の方式)。`#`・`##`・配置用の字句，GNU の `args...` と `, ## __VA_ARGS__`，`__LINE__`・`__FILE__`・`__COUNTER__`，`_Pragma` (被演算子もマクロを展開する。Linux の `__diag` が使う)
+- 指令: `#if`・`#elif` (64 bit の符号付き・符号無しの算術)・`#ifdef`・`#ifndef`・`#else`・`#endif`・`#define`・`#undef`・`#include`・`#include_next`・`#error`・`#warning`・`#pragma` (`once` を含む)・`#line`・`#ident`。include guard を見分けて 2 度目を開かない
+- assembler-with-cpp: 行の頭の `#` で始まる知らない行 (注釈) を残す。閉じない `'` を通す。1 つの字句にならない `##` は誤りにせず 2 つの字句のまま並べる
+
+### 8.2 GCC と合わせたこと
+
+出力の空白と依存の記録は，意味を持たない所も GCC 13 (ホストの cpp) と同じにした。Kbuild はどちらも読む (`gcc-version.sh` は出力の最後の行を読み，fixdep は依存の記録を読む)。
+
+- `-P` では空行を出さない
+- 字句の間の空白は，元に空白があった所と，展開の境 (置換の前後・実引数の前後・空に展開した後) で 2 つの字句がつながって読める所 (`cpp_avoid_paste` の表) にだけ置く。ファイルやマクロの本体で隣り合っていた字句はそのまま並べる (`.data..percpu` を壊さない)
+- 依存の記録: 頭の `./` を除く。`-include` は読む順に記録する。同じファイルを `(書かれた名前, 見つけた探索の階層)` が違う形で 2 度読めば 2 度記録する (`-include` の絶対経路と `#include <...>`，`<linux/taskstats.h>` と `<uapi/linux/taskstats.h>`)。libcpp がファイルをその組で覚えるからである
+- `-include` は作業の場所から先に探す
+
+### 8.3 確かめたこと
+
+| 何を | どう | 結果 |
+|---|---|---|
+| C の単位 374 | `tools/linux19.sh npp`: npp1 の `.i` を ncc1 に通した `.s` を，ホストの cpp の `.i` から作った `.s` と比べ，`.i` も空白を除いてホストの cpp と比べる | 374 すべて一致 |
+| `.S` の単位 12 | `tools/linux19.sh npp <kbout> asm`: nas1 で組み立てた `.o` と，行の中の空白を詰めた `.s` を比べる | 9 一致，1 は `.incbin` の材料が記録の木に無いので `.s` だけ比べて一致，2 は標準入力の単位 (前処理しない) |
+| リンカ台本 2・asm-offsets | `tools/linux19.sh npp-x` | すべて一致 |
+| Kbuild 全体 | `tools/kb18.sh run` を KB18_NPP 付きと無しで回し，`tools/kb18.sh cmp` で比べる | 1,260 個 (`.o`・`.a`・`.so`・`vmlinux`・`Image`・`.config`・依存の記録 `.cmd` 637) がすべて一致。起動 (tools/boot18.sh) も通る |
+| stone の上 | `tools/npp19.sh stone`: stone の npp1 に Kbuild と同じ命令行を走らせ，ホストの npp1 と `.i`・`.d` をバイト単位で比べる | 確かめている途中 |
+
+比べる相手のホストの cpp には `-U__has_attribute` を渡す (`linux19.sh` の `PP=ref`)。GCC 13 の cpp は `__has_attribute` を組み込みで持ち，GCC 4.6 は持たない。Linux は無い時に `__GCC4_has_attribute_*` の表を引くので，そのままでは `__designated_init__` などの属性が GCC 4.6 と違う形で付く。
+
+### 8.4 S1 で直した Stage 18 の道具
+
+- `tools/kb18cc.sh`: 依存を求められていない時にも `-MT` を付けていた。gcc は `-MD` / `-MMD` の無い `-MT` を誤りとするので，Kconfig と Kbuild の試し (`cc-option` など，`-o` を伴うもの) がすべて落ちていた。Stage 18 の rv32-stone はそのため `-march=rv32ima` など少ない選択肢で組まれていた。直した後は試しが通り，`CONFIG_CC_HAS_ASM_INLINE` などが入る。この設定でも起動は通る
+- `tools/kb18cc.sh`: 中間の `.i`・`.s` を出力の隣に置いていたので，`-o /dev/null` の試しを並べて走らせると取り合った。一時ファイルに移した
+- `tools/kb18.sh`: `KBUILD_BUILD_TIMESTAMP`・`KBUILD_BUILD_USER`・`KBUILD_BUILD_HOST` を固定し，同じ入力から同じ `vmlinux` を作る

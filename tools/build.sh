@@ -177,13 +177,13 @@ for f in "$repo_root"/tools/build/stage*.sh; do
     . "$f"
 done
 
-stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015 stage016 stage017 stage018"
+stages="stage002 stage003 stage004 stage005 stage006 stage007 stage008 stage009 stage010 stage011 stage012 stage013 stage014 stage015 stage016 stage017 stage018 stage019"
 target=${1:-all}
-[ "$target" = all ] && target=stage018
+[ "$target" = all ] && target=stage019
 case " $stages " in
 *" $target "*) ;;
 *)
-    echo "usage: build.sh [stage002|...|stage017|stage018|all]" >&2
+    echo "usage: build.sh [stage002|...|stage018|stage019|all]" >&2
     exit 2
     ;;
 esac
@@ -201,7 +201,7 @@ done
 # 途中の Stage までの指定は従来どおり順に作る
 if [ "$target" != stage014 ] && [ "$target" != stage015 ] \
     && [ "$target" != stage016 ] && [ "$target" != stage017 ] \
-    && [ "$target" != stage018 ]; then
+    && [ "$target" != stage018 ] && [ "$target" != stage019 ]; then
     for s in stage011 stage012 stage013; do
         "do_$s"
         [ "$s" = "$target" ] && break
@@ -214,7 +214,10 @@ do_stage013 & lane2=$!
 # stage016 は stage015 の最前線 (cc15p / pp16 / ld16) を使うのでその後ろ。
 # stage017 は stage016 の libc18 を使うのでさらにその後ろ。
 # stage018 は stage017 の cc15as / pp / libc26 で nas1 を組むのでその後ろ
-if [ "$target" = stage018 ]; then
+# stage019 は stage018 と同じ道具で組む。stage018 のスタンプを入力に持つのでその後ろ
+if [ "$target" = stage019 ]; then
+    ( do_stage014 && do_stage015 && do_stage016 && do_stage017 && do_stage018 && do_stage019 ) & lane3=$!
+elif [ "$target" = stage018 ]; then
     ( do_stage014 && do_stage015 && do_stage016 && do_stage017 && do_stage018 ) & lane3=$!
 elif [ "$target" = stage017 ]; then
     ( do_stage014 && do_stage015 && do_stage016 && do_stage017 ) & lane3=$!
