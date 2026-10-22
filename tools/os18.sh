@@ -9,7 +9,8 @@
 # 根を <取り出し先> へ展開する。端末の出力は <取り出し先>.console に置く。
 #
 # kernel29 は RAM 2 GiB を使い，sfs の窓は RAM ファイルの 0x6000_0000 から
-# 先にある (tools/gcc17.sh の run_cc1 と同じ)。イメージは 64 MiB 取る
+# 先にある (tools/gcc17.sh の run_cc1 と同じ)。イメージは 64 MiB 取る。
+# 項目の数の上限は既定で 1024。多い根は OS18_MAXENT で広げる
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -32,7 +33,7 @@ run() {
     w="$out.work"
     rm -rf "$w" "$out"
     mkdir -p "$w"
-    sh tools/sfs4.sh pack "$root" "$w/run.img" "$imgsize" 1024 > /dev/null \
+    sh tools/sfs4.sh pack "$root" "$w/run.img" "$imgsize" "${OS18_MAXENT:-1024}" > /dev/null \
         || die "sfs4 に詰められない"
     dd if=/dev/null of="$w/run.ram" bs=1 seek="$run_ram" 2> /dev/null
     dd if="$w/run.img" of="$w/run.ram" bs=64K oflag=seek_bytes \
