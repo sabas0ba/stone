@@ -1521,6 +1521,10 @@ static int binprec(struct tok *t)
     return 0;
 }
 
+/* 値が結果に効かない被演算子 (0 && x の x，1 || x の x，?: の選ばれない側) を
+ * 評価している深さ。そこでは 0 で割っても誤りにしない (GCC と同じ) */
+static int ev_skip;
+
 static struct val expr_bin(int minprec)
 {
     struct val l = expr_primary();
@@ -1538,7 +1542,12 @@ static struct val expr_bin(int minprec)
             return l;
         iev++;
         o = op->n->s;
-        r = expr_bin(p + 1);
+        {
+            int skip = (strcmp(o, "&&") == 0 && !l.v) || (strcmp(o, "||") == 0 && l.v);
+            ev_skip += skip;
+            r = expr_bin(p + 1);
+            ev_skip -= skip;
+        }
         uns = l.uns || r.uns;
         if (strcmp(o, "||") == 0)
             l = mkval(l.v || r.v, 0);
@@ -1573,9 +1582,11 @@ static struct val expr_bin(int minprec)
         else if (strcmp(o, "*") == 0)
             l = mkval((i64)((u64)l.v * (u64)r.v), uns);
         else {
-            if (r.v == 0)
-                die(ef, el, "#if で 0 で割った", 0);
-            if (strcmp(o, "/") == 0)
+            if (r.v == 0) {
+                if (!ev_skip)
+                    die(ef, el, "#if で 0 で割った", 0);
+                l = mkval(0, uns);
+            } else if (strcmp(o, "/") == 0)
                 l = mkval(uns ? (i64)((u64)l.v / (u64)r.v) : l.v / r.v, uns);
             else
                 l = mkval(uns ? (i64)((u64)l.v % (u64)r.v) : l.v % r.v, uns);
@@ -1589,11 +1600,15 @@ static struct val expr_cond(void)
     if (iev < nev && is_punct(&ev[iev], "?")) {
         struct val a, b;
         iev++;
+        ev_skip += !c.v;
         a = expr_cond();
+        ev_skip -= !c.v;
         if (iev >= nev || !is_punct(&ev[iev], ":"))
             die(ef, el, "#if の ?: の : が要る", 0);
         iev++;
+        ev_skip += !!c.v;
         b = expr_cond();
+        ev_skip -= !!c.v;
         if (a.uns || b.uns) {
             a.uns = b.uns = 1;
         }

@@ -34,3 +34,11 @@ ln(__LINE__
 __LINE__);
 #line 100 "logical.c"
 __LINE__ __FILE__;
+#if 0 && (1 / 0)
+sc_bad;
+#elif 1 || (1 / 0)
+sc_ok1;
+#endif
+#if 0 ? 1 / 0 : 2
+sc_ok2;
+#endif
