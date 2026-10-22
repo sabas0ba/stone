@@ -9,3 +9,6 @@ guard_once;
 inc1_next;
 inc2_last;
 x y; ab12; z; - -1;
+v(1) v(1,) v(1, 2);
+32 32 34 33;
+100 "logical.c";

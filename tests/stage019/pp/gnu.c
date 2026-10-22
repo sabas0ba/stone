@@ -26,3 +26,11 @@ cond_ok;
 #define cat(a, b) a ## b
 #define xcat(a, b) cat(a, b)
 x EMPTY y; xcat(ab, 12); cat(, z); -EMPTY-1;
+#define va(x, ...) v(x, ## __VA_ARGS__)
+va(1) va(1,) va(1, 2);
+#define ln(a) a __LINE__
+ln(__LINE__
+) ln(
+__LINE__);
+#line 100 "logical.c"
+__LINE__ __FILE__;

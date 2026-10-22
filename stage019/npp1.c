@@ -46,21 +46,74 @@ static void die(const char *file, int line, const char *msg, const char *arg)
     exit(1);
 }
 
+/* 記憶域。libc26 の malloc は K&R の方式で，free がアドレス順のフリーリストを
+ * 線形に辿る。展開の度に小さな塊を確保と解放をすると断片が増え，stone の上で
+ * 処理が二乗になる。そこで塊の大きさを 2 の冪の級に切り上げ，解放した塊は
+ * 級ごとの列に持って次の確保に使う。libc へは返さない。塊の頭の 8 バイトに
+ * 級を置く */
+#define POOL_HDR 8
+#define POOL_MIN 4              /* 最小の級 (16 バイト) */
+#define POOL_NCLASS 32
+static void *pool_free[POOL_NCLASS];
+
+static int pool_class(long n)
+{
+    int c = POOL_MIN;
+    while ((1L << c) < n + POOL_HDR) {
+        c++;
+        if (c >= POOL_NCLASS - 1)
+            die(0, 0, "記憶域の塊が大きすぎる", 0);
+    }
+    return c;
+}
+
+static void *pool_get(long n)
+{
+    int c = pool_class(n > 0 ? n : 1);
+    char *p = pool_free[c];
+    if (p)
+        pool_free[c] = *(void **)(p + POOL_HDR);
+    else {
+        p = malloc((size_t)1 << c);
+        if (!p)
+            die(0, 0, "記憶域が足りない", 0);
+        *(int *)p = c;
+    }
+    return p + POOL_HDR;
+}
+
+static void xfree(void *q)
+{
+    char *p;
+    int c;
+    if (!q)
+        return;
+    p = (char *)q - POOL_HDR;
+    c = *(int *)p;
+    *(void **)q = pool_free[c];
+    pool_free[c] = p;
+}
+
 static void *xmalloc(long n)
 {
-    void *p = malloc(n > 0 ? n : 1);
-    if (!p)
-        die(0, 0, "記憶域が足りない", 0);
+    void *p = pool_get(n);
     memset(p, 0, n > 0 ? n : 1);
     return p;
 }
 
-static void *xrealloc(void *p, long n)
+static void *xrealloc(void *q, long n)
 {
-    p = realloc(p, n > 0 ? n : 1);
-    if (!p)
-        die(0, 0, "記憶域が足りない", 0);
-    return p;
+    void *r;
+    long have;
+    if (!q)
+        return pool_get(n);
+    have = (1L << *(int *)((char *)q - POOL_HDR)) - POOL_HDR;
+    if (n <= have)
+        return q;
+    r = pool_get(n);
+    memcpy(r, q, (size_t)have);
+    xfree(q);
+    return r;
 }
 
 static char *xstrndup(const char *s, long n)
@@ -227,6 +280,7 @@ struct src {
     struct name *gname;
     int gdepth;
     int dep_pending;            /* 読み始めたら依存に記録する */
+    const char *lname;          /* __FILE__ と印の名前 (#line で替わる) */
 };
 
 static struct src *cur;
@@ -335,7 +389,7 @@ static void put_marker(struct src *s, int flag)
         return;
     if (!out_bol)
         putc('\n', out);
-    fprintf(out, "# %d \"%s\"", s->line, s->path);
+    fprintf(out, "# %d \"%s\"", s->line, s->lname);
     if (flag)
         fprintf(out, " %d", flag);
     putc('\n', out);
@@ -677,8 +731,8 @@ static int next_tok(struct ctx *c, struct tok *t)
             return 1;
         }
         c->p = p->up;
-        free(p->v);
-        free(p);
+        xfree(p->v);
+        xfree(p);
     }
     if (c->file)
         return lex_file(t);
@@ -712,8 +766,8 @@ static void pop_file(void)
         guards = g;
     }
     cur = s->up;
-    free(s->buf);
-    free(s);
+    xfree(s->buf);
+    xfree(s);
     if (cur)
         put_marker(cur, 2);
 }
@@ -819,11 +873,11 @@ static struct tok paste(struct tok *a, struct tok *b, const char *file, int line
     if (tmp.pos != la + lbl) {
         if (!asm_mode)
             die(file, line, "## が 1 つの字句を作らない", buf);
-        free(buf);
+        xfree(buf);
         paste_failed = 1;
         return *a;
     }
-    free(buf);
+    xfree(buf);
     r.space = a->space;
     r.hs = 0;
     r.noexp = 0;
@@ -845,6 +899,7 @@ struct arg {
     int n;
     struct tlist exp;           /* 展開した実引数 */
     int expanded;
+    int absent;                 /* 可変長の実引数が書かれていない (F(a) の形) */
 };
 
 static int param_index(struct macro *m, struct name *n)
@@ -885,9 +940,10 @@ static void subst(struct macro *m, struct arg *args, struct hset *hs, struct tok
             struct tok lhs = os.v[os.n - 1];
             if (pj >= 0) {
                 struct arg *a = &args[pj];
-                /* GNU: , ## __VA_ARGS__ は可変長の実引数が空なら読点を消す */
+                /* GNU: , ## __VA_ARGS__ は可変長の実引数が書かれていなければ読点を
+                 * 消す。F(a,) のように書かれて空なら読点を残す (GCC と同じ) */
                 if (m->variadic && pj == m->nparam - 1 && is_punct(&lhs, ",")) {
-                    if (a->n == 0)
+                    if (a->absent)
                         os.n--;
                     else
                         for (k = 0; k < a->n; k++)
@@ -969,12 +1025,12 @@ static void subst(struct macro *m, struct arg *args, struct hset *hs, struct tok
         res->v[0].bnd |= 1;
         res->v[res->n - 1].bnd |= 2;
     }
-    free(os.v);
+    xfree(os.v);
 }
 
 static const char *cur_file(void)
 {
-    return cur ? cur->path : "";
+    return cur ? cur->lname : "";
 }
 
 static int cur_line(void)
@@ -1034,6 +1090,7 @@ static struct arg *collect_args(struct ctx *c, struct macro *m, struct tok *rp)
         if (na >= cap)
             args = xrealloc(args, (long)(na + 1) * (long)sizeof(struct arg));
         memset(&args[na], 0, sizeof(struct arg));
+        args[na].absent = 1;
         na++;
     }
     if (na != m->nparam)
@@ -1050,7 +1107,8 @@ static int special(struct ctx *c, struct tok *t, struct tlist *outl, int stream)
     struct tok r = *t;
     switch (t->n->special) {
     case 1:
-        sprintf(b, "%d", cur_line());
+        /* 字句の行。展開の結果の字句はマクロの名前の行を持つ (GCC と同じ) */
+        sprintf(b, "%d", t->line);
         r.kind = T_NUM;
         r.n = intern(b, (int)strlen(b));
         break;
@@ -1112,7 +1170,7 @@ static void expand(struct ctx *c, struct tlist *outl, int stream)
                 subst(m, 0, hs_add(t.hs, m), &t, &res, cur_file(), cur_line());
                 c->pend_bnd = res.n == 0;
                 push_list(c, res.v, res.n);
-                free(res.v);
+                xfree(res.v);
                 continue;
             } else {
                 /* ( が続くか。改行を飛ばして見る (飛ばした改行は戻す) */
@@ -1137,15 +1195,15 @@ static void expand(struct ctx *c, struct tlist *outl, int stream)
                     int i;
                     subst(m, args, hs, &t, &res, cur_file(), cur_line());
                     for (i = 0; i < m->nparam; i++) {
-                        free(args[i].v);
-                        free(args[i].exp.v);
+                        xfree(args[i].v);
+                        xfree(args[i].exp.v);
                     }
-                    free(args);
+                    xfree(args);
                     /* 実引数の中で読み飛ばした改行は展開の後に出す */
                     push_list(c, la, nla);
                     c->pend_bnd = res.n == 0;
                     push_list(c, res.v, res.n);
-                    free(res.v);
+                    xfree(res.v);
                     continue;
                 }
                 push_list(c, la, nla);
@@ -1195,8 +1253,8 @@ static void do_pragma_op(struct ctx *c, struct tlist *outl, int stream)
     if (ex.n != 1 || ex.v[0].kind != T_STR)
         die(cur_file(), cur_line(), "_Pragma の文字列が要る", 0);
     s = ex.v[0];
-    free(raw.v);
-    free(ex.v);
+    xfree(raw.v);
+    xfree(ex.v);
     p = s.n->s;
     n = s.n->len;
     if (!stream) {
@@ -1597,8 +1655,8 @@ static int eval_if(struct tok *v, int n, const char *file, int line)
     r = expr_cond();
     if (iev != nev)
         die(file, line, "#if の式の後ろに字句が残る", ev[iev].n->s);
-    free(pre.v);
-    free(post.v);
+    xfree(pre.v);
+    xfree(post.v);
     return r.v != 0;
 }
 
@@ -1647,7 +1705,7 @@ static char *find_include(const char *name, int quote, int next_after, int *didx
                 return p;
             }
         }
-        free(p);
+        xfree(p);
     }
     for (i = next_after >= 0 ? next_after + 1 : 0; i < nidir; i++) {
         FILE *f;
@@ -1665,7 +1723,7 @@ static char *find_include(const char *name, int quote, int next_after, int *didx
             *system = idirs[i].kind == 2;
             return p;
         }
-        free(p);
+        xfree(p);
     }
     return 0;
 }
@@ -1748,9 +1806,9 @@ static void d_include(struct src *s, int next)
     path = find_include(name, quote, next ? s->diridx : -2, &didx, &system);
     if (!path)
         die(s->path, s->line - 1, "include のファイルが無い", name);
-    free(name);
-    free(l.v);
-    free(e.v);
+    xfree(name);
+    xfree(l.v);
+    xfree(e.v);
     include_file(path, didx, system, 0);
 }
 
@@ -1767,7 +1825,7 @@ static void directive(struct src *s)
         struct tlist l;
         memset(&l, 0, sizeof l);
         read_line(s, &l, 0);
-        free(l.v);
+        xfree(l.v);
         return;
     }
     d = t.n->s;
@@ -1796,7 +1854,7 @@ static void directive(struct src *s)
         if (!guard)
             guard_touch(s);
         push_cond(!skipping() && act, guard);
-        free(l.v);
+        xfree(l.v);
         return;
     }
     if (strcmp(d, "elif") == 0) {
@@ -1818,7 +1876,7 @@ static void directive(struct src *s)
         }
         if (s->gstate == 2 && ncond - 1 == s->gdepth)
             s->gstate = -1;
-        free(l.v);
+        xfree(l.v);
         return;
     }
     if (strcmp(d, "else") == 0) {
@@ -1826,7 +1884,7 @@ static void directive(struct src *s)
         struct tlist l;
         memset(&l, 0, sizeof l);
         read_line(s, &l, 0);
-        free(l.v);
+        xfree(l.v);
         if (ncond == 0)
             die(s->path, line, "#if の無い #else", 0);
         c = &conds[ncond - 1];
@@ -1843,7 +1901,7 @@ static void directive(struct src *s)
         struct tlist l;
         memset(&l, 0, sizeof l);
         read_line(s, &l, 0);
-        free(l.v);
+        xfree(l.v);
         if (ncond <= s->ncond0)
             die(s->path, line, "#if の無い #endif", 0);
         ncond--;
@@ -1856,7 +1914,7 @@ static void directive(struct src *s)
         struct tlist l;
         memset(&l, 0, sizeof l);
         read_line(s, &l, 0);
-        free(l.v);
+        xfree(l.v);
         return;
     }
     if (strcmp(d, "define") == 0) {
@@ -1870,7 +1928,7 @@ static void directive(struct src *s)
                 s->gstate = -1;
         }
         define_macro(l.v, l.n, s->path, line);
-        free(l.v);
+        xfree(l.v);
         return;
     }
     guard_touch(s);
@@ -1884,7 +1942,7 @@ static void directive(struct src *s)
         if (l.n < 1 || l.v[0].kind != T_IDENT)
             die(s->path, line, "#undef の名前が要る", 0);
         l.v[0].n->macro = 0;
-        free(l.v);
+        xfree(l.v);
         return;
     }
     if (strcmp(d, "include") == 0) {
@@ -1915,7 +1973,7 @@ static void directive(struct src *s)
         for (i = 0; i < l.n; i++)
             fprintf(stderr, " %s", l.v[i].n->s);
         fprintf(stderr, "\n");
-        free(l.v);
+        xfree(l.v);
         return;
     }
     if (strcmp(d, "pragma") == 0) {
@@ -1932,7 +1990,7 @@ static void directive(struct src *s)
                 define_cmdline("__npp1_pragma_once__");
             g->next = guards;
             guards = g;
-            free(l.v);
+            xfree(l.v);
             return;
         }
         if (!out_bol)
@@ -1945,14 +2003,52 @@ static void directive(struct src *s)
         putc('\n', out);
         out_bol = 1;
         have_last = 0;
-        free(l.v);
+        xfree(l.v);
         return;
     }
-    if (strcmp(d, "line") == 0 || strcmp(d, "ident") == 0 || strcmp(d, "sccs") == 0) {
+    if (strcmp(d, "line") == 0) {
+        /* #line 行の番号 ["名前"]。字句はマクロを展開してから読む (C99 6.10.4)。
+         * 次の行がその番号になり，名前は __FILE__ と印に使う */
+        struct tlist l, e;
+        long v = 0;
+        int k;
+        memset(&l, 0, sizeof l);
+        memset(&e, 0, sizeof e);
+        read_line(s, &l, 0);
+        expand_list(l.v, l.n, &e);
+        if (e.n < 1 || e.v[0].kind != T_NUM)
+            die(s->path, line, "#line の行の番号が要る", 0);
+        for (k = 0; e.v[0].n->s[k]; k++) {
+            if (e.v[0].n->s[k] < '0' || e.v[0].n->s[k] > '9')
+                die(s->path, line, "#line の行の番号が読めない", e.v[0].n->s);
+            v = v * 10 + (e.v[0].n->s[k] - '0');
+        }
+        if (e.n >= 2) {
+            const char *q = e.v[1].n->s;
+            long n = e.v[1].n->len, j;
+            char *nm;
+            if (e.v[1].kind != T_STR || q[0] != '"')
+                die(s->path, line, "#line の名前が読めない", q);
+            nm = xmalloc(n);
+            for (j = 1, k = 0; j < n - 1; j++) {
+                if (q[j] == '\\' && j + 1 < n - 1)
+                    j++;
+                nm[k++] = q[j];
+            }
+            nm[k] = 0;
+            s->lname = nm;
+        }
+        s->line = (int)v;
+        put_marker(s, 0);
+        xfree(l.v);
+        xfree(e.v);
+        return;
+    }
+    if (strcmp(d, "ident") == 0 || strcmp(d, "sccs") == 0) {
         struct tlist l;
         memset(&l, 0, sizeof l);
         read_line(s, &l, 0);
-        free(l.v);
+        xfree(l.v);
         return;
     }
     if (asm_mode) {
@@ -1974,7 +2070,7 @@ static void directive(struct src *s)
         putc('\n', out);
         out_bol = 1;
         have_last = 0;
-        free(l.v);
+        xfree(l.v);
         return;
     }
     die(s->path, line, "知らない指令", d);
@@ -1984,6 +2080,7 @@ static void push_file(const char *path, char *buf, long len, int diridx)
 {
     struct src *s = xmalloc(sizeof(struct src));
     s->path = xstrdup(path);
+    s->lname = s->path;
     s->dir = dirname_of(path);
     s->diridx = diridx;
     s->buf = buf;

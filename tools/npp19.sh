@@ -92,7 +92,9 @@ stone() {
     done
     nent=$(find "$work/root" | wc -l)
     echo "npp19.sh: 根の項目 $nent 個，$(du -sk "$work/root" | cut -f 1) KiB" >&2
-    OS18_MAXENT=$((nent + 256)) sh tools/os18.sh run "$work/root" "$work/out"
+    # 項目の枠: 根にあるもの，出力ごとの .i と .d，os18.sh が足す sh2 と boot，
+    # それに余り
+    OS18_MAXENT=$((nent + 2 * $# + 2 + 64)) sh tools/os18.sh run "$work/root" "$work/out"
     # 4. 比べる
     for o in "$@"; do
         key=$(printf '%s' "$o" | tr '/' '_')
