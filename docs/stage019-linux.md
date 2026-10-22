@@ -177,22 +177,21 @@ Stage 18 で，ホストから駆動した Kbuild が我々の道具 (ncc1・nas
 - **木の大きさ**: Kbuild の依存の記録 (`.*.cmd`) が引くソースと header は 1,556 ファイル 17 MB，Makefile・Kbuild・Kconfig は木全体で 7.6 MB である。木全体 (1.2 GB) を詰める必要はない
 - **sh が走らせる命令** (kblog の shell.log，レシピと `$(shell ...)`): `trap` 33,627・`kill` 16,775 (どのレシピも `trap ...HUP` の形)・`set` 3,433・`echo` 809・`rm` 641・`mkdir` 290・`printf` 222・`make` 214・`cat` 155・`sed` 11・`sh` 10・`head` 9・`mv` 7・`getconf` 6・`ln`・`grep`・`expr`・`wc`・`bc` は数回
 
-### 7.2 進め方
+### 7.2 進め方 (2026-10-22 決定)
 
-Stage 18 の M4 と M5 で効いた方法をそのまま使う。**我々の道具をまずホストの cc でも組めるようにし，ホストから Kbuild を回して足りないものを測り，揃ってから stone の中で回す**。stone の libc 固有の関数 (`spawn2`・`re_compile` など) はホストで組む時だけ薄い代わりを付ける。
+**最初から stone の OS の上で回す。** 我々の道具をホストの cc で組んで測る段は設けない。stone の libc 固有の関数の代わりを書く手間がかからない代わりに，1 回の試行は遅くなる。試行を速くするため，Kbuild を最初から全体で回すのではなく，道具ごとに Kbuild が使う形を取り出した小さな入力で確かめてから合わせる。
 
 | 部 | 内容 | 終わりの判定 |
 |---|---|---|
-| S1 | pp の新しい世代 | 374 の C の単位・12 の `.S`・リンカ台本 2 つ・asm-offsets の `.i` がホストの cpp と同じ。依存の記録 (`-MMD`) を fixdep が読める |
-| S2 | ドライバ ncc (C で書く) | kb18cc.sh を置き換えて，ホストから駆動した Kbuild で `vmlinux` が同じにできる |
-| S3 | mk の新しい世代 | ホストの sh のまま，GNU make の代わりに Kbuild を回して `vmlinux` ができる |
-| S4 | sh の新しい世代と小道具，bc | S3 の sh も我々のものにして `vmlinux` ができる |
-| S5 | kconf1・Linux の補助プログラムを stone の cc で組む。OS と libc に環境変数・`popen`・`rename` など足りないもの | ホストで走らせて，S4 と同じ `vmlinux` ができる |
+| S1 | pp の新しい世代 (`-I`・`-isystem`・`-include`・`-D`・`-U`・`-Wp,-MMD`) | stone の上で，374 の C の単位・`.S`・リンカ台本・asm-offsets の `.i` がホストの cpp と同じになる。依存の記録を fixdep が読める |
+| S2 | ドライバ ncc (C で書く。stage018-ncc.md 3 章) | stone の上で，Kbuild が出す gcc の命令行のまま単位を組める |
+| S3 | mk の新しい世代 | stone の上で Kbuild の Makefile を読んで，回すべき命令を回す |
+| S4 | sh の新しい世代と小道具，bc | Kbuild のレシピと scripts/*.sh が走る |
+| S5 | kconf1・Linux の補助プログラムを stone の cc で組む。OS と libc に環境変数・`popen`・`rename` など足りないもの | 設定の目標と `vmlinux` の目標が stone の中で通る |
 | S6 | 全体を stone の OS の中で回す | 1 章の完了条件 1・2 |
 
-S1〜S5 はホストの上で回すので，速く回せて，誤りを区切って探せる。S6 で初めて OS の上の速さ・ファイル系の大きさ・プロセスの数が効く。
+mk・sh・sed などの道具は，これまでの世代と同じく，今の世代 (mk20・sh5・sed3 など) を全文複製した新しい世代に足していく (2026-10-22 決定)。
 
-### 7.3 決めたいこと
+### 7.3 Stage 18 からの引継ぎ
 
-1. 7.2 の進め方 (ホストでも組めるようにして測る) と S1〜S6 の順
-2. mk・sh・小道具は既存の世代 (mk20・sh5・sed3 など) の写しを広げる新しい世代とする。Kbuild が要るものは mk20 の範囲 (tcc の Makefile) を大きく越えるので，作りを変える所が多くなる
+stage018-ncc.md 4.3 の変更 (除去されずに残った `error` 属性の関数の呼出しを `ebreak` にし警告を出す。rv32-stone では 2 箇所) は承認された (2026-10-22)。
