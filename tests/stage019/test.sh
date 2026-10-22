@@ -90,7 +90,8 @@ section "npp1: GNU の拡張・assembler-with-cpp・依存の記録"
 
 squeeze < "$out/pp/out/gnu.i" | diff "$pp/gnu.expect" - > "$out/gnu.diff"
 report $? "gnu: , ## __VA_ARGS__・args...・_Pragma の展開・__COUNTER__・#if・include guard・#include_next・展開の境の空白"
-squeeze < "$out/pp/out/asm.i" | diff "$pp/asm.expect" - > "$out/asm.diff"
+# 行の頭の空白も GCC と同じに出るかを見るので，頭は除かない
+tr -s ' \t' '  ' < "$out/pp/out/asm.i" | sed 's/ $//' | diff "$pp/asm.expect" - > "$out/asm.diff"
 report $? "asm: # の注釈の行を残す・閉じない ' を通す・字句にならない ## を 2 つの字句のまま並べる"
 cmp -s "$pp/dep.expect" "$out/pp/out/dep.d"
 report $? "dep: -MMD の記録 (-include の順・処理系の階層を除く・書かれた名前で見分ける)"

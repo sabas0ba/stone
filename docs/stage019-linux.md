@@ -234,7 +234,7 @@ libc26 の `malloc` は K&R の方式で，`free` がアドレス順のフリー
 | `.S` の単位 12 | `tools/linux19.sh npp <kbout> asm`: nas1 で組み立てた `.o` と，行の中の空白を詰めた `.s` を比べる | 9 一致，1 は `.incbin` の材料が記録の木に無いので `.s` だけ比べて一致，2 は標準入力の単位 (前処理しない) |
 | リンカ台本 2・asm-offsets | `tools/linux19.sh npp-x` | すべて一致 |
 | Kbuild 全体 | `tools/kb18.sh run` を KB18_NPP 付きと無しで回し，`tools/kb18.sh cmp` で比べる | 1,260 個 (`.o`・`.a`・`.so`・`vmlinux`・`Image`・`.config`・依存の記録 `.cmd` 637) がすべて一致。起動 (tools/boot18.sh) も通る |
-| stone の上 | `tools/npp19.sh stone`: stone の npp1 に Kbuild と同じ命令行を走らせ，ホストの npp1 と `.i`・`.d` をバイト単位で比べる | 確かめている途中 |
+| stone の上 | `tools/npp19.sh stone`: stone の npp1 に Kbuild と同じ命令行を走らせ，ホストの npp1 と `.i`・`.d` をバイト単位で比べる | `mm/highmem.o`・`kernel/exit.o`・`arch/riscv/kernel/head.o`・`vmlinux.lds`・`asm-offsets.s` がすべて一致 (tests/stage019)。1 単位は起動と詰める時間を含めて約 2.5 分 |
 
 比べる相手のホストの cpp には `-U__has_attribute` を渡す (`linux19.sh` の `PP=ref`)。GCC 13 の cpp は `__has_attribute` を組み込みで持ち，GCC 4.6 は持たない。Linux は無い時に `__GCC4_has_attribute_*` の表を引くので，そのままでは `__designated_init__` などの属性が GCC 4.6 と違う形で付く。
 
