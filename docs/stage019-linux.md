@@ -157,3 +157,42 @@ sh は Kbuild のすべてのレシピで `trap '...; kill -s HUP $$' HUP` の�
 - **属性**: `no_instrument_function`・`unused`・`gnu_inline`・`always_inline`・`error`・`format`・`cold`・`aligned`・`section`・`designated_init`・`const`・`malloc`・`noreturn`・`pure`・`assume_aligned`・`nonnull`・`packed`・`noinline`・`externally_visible`・`alias`・`used`・`weak`・`mode` (`__attribute__((` の直後の名前だけを数えた)
 - **inline asm の制約**: `r`・`=r`・`=&r`・`+r`・`rJ`・`rK`・`i`・`m`・`=m`・`+A` (不可分操作の番地)・`+rm`。asm 文は字面で 82,735 個ある
 - **レジスタを指定した変数**: `register uintptr_t a0 asm ("a0")` (SBI の呼出しで a0〜a7)，`gp`，`sp`
+
+## 7. 段取り (2026-10-22，案)
+
+Stage 18 で，ホストから駆動した Kbuild が我々の道具 (ncc1・nas1・nld1・nar1・nobj1) だけで rv32-stone の `vmlinux` を組み，我々の SBI の上で initramfs の init まで起動した ([stage018-ncc.md](stage018-ncc.md) 16・17 章)。残るのは 1 章の完了条件 1，すなわち**全体を stone の OS の中で回すこと**である。ホストに残っている役目は次のとおり。
+
+| 役目 | 今 (Stage 18) | stone の中で要るもの |
+|---|---|---|
+| 前処理 | ホストの cpp | pp の新しい世代 (`-I`・`-isystem`・`-include`・`-D`・`-U`・`-Wp,-MMD`) |
+| make | GNU make | mk の新しい世代 (Kbuild が使う GNU make の部分集合) |
+| sh と小道具 | bash・coreutils | sh の新しい世代と，echo・rm・mkdir・printf・cat・sed・head・mv・ln・grep・expr・wc・getconf・bc |
+| 設定 | 上流の conf (flex / bison) | kconf1 (4 章) を stone の cc で組む |
+| Linux の補助プログラム | ホストの cc | fixdep・mk_elfconfig・modpost・gen_init_cpio・gen_crc32table を stone の cc (cc15as + libc26) で組む。dtc は組まない (5.3) |
+| 駆動 | kb18cc.sh (ホストの sh) | gcc の命令行を受けるドライバ `ncc` (stage018-ncc.md 3 章) |
+
+### 7.1 測ったこと
+
+- **ncc1 の速さ** (stage018-ncc.md 11 章の 3): cc15as で組んだ ncc1 は，stone の OS の上で 1.48 MB の `.i` (2 単位) を起動の分を除いて約 14 秒で訳した (ホスト版と同じ `.s`)。374 単位 388 MB で 1 時間ほどになる。**ncc1 の自己ホストは要らない**
+- **木の大きさ**: Kbuild の依存の記録 (`.*.cmd`) が引くソースと header は 1,556 ファイル 17 MB，Makefile・Kbuild・Kconfig は木全体で 7.6 MB である。木全体 (1.2 GB) を詰める必要はない
+- **sh が走らせる命令** (kblog の shell.log，レシピと `$(shell ...)`): `trap` 33,627・`kill` 16,775 (どのレシピも `trap ...HUP` の形)・`set` 3,433・`echo` 809・`rm` 641・`mkdir` 290・`printf` 222・`make` 214・`cat` 155・`sed` 11・`sh` 10・`head` 9・`mv` 7・`getconf` 6・`ln`・`grep`・`expr`・`wc`・`bc` は数回
+
+### 7.2 進め方
+
+Stage 18 の M4 と M5 で効いた方法をそのまま使う。**我々の道具をまずホストの cc でも組めるようにし，ホストから Kbuild を回して足りないものを測り，揃ってから stone の中で回す**。stone の libc 固有の関数 (`spawn2`・`re_compile` など) はホストで組む時だけ薄い代わりを付ける。
+
+| 部 | 内容 | 終わりの判定 |
+|---|---|---|
+| S1 | pp の新しい世代 | 374 の C の単位・12 の `.S`・リンカ台本 2 つ・asm-offsets の `.i` がホストの cpp と同じ。依存の記録 (`-MMD`) を fixdep が読める |
+| S2 | ドライバ ncc (C で書く) | kb18cc.sh を置き換えて，ホストから駆動した Kbuild で `vmlinux` が同じにできる |
+| S3 | mk の新しい世代 | ホストの sh のまま，GNU make の代わりに Kbuild を回して `vmlinux` ができる |
+| S4 | sh の新しい世代と小道具，bc | S3 の sh も我々のものにして `vmlinux` ができる |
+| S5 | kconf1・Linux の補助プログラムを stone の cc で組む。OS と libc に環境変数・`popen`・`rename` など足りないもの | ホストで走らせて，S4 と同じ `vmlinux` ができる |
+| S6 | 全体を stone の OS の中で回す | 1 章の完了条件 1・2 |
+
+S1〜S5 はホストの上で回すので，速く回せて，誤りを区切って探せる。S6 で初めて OS の上の速さ・ファイル系の大きさ・プロセスの数が効く。
+
+### 7.3 決めたいこと
+
+1. 7.2 の進め方 (ホストでも組めるようにして測る) と S1〜S6 の順
+2. mk・sh・小道具は既存の世代 (mk20・sh5・sed3 など) の写しを広げる新しい世代とする。Kbuild が要るものは mk20 の範囲 (tcc の Makefile) を大きく越えるので，作りを変える所が多くなる
