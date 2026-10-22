@@ -1,0 +1,15 @@
+ok call_plt
+ok pcrel_load
+ok hi20_lo12_i
+ok lo12_s
+ok pcrel_lo12_s
+ok jal
+ok branch
+ok word32
+ok add32_sub32
+ok weak_override
+ok weak_undef
+ok common
+ok script_symbols
+hello from other.s
+ok rodata

@@ -1,0 +1,11 @@
+entry 0x0
+section .data PROGBITS WA addr=0x4000 size=0xc
+load vaddr=0x4000 paddr=0x4000 filesz=0xc memsz=0xc flags=RW
+symbol a 0x5 GLOBAL ABS
+symbol b 0x5 GLOBAL ABS
+symbol c 0x5 GLOBAL ABS
+symbol d 0x5 GLOBAL ABS
+symbol e 0x5 GLOBAL ABS
+symbol x 0x10b GLOBAL ABS
+symbol zero 0x0 GLOBAL ABS
+bytes .data 77 00 00 00 05 00 00 00 0b 01 00 00

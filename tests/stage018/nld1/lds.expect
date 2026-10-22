@@ -1,0 +1,25 @@
+entry 0x1000
+section .text PROGBITS AX addr=0x1000 size=0x10
+section .rodata PROGBITS A addr=0x1100 size=0xa
+section .orphan.ro PROGBITS A addr=0x110a size=0x4
+section .data PROGBITS WA addr=0x2000 size=0x8
+section .init.data PROGBITS WA addr=0x2008 size=0x4
+section .orphan.data PROGBITS WA addr=0x200c size=0x4
+section .bss NOBITS WA addr=0x2010 size=0xa
+load vaddr=0x1000 paddr=0x1000 filesz=0x10 memsz=0x10 flags=RE
+load vaddr=0x1100 paddr=0x1100 filesz=0xa memsz=0xa flags=R
+load vaddr=0x110a paddr=0x110a filesz=0x4 memsz=0x4 flags=R
+load vaddr=0x2000 paddr=0x3000 filesz=0x8 memsz=0x8 flags=RW
+load vaddr=0x2008 paddr=0x3008 filesz=0x4 memsz=0x4 flags=RW
+load vaddr=0x200c paddr=0x300c filesz=0x4 memsz=0x4 flags=RW
+load vaddr=0x2010 paddr=0x3010 filesz=0x0 memsz=0xa flags=RW
+symbol __init_end 0x200c GLOBAL .init.data
+symbol __init_start 0x2008 GLOBAL .init.data
+symbol _start 0x1000 GLOBAL .text
+symbol data_lma 0x3000 GLOBAL ABS
+symbol init_lma 0x3008 GLOBAL ABS
+symbol prov_sym 0x1234 GLOBAL ABS
+symbol rodata_addr 0x1100 GLOBAL ABS
+symbol text_size 0x10 GLOBAL ABS
+bytes .data 11 11 11 11 34 12 00 00
+bytes .rodata 01 02 03 7f 34 12 ef be ad de

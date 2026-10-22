@@ -82,6 +82,11 @@ ncc1 は最適化をしない。ただし Linux は次の 2 つを前提にし�
 
 `__compiletime_assert` (BUILD_BUG_ON) は，条件が ICE でない場合に `error` 属性の関数の呼出しが残る。GCC はこれを inline 展開の後に判定するので，**我々が inline 展開をしないことによる差はここに出る**。呼出しが除去されずに残った `error` 属性の関数は，GCC と同じく翻訳時の誤りとして報告し，件数を測る。多ければ `always_inline` の関数に限った展開を足す (11 章の危険 1)。
 
+**M5 で改めたこと (16.2)。** 測ると，残る呼出しの多くは `always_inline` の関数の中ではなく，設定の無い時の `static inline` の代わり (`pmd_trans_huge()` が 0 を返すなど) を GCC が展開して畳んだ枝の中にあった。`always_inline` に限った展開では足りないので，次の 2 つにした。
+
+- **展開の代わりの畳込み**: 展開はしないが，GCC が展開した後に畳む形を条件の値として決める。値が定数に決まる `static inline` の関数の呼出し (本体が `return <定数>;`，その前に値の決まる `if (c) return <定数>;` が並ぶもの)・空の `static inline` の関数の呼出し・`&&` / `||` の片側が決まるもの・`x & 0`・定数で初期化して書き込まない局所の変数・関数の最上位で 1 度だけ代入する局所の変数を畳む。引数に副作用が無ければ呼出しそのものを出さない (引数だけが参照する `static` のデータも出さない)。`switch` の選択式も同じく畳む
+- **残った `error` 属性の呼出しは到達しない**: それでも残るものは，GCC で組める単位では到達しないので，参照を出さずに `ebreak` にし，件数を測るために警告を出す。畳込みの後の rv32-stone では 2 箇所 (定数の引数で呼ぶ `fix_to_virt()` の `BUILD_BUG_ON(idx >= __end_of_fixed_addresses)` と mm/vmscan.c の 1 つ) に残る。どちらも引数の値を関数の中へ伝えないと畳めない
+
 ### 4.4 コード生成とレジスタの割当て
 
 中間表現を置かず，型付きの AST から直接アセンブリを出す。理由は次のとおりである。
@@ -139,6 +144,7 @@ ncc1 は命令を解釈せず，`%n`・`%[name]`・`%z`・`%%` を置き換え�
 | `i` | ICE の値を 10 進で出す。asm-offsets (`DEFINE`) はこれで定数を取り出す |
 | `m`・`=m`・`+rm` | 番地をレジスタへ求め `0(reg)` と書く |
 | `+A` | 番地をレジスタへ求め `(reg)` と書く (AMO の番地) |
+| 64 bit の値 | `r` の入力は下位の語のレジスタを渡す (GCC はレジスタの対を取り，`%N` に下位のレジスタを出す)。`rm` と `m` は記憶域にする。レジスタに載る 64 bit の出力は持たない |
 
 clobber に書かれた callee-saved レジスタは prologue で退避する。`memory` の clobber は扱いを変えない (値をレジスタに持ち越さないため)。
 
@@ -225,8 +231,10 @@ Kbuild の記録 (rv32-stone) で呼ばれる形を持つ。
 | `objcopy` | `-O binary`・`-j <節>`・`-G <記号>` (指定以外の大域記号を局所にする)・`-S` |
 | `nm` | 既定の書式と `-n` (`System.map` を作る `scripts/mksysmap`) |
 | `objdump` | `-h` (`lib-ksyms` の台本を作る sed が節の名前を拾う) |
-| `ar` | ar17 に `T` (thin)・`D`・`P`・`s` / `S` を足す |
+| `ar` | `T` (thin)・`D`・`P`・`s` / `S`・長い名前 |
 | `ncc` | 3 章のドライバ |
+
+`objcopy`・`nm`・`objdump` は 1 つの道具 nobj1 ([stage018/nobj1.c](../stage018/nobj1.c)) に，`ar` は nar1 ([stage018/nar1.c](../stage018/nar1.c)) にした。ar17 に足す予定だったが，thin・長い名前・記号表はどれも ar17 の作り (16 バイトの名前・記号表なし) の外にあり，書き直す量になるので別の道具にした。ドライバ `ncc` は，ホストから駆動する間は [tools/kb18cc.sh](../tools/kb18cc.sh) (前処理はホストの cpp，8 章) で代える。
 
 ## 7. 検証
 
@@ -256,11 +264,11 @@ Kbuild の記録 (rv32-stone) で呼ばれる形を持つ。
 | 部 | 内容 | 終わりの判定 |
 |---|---|---|
 | M1 | nas1 | 7 章の 1 が通る。Linux の `.S` の単位 (ホストの cpp で前処理したもの) が組み立てられる。**完了** (12 章) |
-| M2 | nld1 の基本 (`-T` の最小形・`ET_EXEC`) と素の実行環境 | `.S` だけの試験が QEMU で走る |
-| M3 | ncc1 の C89 と psABI | 7 章の 2・3 が通る |
-| M4 | ncc1 の GNU 拡張・組込み・inline asm | 374 単位すべてが訳され，nas1 を通る |
-| M5 | nld1 のリンカ台本・`-r`・書庫・`-shared`，周辺の道具 | ホストから駆動した Kbuild で `vmlinux` ができる |
-| M6 | SBI・initramfs の init・起動 | 完了条件 3 |
+| M2 | nld1 の基本 (`-T` の最小形・`ET_EXEC`) と素の実行環境 | `.S` だけの試験が QEMU で走る。**完了** (13 章) |
+| M3 | ncc1 の C89 と psABI | 7 章の 2・3 が通る。**完了** (14 章) |
+| M4 | ncc1 の GNU 拡張・組込み・inline asm | 374 単位すべてが訳され，nas1 を通る。**完了** (15 章) |
+| M5 | nld1 のリンカ台本・`-r`・書庫・`-shared`，周辺の道具 | ホストから駆動した Kbuild で `vmlinux` ができる。**完了** (16 章) |
+| M6 | SBI・initramfs の init・起動 | 完了条件 3。**完了** (17 章。ホストから駆動) |
 
 M6 までをホストから駆動して終えた後，stone の OS の中で回すための作業 (pp・OS・libc・sh・mk・bc・getconf) に移る。M1 と M3 の前半は互いに依存しないが，試験の実行に nas1 と nld1 が要るので M1・M2 を先にする。
 
@@ -303,6 +311,189 @@ Linux の `.S` を通すために，6.1 の範囲に次を足した。いずれ�
 ### 12.4 まだ無いもの
 
 `.incbin` は試験では置き換えた中身で試した (Linux の `vdso.so` と `initramfs_data.cpio` は nld1 と gen_init_cpio の後にできる)。Linux の inline asm の文字列は ncc1 ができてから通す (M4)。
+
+## 13. M2 の到達点 (2026-10-21)
+
+nld1 ([stage018/nld1.c](../stage018/nld1.c)，約 2,200 行) と素の実行環境 ([tests/stage018/rt](../tests/stage018/rt)) を書いた。nld1 も nas1 と同じく `sh tools/build.sh stage018` が cc15as で組み，試験は kernel29 の上で走らせる。kernel29 で 1 回起動して命令を並べて走らせる部分は [tools/os18.sh](../tools/os18.sh) にまとめた。
+
+### 13.1 nld1 の範囲
+
+| 項目 | 持つもの |
+|---|---|
+| 入力 | nas1 が出す ELF32 の `ET_REL`。COMMON の記号は擬似的な入力節 `COMMON` にまとめる |
+| リンカ台本 | `ENTRY`・`SECTIONS`・`.` と記号への代入 (複合代入を含む)・`PROVIDE` / `PROVIDE_HIDDEN` / `HIDDEN`・出力節の番地・`AT()`・`ALIGN()`・`(NOLOAD)`・入力節の指定 (ワイルドカード，`EXCLUDE_FILE`，`SORT`，`KEEP`)・`/DISCARD/`・`BYTE` / `SHORT` / `LONG` / `QUAD`・`ASSERT`。式は C の演算子と `ALIGN`・`ADDR`・`LOADADDR`・`SIZEOF`・`ALIGNOF`・`DEFINED`・`MAX` / `MIN`・`ABSOLUTE`・`CONSTANT`。`OUTPUT_ARCH` などは読み捨てる |
+| 既定の台本 | `-T` が無ければ，0x8000_0000 から `.text`・`.rodata`・`.data`・`.bss` を並べ，後ろに 64 KiB のスタック (`__stack_top`) を置く。既定の台本も同じ解析器で読む |
+| orphan | 台本が置かない割り付ける節は，同じ種類 (命令・読出し専用・書込み可・nobits) の最後の出力節の後ろに，同じ名前の出力節として置く。割り付けない節は出力しない |
+| 再配置 | 32・64・BRANCH・JAL・CALL / CALL_PLT・PCREL_HI20 / LO12_I / LO12_S・HI20 / LO12_I / LO12_S・ADD / SUB (8・16・32・64)。RELAX は読み捨て，ALIGN は誤りとする |
+| 出力 | `ET_EXEC`。大きさのある出力節ごとに PT_LOAD を 1 つ置く (`p_paddr` は LMA)。記号表は入力の局所の記号 (`.L` を除く) と大域の記号を持つ |
+
+書庫・`-r`・`--just-symbols`・`-shared`・`PHDRS`・`--build-id` は M5 で足す。
+
+### 13.2 試験
+
+| 検査 | 結果 |
+|---|---|
+| 別の .o の記号への再配置 (`tests/stage018/nld1/main.s` + `other.s`) | stone の OS の上で nld1 が結合した実行形式を QEMU で素のまま走らせ，CALL_PLT・PCREL (読み・書き)・HI20 / LO12 (読み・書き)・JAL・BRANCH・32 (関数の表)・ADD32 / SUB32・weak の上書き・weak の未定義 (0)・COMMON のまとめ・台本の記号の 14 項目がすべて正しい |
+| リンカ台本 (`lds.s` + `lds.lds`) | 節の番地と大きさ・PT_LOAD の VMA / LMA・記号の値・中身が，台本から手で数えた期待 (`lds.expect`) と verify 層の readelf の読みで一致 ([verify/nld1elf.sh](../verify/nld1elf.sh)) |
+| 誤った入力 | 未定義の記号・多重定義・届かない分岐・対応する `%pcrel_hi` の無い `%pcrel_lo`・成り立たない `ASSERT` の 5 種を止める |
+| ホスト版との一致 | 2 つの結合で，ホストの gcc で組んだ nld1 と同じ実行形式を出す |
+
+## 14. M3 の到達点 (2026-10-21)
+
+ncc1 ([stage018/ncc1.c](../stage018/ncc1.c)，約 5,800 行) を書いた。4 章の段の構成のとおり，字句解析・構文解析と型付け・定数の畳込み・AST からの直接の生成・参照された static の選別を持つ。`sh tools/build.sh stage018` が cc15as で組み，試験は stone の OS の上で ncc1・nas1・nld1 を 1 回の起動で通し，できた実行形式を QEMU で素のまま走らせる。開発中はホスト版で回す ([tools/ncc18.sh](../tools/ncc18.sh))。
+
+### 14.1 範囲
+
+| 項目 | 持つもの |
+|---|---|
+| 言語 | C89 のすべて (K&R の関数定義を除く)。`long long`・`_Bool`・`inline`・`//` の注釈・文の後の宣言・`for` の中の宣言・指定付き初期化子 (`.x`・`[i]`・`[a ... b]`・`name:`)・中括弧の省略・無名の構造体と共用体の成員・`case a ... b`・文式 `({ })`・`typeof`・`__extension__`・`_Static_assert`・`__alignof__`・`__label__`・大域の `asm("...")` |
+| 属性 | `aligned`・`packed`・`section`・`weak`・`alias`・`used`・`unused`・`mode`・`gnu_inline`・`visibility("hidden")`・`asm("名前")`。他は読み捨てる |
+| 組込み関数 | `__builtin_va_start` / `va_arg` / `va_end` / `va_copy`・`expect`・`constant_p`・`offsetof`・`types_compatible_p`・`choose_expr`・`unreachable`・`trap` |
+| 生成 | 4.4〜4.6 のとおり。一時値は s1〜s11，フレームは s0 起点，引数は呼出しごとの領域で評価してから a0〜a7 とスタックへ割り付ける。64 bit の除算・剰余だけを実行時支援の呼出しにする |
+| 除去 | 4.3 の 2 つ (定数条件の枝・参照されない static) |
+
+浮動小数点・asm 文・レジスタを指定した変数・複合リテラル・計算した goto は持たない (浮動小数点と計算した goto は 9 章のとおり範囲外，残りは M4)。`__builtin_constant_p` は整数定数式だけを 1 とする (4.8)。最適化をするホストの gcc は値の分かっている局所の変数も 1 とするので，試験はこの差に依らない形に書いた。
+
+### 14.2 試験
+
+| 検査 | 結果 |
+|---|---|
+| C の試験 ([tests/stage018/c](../tests/stage018/c)) 9 本 | 32 bit 以下の演算と変換・64 bit の演算・制御構造と再帰・ポインタと配列と関数へのポインタ・構造体 (配置・ビットフィールド・packed・共用体・無名の成員・値渡しと値返し)・初期化子・可変長引数と多数の引数・到達しない枝の除去・その他 (2 KiB を超えるフレーム・列挙・文式・組込み関数・64 bit の switch・深い式)。stone の OS の上で訳して組んだものが，ホストの gcc (`-funsigned-char`) と同じ出力を出す |
+| psABI (`abi.c` + `abi.s`) | psABI の文面から手で書いたアセンブリと C が呼び合う: 64 bit の対・a7 とスタックの分割・可変長の偶数番の対と，対が残らない時のスタックへの移動・2×XLEN 以下と超える構造体の値渡しと値返し (隠れた引数)・狭い整数の拡張。期待は文面から手で書いた |
+| 試験の libc ([tests/stage018/rt/libc.c](../tests/stage018/rt/libc.c)) | printf・memcpy・64 bit の除算の支援を ncc1 で訳したもの。前処理器の指令を使わない |
+| 誤った入力 | 構文の誤り・宣言の無い名前・構造体からスカラーへの変換・定義の無い static 関数の参照・浮動小数点の 5 種を止める |
+| ホスト版との一致 | 試験の 10 本 (libc を含む) で，cc15as で組んだ ncc1 がホストの gcc で組んだ ncc1 と同じ `.s` を出す |
+
+試験が見つけた ncc1 の誤りは 1 件で，構造体の値をスカラーに代入しても止めていなかった。試験の側の誤りが 3 件あった (評価の順の決まっていない式 2 件，最適化に依る `__builtin_constant_p`)。
+
+## 15. M4 の到達点 (2026-10-21)
+
+ncc1 は約 6,900 行になった。rv32-stone の構成の C の単位 374 をホストの cpp で前処理したもの (`sh tools/linux19.sh pre`) を，すべて ncc1 で訳し，nas1 で組み立てられる (`sh tools/linux19.sh ncc`)。404 MB の `.i` は stone の OS のファイルシステム (64 MiB) に入らないので，この測定はホストの cc で組んだ ncc1 と nas1 で行う。stone で組んだ ncc1 がホスト版と同じ `.s` を出すことは試験の C で確かめている (14.2)。
+
+### 15.1 足したもの
+
+| 項目 | 内容 |
+|---|---|
+| inline asm | 4.7 のとおり。被演算子の名前 (`%[name]`)・`%=`・一致の制約 (`"0"`)・レジスタを指定した変数・64 bit の値 |
+| 複合リテラル | 局所は枠に置く。ファイルの有効範囲では static の名前の無い変数にする。静的な初期化子の中の複合リテラル (`(spinlock_t) { ... }`，空の `{ }` を含む) はその初期化子を取り込む |
+| 組込み関数 | 4.8 の表の残り (`return_address`・`frame_address`・`object_size`・`prefetch`・ビット演算・`bswap`)。`memcpy` などの名前は暗黙の関数の宣言にする |
+| 式 | `x ?: y`・ラベルの番地 `&&label` (`_THIS_IP_`)・添字が実行時の値の `offsetof`・同じ型への構造体のキャスト・記号の番地と空ポインタの比較の畳込み (`f == (T)0 ? f : f`。weak の記号は畳まない)・`(void *)<整数定数式>` を空ポインタ定数として扱う (`__is_constexpr`) |
+| 文 | `__label__` の局所のラベル (同じマクロの文式が 1 つの関数に何度も展開される)・ラベルの付いた文式の値 (`({ __label__ h; h: (unsigned long)&&h; })`)・`return` で値が到達しない文式・ラベルの直後の asm 文 |
+| 初期化子 | 余る初期化子は読んで捨てる (長さ 0 の配列に `{ 0 }`。GCC は警告に留める)。指示子が同じ場所を 2 度初期化した時は後のものを採る (再配置も外す)，再配置は位置の順に並べる |
+| 到達の判定 | `break` と `continue` が到達したかを繰返しと switch ごとに覚え，出口のラベルはそのどちらかか落ちてくる時だけ到達するとする。`do { } while (0)` の先頭へは戻らない。これで定数の switch で選ばれない `case` の中の文 (64 bit の `put_user` など) を出さない |
+| 長い関数 | 本体の行の数から長さの上限を見積もり，4 KiB に届きうる関数は文と式の間の条件分岐を反転した分岐と `j` で作り直す。nas1 は緩和をしないので，届かない分岐は ncc1 の側で避ける |
+| nas1 | `jump <先>, <レジスタ>` (`auipc` + `jalr`，R_RISCV_CALL)。Linux の `__put_user` の `.fixup` が使う |
+
+### 15.2 試験
+
+| 検査 | 結果 |
+|---|---|
+| `gnu.c` | 局所のラベル・ラベルの付いた文式の値・`return` を含む文式・260 文の繰返しを持つ長い関数・余る初期化子・番地の比較を畳む静的な初期化子・指示子の上書きと順の違う指示子・静的な初期化子の複合リテラル・同じ型へのキャスト・到達の判定。ホストの gcc と同じ出力 |
+| `asm.c` | 64 bit の入力 (下位の語，`%z` と `>> 32`)・`+rm` と `=m` の 64 bit・`jump` 擬似命令・ラベルの直後の asm・定数の switch で除かれる 64 bit の出力。期待は手で書いた (RISC-V の命令はホストで組めない) |
+| Linux の C の単位 | 374 単位すべてを訳し，nas1 で組み立てる (前処理した単位がある時だけ。無ければ検査しない旨を出す) |
+
+Linux の単位が見つけた ncc1 の誤りのうち，黙って誤ったものを出しうるものが 3 件あった。
+
+- 指示子で初期化の順が前後すると，静的なデータの再配置が位置の順に並ばず，出力の繰返しが止まらなかった
+- 文式の中の `return` で到達しなくなったことが式の外へ漏れ，`?:` の後ろの文が出力から消えていた (`gnu.c` の `early` が見つけた)
+- ラベルの付いた最後の文を文式の値として扱わず，値の無い式をキャストしていた
+
+### 15.3 まだ無いもの
+
+- 一時値のレジスタ (s1〜s11) が尽きた時の退避。374 単位では尽きなかった
+- レジスタに載る 64 bit の asm の出力，計算した goto
+- 11 章の 3 (cc15as で組んだ ncc1 の速さ) の測定。stone の OS のファイルシステムに入る大きさに分けて測る
+
+## 16. M5 の到達点 (2026-10-21)
+
+ホストの make で Kbuild を回し，gcc・ld・ar・nm・objcopy・objdump をすべて我々のもの (ホストの cc で組んだ ncc1・nas1・nld1・nar1・nobj1) に差し替えて，rv32-stone の `vmlinux`・`vdso.so`・`System.map` ができる (`sh tools/kb18.sh run <出力> allnoconfig KCONFIG_ALLCONFIG=stage019/rv32-stone.config`)。前処理はホストの cpp で行う (8 章)。Kbuild が組んで走らせるホストの補助プログラム (fixdep・modpost など) はホストの cc のままである。modpost は nld1 -r の `vmlinux.o` を読んで section mismatch を検査し，誤りを出さない。
+
+### 16.1 足したもの
+
+| 道具 | 内容 |
+|---|---|
+| nld1 | 書庫と thin の書庫 (`--whole-archive` の中はすべて，外は未定義の参照を定義するメンバを引き込む。`--start-group` の区別はしない)・`-r` (節を名前でまとめ，再配置と局所の記号を残す。COMMON は COMMON のまま)・`--just-symbols`・`-shared` (`.hash`・`.gnu.hash`・`.dynsym`・`.dynstr`・`.gnu.version`・`.gnu.version_d`・`.dynamic` を作る。動的な再配置は作らない)・`PHDRS` (`FILEHDR`・`PHDRS`・`FLAGS`・`:phdr` の引継ぎ)・`VERSION` (節点 1 つ)・`SIZEOF_HEADERS`・`EXTERN`・`--build-id` (SHA-1)・`-s`。入力が定義した記号への台本の代入は台本が勝つ (`_start = .;`)。未定義の参照はすべて出してから止める |
+| nar1 | 6.3 の `ar`。thin の書庫に thin の書庫を足すと中のメンバを展開する |
+| nobj1 | 6.3 の `nm`・`objcopy`・`objdump`。`nm` と `objdump -h` は GNU binutils と同じ書式で出す (Kbuild の sed が読む) |
+| tools/kb18.sh・kb18cc.sh | Kbuild を我々の道具で回す。kb18cc.sh は gcc の命令行を読み，`-E` をホストの cpp に，`-c` / `-S` を cpp + ncc1 (+ nas1) に，結合を nld1 に渡す。問合せには GCC 4.6.4 として答える |
+
+### 16.2 Linux の結合が見つけた ncc1 の誤りと不足
+
+M4 の判定 (374 単位が訳されて nas1 を通る) では見えず，結合と modpost で初めて見えたもの。
+
+- **宣言子の中の属性を捨てていた** (誤り): `static char * __init f(...)` の `__init` (`section(".init.text")`) が効かず，`__init` の関数が `.text` に置かれていた。宣言子の中の属性を宣言に付けるようにした
+- **gnu89 の `inline` を extern inline と取り違えていた** (誤り): `gnu_inline` 属性の付いた (extern の無い) `inline` の関数の外部の定義を出していなかった
+- **展開しないことによる差**: GCC が展開して呼ぶ側の節に入れる `static inline` の関数が `.text` に残り，`.init.text` を参照する (modpost の section mismatch)。参照するのがすべて同じ節の関数なら，その節に置くようにした。また，GCC が展開した後に畳む枝に残る未定義の参照は 4.3 の畳込みで除いた
+- **64 bit の 2 の冪での除算**: `__udivdi3` などを呼んでいた。Linux は libgcc を結合しないので，シフトとマスクで作るようにした (GCC と同じ)
+- **到達の判定**: 到達しない `if` の中の `else` の入口と，到達しない繰返しの先頭を到達するとしていた。入口に合わせるようにした (到達しない枝の中の参照が残っていた)
+
+### 16.3 試験
+
+| 検査 | 内容 |
+|---|---|
+| 書庫 | stone の nar1 が記号表付きの書庫と，長い名前のメンバを入れ子にした thin の書庫を作り，nld1 がそれぞれから結合したものが走る。verify 層の `ar t`・`nm -s` が読む |
+| -r | 2 つの .o を 1 つにまとめ，それを結合したものが走る |
+| -shared | vdso と同じ形の台本 ([tests/stage018/nld1/dso.lds](../tests/stage018/nld1/dso.lds)) の出力の program header・動的な節・動的な記号・版の定義が期待どおり ([verify/nld1dyn.sh](../verify/nld1dyn.sh))。build-id が，中身を 0 にした出力の SHA-1 (ホストの `sha1sum`) と一致する |
+| --just-symbols・objcopy | `objcopy -G` で残した記号だけが絶対値の記号になる。`-S` で記号表を除く。`-O binary`・`nm -n`・`objdump -h` が verify 層の binutils と同じ |
+| ホスト版との一致 | nar1・nld1 (-r・-shared) が，ホストの cc で組んだものと同じ出力を出す |
+| C の試験 | `pow2.c` (64 bit の 2 の冪での除算・剰余)，`dce.c` に 16.2 の畳込みの形 (定数を返す関数・空の関数と引数だけが参照する表・`a && 0`・定数の局所の変数・1 度だけの代入) を足した |
+| Kbuild | Linux のソースと conf があれば，Kbuild を回して `vmlinux`・`System.map` ができ，入口が `_start` である |
+
+### 16.4 まだ無いもの
+
+- `--start-group` / `--end-group` の範囲 (すべての書庫を 1 つの組として扱う)，`PHDRS` の `AT`，`VERSION` の複数の節点
+- 動的な再配置 (vdso には要らない)
+- 起動 (M6。17 章で完了)
+
+## 17. M6 の到達点 (2026-10-21)
+
+16 章の Kbuild で組んだ `arch/riscv/boot/Image` が，我々の SBI の上で QEMU virt (rv32) で起動し，initramfs の init (ncc1 で組んだ静的な ELF) が syscall を確かめて電源を切る (`sh tools/boot18.sh build tmp/kb18-stone`，`sh tools/boot18.sh run tmp/kb18-stone`)。2 章の完了条件 3 を，ホストから駆動して満たした。
+
+```
+stone sbi: hart 0x00000000 dtb 0x87e00000 next 0x80400000
+Linux version 5.4.302+ (root@vm) (gcc version 4.6.4 (stone)) ...
+Kernel command line: earlycon=sbi console=hvc0 rdinit=/init
+...
+Run /init as init process
+init: stone の init が走った
+init: ok   write が書いた長さを返す
+init: pid 1
+...
+init: すべて期待どおり。電源を切る
+reboot: Power down
+stone sbi: shutdown
+```
+
+### 17.1 SBI
+
+[stage018/sbi1.c](../stage018/sbi1.c) と [stage018/sbi1s.s](../stage018/sbi1s.s)。QEMU の `-bios` として M モードで走る。
+
+- **入口**: reset vector から a0 = hartid，a1 = 機器木，a2 = fw_dynamic_info で入る。fw_dynamic_info の `next_addr` (QEMU が Image を置いた番地。rv32 では 0x8040_0000) へ，a0・a1 をそのまま渡して S モードで `mret` する
+- **M モードの設定**: 例外 (命令の番地の不整列・breakpoint・U の ecall・ページフォールト) と S の割込みを S へ委ねる。`mcounteren` で S と U に cycle・time・instret を開く。PMP の 1 項で全体を開く (QEMU は PMP の項が無いと S の読み書きを止める)
+- **呼出し**: Linux 5.4 が使う SBI v0.1 の 9 つ (set_timer・console_putchar・console_getchar・clear_ipi・send_ipi・remote_fence_i・remote_sfence_vma[_asid]・shutdown)。set_timer は CLINT の mtimecmp に書き，M の timer 割込みを S の timer 割込み (mip.STIP) に移す。console は UART (16550)，shutdown は test finisher に書く
+- **その他の trap**: 内容を出して異常の終了コードで止める
+
+### 17.2 init と initramfs
+
+[stage018/init1.c](../stage018/init1.c) は libc を使わず，ecall で syscall を直に呼ぶ (レジスタを指定した変数と inline asm。M4)。write・getpid (1)・uname (Linux / riscv32)・openat・read (/init 自身の ELF の頭)・close を確かめて，reboot(POWER_OFF) で電源を切る。[stage018/init1.lds](../stage018/init1.lds) は PHDRS で ELF の頭を含む命令の段と書込みのできる段を分け，ファイルの位置と番地を 4 KiB を法として揃える (Linux の ELF の読込みが要る)。
+
+initramfs は Kbuild がホストの cc で組んだ `usr/gen_init_cpio` で作り，QEMU の `-initrd` で渡す (`CONFIG_INITRAMFS_SOURCE` は空のまま)。
+
+### 17.3 Kbuild に足したもの
+
+`arch/riscv/boot/Image` を組むために，nobj1 の objcopy に `-R <節>` を足した (`-O binary -R .note -R .note.gnu.build-id -R .comment -S`)。
+
+### 17.4 試験
+
+| 検査 | 内容 |
+|---|---|
+| 組む | SBI・init・initramfs を組む |
+| ホスト版との一致 | stone の ncc1 が SBI と init の `.s` をホスト版と同じに出す |
+| 起動 | QEMU が終了コード 0 で止まる。カーネルの版の行と `Run /init` が出る。init の 8 つの確かめがすべて通り，SBI の shutdown に届く |
+
+### 17.5 まだ無いもの (Stage 19)
+
+1〜3 はホストから駆動して確かめた (2 章)。stone の OS の中で全体を回すことは Stage 19 の完了条件として残る。前処理 (pp の `-I` / `-MMD` など)・make・sh・Kbuild の補助プログラムを stone の OS の上で揃える作業である ([stage019-linux.md](stage019-linux.md))。
 
 ## 一次資料
 

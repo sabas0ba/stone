@@ -1,0 +1,22 @@
+add 12 sub 22 mul -85
+div -3 mod 2 div2 -3 mod2 -2
+udiv 428571428 umod 4
+shl 136 shr 4 ushr 23437500 sar -3
+and 0 or 29 xor 29 not -18
+cmp 0 1 1 0 1 0
+ucmp 1 1
+mixed 1 2
+char 65 -100 200
+short -30000 60000
+trunc 44 44 4464
+promote 400 -200
+globals -7 4294967280 -100 200 -30000 60000
+not 0 1
+neg -17 1294967296
+opassign 3 4294967279 56 44
+incdec 5 7 7 6
+call 10
+ops 64
+conv -2147483648 2147483648 -1
+bool 1 0
+rc 0
