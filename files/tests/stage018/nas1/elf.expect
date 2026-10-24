@@ -1,0 +1,48 @@
+section .text PROGBITS AX size=0x40 align=4 entsize=0
+section .data PROGBITS WA size=0x3a align=4 entsize=0
+section .bss NOBITS WA size=0x10 align=1 entsize=0
+section .init.text PROGBITS AX size=0xc align=4 entsize=0
+section __ex_table PROGBITS A size=0x8 align=4 entsize=0
+section .rodata.str1.1 PROGBITS AMS size=0x2 align=1 entsize=1
+section .bss.big NOBITS WA size=0x20 align=1 entsize=0
+section .note.test NOTE A size=0x4 align=1 entsize=0
+reloc .text 0x0 R_RISCV_PCREL_HI20 dvar +0x0
+reloc .text 0x4 R_RISCV_PCREL_LO12_I .Lpcrel_hi0 +0x0
+reloc .text 0x8 R_RISCV_CALL_PLT extfn +0x0
+reloc .text 0x10 R_RISCV_HI20 extvar +0x0
+reloc .text 0x14 R_RISCV_LO12_I extvar +0x0
+reloc .text 0x18 R_RISCV_LO12_S extvar +0x8
+reloc .text 0x1c R_RISCV_PCREL_HI20 .data +0x8
+reloc .text 0x20 R_RISCV_PCREL_LO12_I .Ln1_0 +0x0
+reloc .text 0x24 R_RISCV_BRANCH extfn +0x0
+reloc .text 0x28 R_RISCV_JAL extfn +0x0
+reloc .text 0x2c R_RISCV_BRANCH wk +0x0
+reloc .text 0x38 R_RISCV_CALL_PLT extfn +0x0
+reloc .data 0x8 R_RISCV_32 extvar +0x4
+reloc .data 0xc R_RISCV_32 start +0x0
+reloc .data 0x10 R_RISCV_32 .text +0x40
+reloc .data 0x1c R_RISCV_ADD64 _end +0x0
+reloc .data 0x1c R_RISCV_SUB64 start +0x0
+reloc .data 0x24 R_RISCV_ADD32 extvar +0x0
+reloc .data 0x24 R_RISCV_SUB32 .data +0x8
+reloc __ex_table 0x0 R_RISCV_32 .init.text +0x0
+reloc __ex_table 0x4 R_RISCV_32 start +0x0
+reloc .note.test 0x0 R_RISCV_32 wext +0x0
+symbol .Ln1_0 0x1c 0 NOTYPE LOCAL DEFAULT .text
+symbol .Lpcrel_hi0 0x0 0 NOTYPE LOCAL DEFAULT .text
+symbol _end 0x0 0 NOTYPE GLOBAL DEFAULT UND
+symbol alias1 0x8 0 NOTYPE GLOBAL DEFAULT .text
+symbol bvar 0x0 0 NOTYPE GLOBAL DEFAULT .bss
+symbol cvar 0x4 8 OBJECT GLOBAL DEFAULT COM
+symbol dvar 0x0 58 OBJECT GLOBAL DEFAULT .data
+symbol end_text 0x40 0 NOTYPE LOCAL DEFAULT .text
+symbol extfn 0x0 0 NOTYPE GLOBAL DEFAULT UND
+symbol extvar 0x0 0 NOTYPE GLOBAL DEFAULT UND
+symbol hid 0x0 0 NOTYPE GLOBAL HIDDEN .data
+symbol init1 0x0 0 NOTYPE LOCAL DEFAULT .init.text
+symbol lvar 0x8 0 NOTYPE LOCAL DEFAULT .data
+symbol start 0x0 56 FUNC GLOBAL DEFAULT .text
+symbol wext 0x0 0 NOTYPE WEAK DEFAULT UND
+symbol wk 0x34 0 NOTYPE WEAK DEFAULT .text
+bytes .data 44 33 22 11 66 55 01 02 00 00 00 00 00 00 00 00 00 00 00 00 08 07 06 05 04 03 02 01 00 00 00 00 00 00 00 00 00 00 00 00 40 00 00 00 61 62 63 0a 00 ee ee ee 00 00 34 12 34 12
+bytes .rodata.str1.1 78 00
