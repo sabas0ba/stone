@@ -8,6 +8,9 @@
 #   linux19.sh scan <kbout>         前処理した単位の中の拡張の使われ方を数える
 #   linux19.sh spre <kbout>         .S の単位を前処理だけする (nas1 の入力。docs/stage018-ncc.md 10 章の M1)
 #   linux19.sh ncc <kbout>          前処理した全単位をホストの ncc1 と nas1 に通す (同 M4)
+#   linux19.sh npp <kbout> [asm]    全単位を npp1 で前処理してホストの cpp と比べる
+#                                   (docs/stage019-linux.md 7 章の S1)
+#   linux19.sh npp-x <kbout>        リンカ台本と asm-offsets を同じく比べる
 #
 # <kbout> は tools/kbuildlog.sh run の出力先 (Kbuild の objtree) である。
 # 単位ごとの命令行はそこの kblog/tools.log にある。
@@ -32,6 +35,7 @@ predef="$repo_root/stage019/predef-rv32-gcc46.h"
 ccinc="$repo_root/stage019/include"
 cc15="tmp/build/cc15as.bin"
 ncc_host="$repo_root/tmp/nas1/host"
+npp="$repo_root/tmp/npp1/npp1"
 HOSTCC=${HOSTCC:-gcc}
 
 die() { echo "linux19.sh: $*" >&2; exit 1; }
@@ -117,10 +121,162 @@ preprocess() {
         IFS='
 '
         set -f
-        # shellcheck disable=SC2046
-        "$HOSTCC" -E -P -undef -nostdinc $stdopt -include "$predef" \
-            $(cat "$out.args") "$src" -o "$out" 2> "$out.cpp.err"
+        if [ "${PP:-}" = npp ]; then
+            # shellcheck disable=SC2046
+            "$npp" -P -include "$predef" $(cat "$out.args") "$src" -o "$out" 2> "$out.cpp.err"
+        else
+            # PP=ref はホストの cpp が組み込みで持つ __has_attribute を消す。
+            # GCC 4.6 は持たず，Linux は無い時に表 (__GCC4_has_attribute_*) を引く
+            ref=''
+            [ "${PP:-}" = ref ] && ref='-U__has_attribute'
+            # shellcheck disable=SC2046
+            "$HOSTCC" -E -P -undef -nostdinc $stdopt $ref -include "$predef" \
+                $(cat "$out.args") "$src" -o "$out" 2> "$out.cpp.err"
+        fi
     )
+}
+
+# 1 単位を npp1 で前処理して ncc1 に通し，ホストの cpp の .i から作った .s
+# (<work>/ncc) と比べる。.i は空白を除いてホストの cpp (PP=ref) の出力と比べる。
+# 字句の間の空白の置き方は前処理器ごとに違い，意味を持たない。
+# 結果は <work>/npp/<key>.{i,ref.i,s,err,res}。res は same / sdiff (.s が違う) /
+# idiff (.s は同じで .i が違う) / pp (npp1 が失敗) / cc (ncc1 が失敗) /
+# base (比べる .s が無い)
+npp_one() {
+    kb=$1; key=$2
+    d="$work/npp"
+    rm -f "$d/$key.i" "$d/$key.s"
+    set +e
+    PP=npp preprocess "$kb" "$key" "$d/$key.i"
+    rc=$?
+    PP=ref preprocess "$kb" "$key" "$d/$key.ref.i"
+    if [ $rc -ne 0 ]; then
+        res=pp
+    elif ! (ulimit -v 2000000; timeout 60 "$ncc_host/ncc1" -o "$d/$key.s" "$d/$key.i") 2> "$d/$key.err"; then
+        res=cc
+    elif [ ! -e "$work/ncc/$key.s" ]; then
+        res=base
+    elif ! cmp -s "$d/$key.s" "$work/ncc/$key.s"; then
+        res=sdiff
+    elif [ "$(tr -d ' \t\n' < "$d/$key.i" | cksum)" != "$(tr -d ' \t\n' < "$d/$key.ref.i" | cksum)" ]; then
+        res=idiff
+    else
+        res=same
+    fi
+    set -e
+    echo "$res" > "$d/$key.res"
+}
+
+# .S の 1 単位を npp1 とホストの cpp (PP=ref) で前処理し，nas1 で組み立てた .o を
+# 比べる。.s は空行を除き，行の中の空白を 1 つに詰めて比べる (行の区切りは
+# 文の区切りなので残す)。res は same / odiff (.o が違う) / sdiff (.o は同じで
+# .s が違う) / pp / text (.incbin の材料が objtree に無く組み立てられないので
+# .s だけ比べて同じ) / stdin (前処理しない単位)
+snpp_one() {
+    kb=$1; key=$2
+    d="$work/npp"
+    rm -f "$d/$key.s" "$d/$key.o" "$d/$key.ref.o"
+    # 標準入力から読む単位 (-x assembler -) は前処理しない
+    if [ "$(awk '{ print $NF }' "$work/args/$key")" = - ]; then
+        echo stdin > "$d/$key.res"
+        return 0
+    fi
+    set +e
+    PP=npp preprocess "$kb" "$key" "$d/$key.s"
+    rc=$?
+    PP=ref preprocess "$kb" "$key" "$d/$key.ref.s"
+    # .incbin は objtree からの相対経路で書かれる
+    same_text=0
+    [ "$(squeeze < "$d/$key.s" | cksum)" = "$(squeeze < "$d/$key.ref.s" | cksum)" ] && same_text=1
+    if [ $rc -ne 0 ]; then
+        res=pp
+    elif ! (cd "$kb" && "$ncc_host/nas1" -o "$d/$key.ref.o" "$d/$key.ref.s") 2> /dev/null; then
+        if [ $same_text -eq 1 ]; then res=text; else res=sdiff; fi
+    elif ! (cd "$kb" && "$ncc_host/nas1" -o "$d/$key.o" "$d/$key.s") 2> "$d/$key.err" \
+        || ! cmp -s "$d/$key.o" "$d/$key.ref.o"; then
+        res=odiff
+    elif [ $same_text -eq 0 ]; then
+        res=sdiff
+    else
+        res=same
+    fi
+    set -e
+    echo "$res" > "$d/$key.res"
+}
+
+# npp1 は比べる度にホストの cc で組み直す
+build_npp() {
+    mkdir -p "$(dirname "$npp")"
+    "$HOSTCC" -std=c89 -pedantic -Wno-long-long -Wall -Wextra -Werror -O1 \
+        -o "$npp" "$repo_root/stage019/npp1.c"
+}
+
+# 単位でない前処理 (リンカ台本と asm-offsets) を npp1 とホストの cpp で比べる。
+# 命令行は記録から出力の名前で拾う。台本は squeeze で，asm-offsets (C) は
+# 空白を除いて比べる。-C (注釈を残す) はどちらにも渡さない (preprocess が
+# 捨てる)。注釈はリンカ台本の意味を持たない
+npp_x() {
+    build_npp
+    kb=$1
+    log="$kb/kblog/tools.log"
+    d="$work/x"
+    rm -rf "$d"
+    mkdir -p "$d/args"
+    work_saved=$work
+    work=$d
+    for o in arch/riscv/kernel/vmlinux.lds arch/riscv/kernel/vdso/vdso.lds arch/riscv/kernel/asm-offsets.s; do
+        key=$(printf '%s' "$o" | tr '/' '_')
+        grep -E -- " -o $o( |\$)" "$log" | head -n 1 | sed 's/^gcc //' > "$d/args/$key"
+        [ -s "$d/args/$key" ] || die "記録に無い: $o"
+        set +e
+        PP=npp preprocess "$kb" "$key" "$d/$key.npp"
+        rc=$?
+        PP=ref preprocess "$kb" "$key" "$d/$key.ref"
+        set -e
+        case "$o" in
+        *.lds) norm=squeeze ;;
+        *) norm=strip_ws ;;
+        esac
+        if [ $rc -ne 0 ]; then
+            res=pp
+        elif [ "$($norm < "$d/$key.npp" | cksum)" = "$($norm < "$d/$key.ref" | cksum)" ]; then
+            res=same
+        else
+            res="diff"
+        fi
+        printf '%s\t%s\n' "$o" "$res"
+    done
+    work=$work_saved
+}
+
+strip_ws() {
+    tr -d ' \t\n'
+}
+
+squeeze() {
+    tr -s ' \t' '  ' | sed 's/^ //; s/ $//; /^$/d'
+}
+
+# 全単位を npp1 で前処理して比べる (docs/stage019-linux.md 7 章の S1)。
+# 第 1 引数が asm なら .S の単位 (<work>/asm)
+npp_all() {
+    kind=${1:-c}
+    if [ "$kind" = asm ]; then
+        work="$work/asm"
+        one="snpp-one"
+    else
+        one="npp-one"
+    fi
+    [ -x "$ncc_host/ncc1" ] || die "ncc1 が無い (sh tools/ncc18.sh host)"
+    build_npp
+    [ -s "$work/units.tsv" ] || die "単位の一覧が無い (sh tools/linux19.sh units)"
+    rm -rf "$work/npp"
+    mkdir -p "$work/npp"
+    cut -f 2 "$work/units.tsv" | sort \
+        | xargs -P "${JOBS:-8}" -I{} sh "$0" "$one" "$kbabs" {}
+    total=$(find "$work/npp" -name '*.res' | wc -l | tr -d ' ')
+    echo "npp: $total 単位 ($work/npp)"
+    cat "$work/npp"/*.res | sort | uniq -c | sort -rn
 }
 
 one() {
@@ -298,8 +454,12 @@ scan) [ $# -ge 2 ] || die "scan <kbout>"; scan ;;
 spre) [ $# -ge 2 ] || die "spre <kbout>"; spre_all "$kbabs" ;;
 ncc) [ $# -ge 2 ] || die "ncc <kbout>"; ncc_all ;;
 ncc-one) [ $# -ge 3 ] || die "ncc-one <kbout> <key>"; ncc_one "$3" ;;
+npp) [ $# -ge 2 ] || die "npp <kbout> [asm]"; npp_all "${3:-c}" ;;
+npp-one) [ $# -ge 3 ] || die "npp-one <kbout> <key>"; npp_one "$kbabs" "$3" ;;
+snpp-one) [ $# -ge 3 ] || die "snpp-one <kbout> <key>"; work="$work/asm"; snpp_one "$kbabs" "$3" ;;
+npp-x) [ $# -ge 2 ] || die "npp-x <kbout>"; npp_x "$kbabs" ;;
 *)
-    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan <kbout> | spre <kbout> | ncc <kbout>}" >&2
+    echo "usage: linux19.sh {units <kbout> | pre <kbout> | one <kbout> <obj> | all <kbout> | scan <kbout> | spre <kbout> | ncc <kbout> | npp <kbout> [asm] | npp-x <kbout>}" >&2
     exit 2
     ;;
 esac

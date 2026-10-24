@@ -3,7 +3,10 @@
 #
 #   kb18.sh run <出力> <設定の目標> [make の変数=値...]
 #       O=<出力> に設定を作り，vmlinux と arch/riscv/boot/Image まで組む。道具は CROSS_COMPILE で
-#       我々のものに差し替える
+#       我々のものに差し替える。KB18_NPP を与えると前処理を npp1 で行う (tools/kb18cc.sh)
+#
+#   kb18.sh cmp <出力 1> <出力 2>
+#       2 つの出力の生成物と依存の記録を比べる
 #
 # 道具の対応:
 #   gcc                      tools/kb18cc.sh (ホストの cpp と ncc1・nas1・nld1)
@@ -52,6 +55,12 @@ run_build() {
     KB18_ROOT=$repo_root
     KB18_BIN=$host
     export KB18_ROOT KB18_BIN
+    # 版の文字列 (init/version.o) と initramfs の時刻を固定し，同じ入力から
+    # 同じ vmlinux を作る (2 つの出力を cmp で比べられるように)
+    KBUILD_BUILD_TIMESTAMP=${KBUILD_BUILD_TIMESTAMP:-Thu Jan  1 00:00:00 UTC 1970}
+    KBUILD_BUILD_USER=${KBUILD_BUILD_USER:-stone}
+    KBUILD_BUILD_HOST=${KBUILD_BUILD_HOST:-stone}
+    export KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_USER KBUILD_BUILD_HOST
     set -- O="$out" ARCH=riscv CROSS_COMPILE="$out/kb18/bin/riscv32-stone-" \
         LEX="$flexbin" YACC=bison "$@"
     if [ ! -f "$out/.config" ]; then
@@ -67,6 +76,40 @@ run_build() {
     fi
 }
 
+# 2 つの出力を比べる (前処理器を差し替えた時の確かめ。docs/stage019-linux.md 8 章)。
+# .o・.a・.so・vmlinux・Image・設定・依存の記録 (.cmd) は一致を求める。.cmd の
+# 中の出力先の経路は置き換えてから比べる。リンカ台本は空行と行の中の空白の量を
+# 除いて比べる。組んだ時刻は run が固定するので，違いは全て説明の無いものとする
+compare() {
+    a=$(CDPATH='' cd -- "$1" && pwd)
+    b=$(CDPATH='' cd -- "$2" && pwd)
+    n=0; bad=0
+    list=$(cd "$a" && find . -type f \( -name '*.o' -o -name '*.a' -o -name '*.so' \
+        -o -name '*.lds' -o -name '.*.cmd' -o -name '.config' -o -name 'System.map' \
+        -o -name 'vmlinux' -o -name 'Image' \) -not -path './kb18/*' | sort)
+    for f in $list; do
+        n=$((n + 1))
+        if [ ! -f "$b/$f" ]; then
+            echo "無い: $f"
+            bad=$((bad + 1))
+            continue
+        fi
+        case "$f" in
+        *.lds) [ "$(squeeze < "$a/$f")" = "$(squeeze < "$b/$f")" ] && continue ;;
+        *.cmd) [ "$(sed "s|$a|@|g" "$a/$f")" = "$(sed "s|$b|@|g" "$b/$f")" ] && continue ;;
+        *) cmp -s "$a/$f" "$b/$f" && continue ;;
+        esac
+        echo "違う: $f"
+        bad=$((bad + 1))
+    done
+    echo "kb18.sh: $n 個を比べ，違いが $bad 個"
+    [ "$bad" -eq 0 ]
+}
+
+squeeze() {
+    tr -s ' \t' '  ' | sed 's/^ //; s/ $//; /^$/d'
+}
+
 cmd=${1:-}
 case "$cmd" in
 run)
@@ -74,8 +117,12 @@ run)
     shift
     run_build "$@"
     ;;
+cmp)
+    [ $# -eq 3 ] || die "cmp <出力 1> <出力 2>"
+    compare "$2" "$3"
+    ;;
 *)
-    echo "usage: kb18.sh run <出力> <設定の目標> [変数=値...]" >&2
+    echo "usage: kb18.sh {run <出力> <設定の目標> [変数=値...] | cmp <出力 1> <出力 2>}" >&2
     exit 2
     ;;
 esac

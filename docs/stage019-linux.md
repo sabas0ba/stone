@@ -157,3 +157,89 @@ sh は Kbuild のすべてのレシピで `trap '...; kill -s HUP $$' HUP` の�
 - **属性**: `no_instrument_function`・`unused`・`gnu_inline`・`always_inline`・`error`・`format`・`cold`・`aligned`・`section`・`designated_init`・`const`・`malloc`・`noreturn`・`pure`・`assume_aligned`・`nonnull`・`packed`・`noinline`・`externally_visible`・`alias`・`used`・`weak`・`mode` (`__attribute__((` の直後の名前だけを数えた)
 - **inline asm の制約**: `r`・`=r`・`=&r`・`+r`・`rJ`・`rK`・`i`・`m`・`=m`・`+A` (不可分操作の番地)・`+rm`。asm 文は字面で 82,735 個ある
 - **レジスタを指定した変数**: `register uintptr_t a0 asm ("a0")` (SBI の呼出しで a0〜a7)，`gp`，`sp`
+
+## 7. 段取り (2026-10-22，案)
+
+Stage 18 で，ホストから駆動した Kbuild が我々の道具 (ncc1・nas1・nld1・nar1・nobj1) だけで rv32-stone の `vmlinux` を組み，我々の SBI の上で initramfs の init まで起動した ([stage018-ncc.md](stage018-ncc.md) 16・17 章)。残るのは 1 章の完了条件 1，すなわち**全体を stone の OS の中で回すこと**である。ホストに残っている役目は次のとおり。
+
+| 役目 | 今 (Stage 18) | stone の中で要るもの |
+|---|---|---|
+| 前処理 | ホストの cpp | pp の新しい世代 (`-I`・`-isystem`・`-include`・`-D`・`-U`・`-Wp,-MMD`) |
+| make | GNU make | mk の新しい世代 (Kbuild が使う GNU make の部分集合) |
+| sh と小道具 | bash・coreutils | sh の新しい世代と，echo・rm・mkdir・printf・cat・sed・head・mv・ln・grep・expr・wc・getconf・bc |
+| 設定 | 上流の conf (flex / bison) | kconf1 (4 章) を stone の cc で組む |
+| Linux の補助プログラム | ホストの cc | fixdep・mk_elfconfig・modpost・gen_init_cpio・gen_crc32table を stone の cc (cc15as + libc26) で組む。dtc は組まない (5.3) |
+| 駆動 | kb18cc.sh (ホストの sh) | gcc の命令行を受けるドライバ `ncc` (stage018-ncc.md 3 章) |
+
+### 7.1 測ったこと
+
+- **ncc1 の速さ** (stage018-ncc.md 11 章の 3): cc15as で組んだ ncc1 は，stone の OS の上で 1.48 MB の `.i` (2 単位) を起動の分を除いて約 14 秒で訳した (ホスト版と同じ `.s`)。374 単位 388 MB で 1 時間ほどになる。**ncc1 の自己ホストは要らない**
+- **木の大きさ**: Kbuild の依存の記録 (`.*.cmd`) が引くソースと header は 1,556 ファイル 17 MB，Makefile・Kbuild・Kconfig は木全体で 7.6 MB である。木全体 (1.2 GB) を詰める必要はない
+- **sh が走らせる命令** (kblog の shell.log，レシピと `$(shell ...)`): `trap` 33,627・`kill` 16,775 (どのレシピも `trap ...HUP` の形)・`set` 3,433・`echo` 809・`rm` 641・`mkdir` 290・`printf` 222・`make` 214・`cat` 155・`sed` 11・`sh` 10・`head` 9・`mv` 7・`getconf` 6・`ln`・`grep`・`expr`・`wc`・`bc` は数回
+
+### 7.2 進め方 (2026-10-22 決定)
+
+**最初から stone の OS の上で回す。** 我々の道具をホストの cc で組んで測る段は設けない。stone の libc 固有の関数の代わりを書く手間がかからない代わりに，1 回の試行は遅くなる。試行を速くするため，Kbuild を最初から全体で回すのではなく，道具ごとに Kbuild が使う形を取り出した小さな入力で確かめてから合わせる。
+
+| 部 | 内容 | 終わりの判定 |
+|---|---|---|
+| S1 | pp の新しい世代 (`-I`・`-isystem`・`-include`・`-D`・`-U`・`-Wp,-MMD`) | stone の上で，374 の C の単位・`.S`・リンカ台本・asm-offsets の `.i` がホストの cpp と同じになる。依存の記録を fixdep が読める |
+| S2 | ドライバ ncc (C で書く。stage018-ncc.md 3 章) | stone の上で，Kbuild が出す gcc の命令行のまま単位を組める |
+| S3 | mk の新しい世代 | stone の上で Kbuild の Makefile を読んで，回すべき命令を回す |
+| S4 | sh の新しい世代と小道具，bc | Kbuild のレシピと scripts/*.sh が走る |
+| S5 | kconf1・Linux の補助プログラムを stone の cc で組む。OS と libc に環境変数・`popen`・`rename` など足りないもの | 設定の目標と `vmlinux` の目標が stone の中で通る |
+| S6 | 全体を stone の OS の中で回す | 1 章の完了条件 1・2 |
+
+mk・sh・sed などの道具は，これまでの世代と同じく，今の世代 (mk20・sh5・sed3 など) を全文複製した新しい世代に足していく (2026-10-22 決定)。
+
+### 7.3 Stage 18 からの引継ぎ
+
+stage018-ncc.md 4.3 の変更 (除去されずに残った `error` 属性の関数の呼出しを `ebreak` にし警告を出す。rv32-stone では 2 箇所) は承認された (2026-10-22)。
+
+## 8. S1: 前処理器 npp1 (2026-10-22)
+
+`stage019/npp1.c`。C89 で書き，stage018 の道具と同じく cc15as と libc26 で組む (`tools/build/stage019.sh`)。pp21 (stage017) は sc の方言で書かれ，バンドルを入力に取り `-I` しか持たないので，広げずに新しく書いた。
+
+### 8.1 受けるもの
+
+GCC の cc1 の前処理の部分集合で，Linux 5.4 の rv32-stone が使うもの。
+
+- 選択肢: `-I`・`-isystem`・`-iquote`・`-include`・`-D`・`-U`・`-P`・`-x c|assembler-with-cpp`・`-MD <file>`・`-MMD <file>`・`-MF`・`-MT`・`-o`。`-nostdinc`・`-undef`・`-E` は読み捨てる (前もって定義するものは持たず，ドライバが `-include stage019/predef-rv32-gcc46.h` で与える)。知らない選択肢は誤り。入力 `-` は標準入力
+- 展開: 字句の列と hide set による展開 (Prosser の方式)。`#`・`##`・配置用の字句，GNU の `args...` と `, ## __VA_ARGS__`，`__LINE__`・`__FILE__`・`__COUNTER__`，`_Pragma` (被演算子もマクロを展開する。Linux の `__diag` が使う)
+- 指令: `#if`・`#elif` (64 bit の符号付き・符号無しの算術)・`#ifdef`・`#ifndef`・`#else`・`#endif`・`#define`・`#undef`・`#include`・`#include_next`・`#error`・`#warning`・`#pragma` (`once` を含む)・`#line`・`#ident`。include guard を見分けて 2 度目を開かない
+- assembler-with-cpp: 行の頭の `#` で始まる知らない行 (注釈) を残す。閉じない `'` を通す。1 つの字句にならない `##` は誤りにせず 2 つの字句のまま並べる
+
+### 8.2 GCC と合わせたこと
+
+出力の空白と依存の記録は，意味を持たない所も GCC 13 (ホストの cpp) と同じにした。Kbuild はどちらも読む (`gcc-version.sh` は出力の最後の行を読み，fixdep は依存の記録を読む)。
+
+- `-P` では空行を出さない
+- 字句の間の空白は，元に空白があった所と，展開の境 (置換の前後・実引数の前後・空に展開した後) で 2 つの字句がつながって読める所 (`cpp_avoid_paste` の表) にだけ置く。ファイルやマクロの本体で隣り合っていた字句はそのまま並べる (`.data..percpu` を壊さない)
+- 依存の記録: 頭の `./` を除く。`-include` は読む順に記録する。同じファイルを `(書かれた名前, 見つけた探索の階層)` が違う形で 2 度読めば 2 度記録する (`-include` の絶対経路と `#include <...>`，`<linux/taskstats.h>` と `<uapi/linux/taskstats.h>`)。libcpp がファイルをその組で覚えるからである
+- `-include` は作業の場所から先に探す
+- `__LINE__` は字句の行を返す。マクロの本体から来た字句はマクロの名前の行，実引数の中の字句は自身の行になる (複数行にわたる呼出しで閉じ括弧の行にならない)
+- `, ## __VA_ARGS__` は可変長の実引数が書かれていない時 (`F(a)`) だけ読点を消し，書かれて空の時 (`F(a,)`) は残す
+- `#line` は展開してから読み，次の行の番号と `__FILE__` の名前を替える
+- `#if` の `&&`・`||`・`?:` で結果に効かない被演算子は 0 で割っても誤りにしない
+
+### 8.1.1 記憶域
+
+libc26 の `malloc` は K&R の方式で，`free` がアドレス順のフリーリストを線形に辿る。npp1 は展開の度に小さな塊を確保・解放するので，そのままでは断片が増えて stone の上で処理が二乗になる (ホストの libc では表れない)。npp1 は塊を 2 の冪の級に切り上げ，解放した塊を級ごとの列に持って次の確保に使い，libc へは返さない (`xmalloc`・`xrealloc`・`xfree`)。
+
+### 8.3 確かめたこと
+
+| 何を | どう | 結果 |
+|---|---|---|
+| C の単位 374 | `tools/linux19.sh npp`: npp1 の `.i` を ncc1 に通した `.s` を，ホストの cpp の `.i` から作った `.s` と比べ，`.i` も空白を除いてホストの cpp と比べる | 374 すべて一致 |
+| `.S` の単位 12 | `tools/linux19.sh npp <kbout> asm`: nas1 で組み立てた `.o` と，行の中の空白を詰めた `.s` を比べる | 9 一致，1 は `.incbin` の材料が記録の木に無いので `.s` だけ比べて一致，2 は標準入力の単位 (前処理しない) |
+| リンカ台本 2・asm-offsets | `tools/linux19.sh npp-x` | すべて一致 |
+| Kbuild 全体 | `tools/kb18.sh run` を KB18_NPP 付きと無しで回し，`tools/kb18.sh cmp` で比べる | 1,260 個 (`.o`・`.a`・`.so`・`vmlinux`・`Image`・`.config`・依存の記録 `.cmd` 637) がすべて一致。起動 (tools/boot18.sh) も通る |
+| stone の上 | `tools/npp19.sh stone`: stone の npp1 に Kbuild と同じ命令行を走らせ，ホストの npp1 と `.i`・`.d` をバイト単位で比べる | `mm/highmem.o`・`kernel/exit.o`・`arch/riscv/kernel/head.o`・`vmlinux.lds`・`asm-offsets.s` がすべて一致 (tests/stage019)。1 単位は起動と詰める時間を含めて約 2.5 分 |
+
+比べる相手のホストの cpp には `-U__has_attribute` を渡す (`linux19.sh` の `PP=ref`)。GCC 13 の cpp は `__has_attribute` を組み込みで持ち，GCC 4.6 は持たない。Linux は無い時に `__GCC4_has_attribute_*` の表を引くので，そのままでは `__designated_init__` などの属性が GCC 4.6 と違う形で付く。
+
+### 8.4 S1 で直した Stage 18 の道具
+
+- `tools/kb18cc.sh`: 依存を求められていない時にも `-MT` を付けていた。gcc は `-MD` / `-MMD` の無い `-MT` を誤りとするので，Kconfig と Kbuild の試し (`cc-option` など，`-o` を伴うもの) がすべて落ちていた。Stage 18 の rv32-stone はそのため `-march=rv32ima` など少ない選択肢で組まれていた。直した後は試しが通り，`CONFIG_CC_HAS_ASM_INLINE` などが入る。この設定でも起動は通る
+- `tools/kb18cc.sh`: 中間の `.i`・`.s` を出力の隣に置いていたので，`-o /dev/null` の試しを並べて走らせると取り合った。一時ファイルに移した
+- `tools/kb18.sh`: `KBUILD_BUILD_TIMESTAMP`・`KBUILD_BUILD_USER`・`KBUILD_BUILD_HOST` を固定し，同じ入力から同じ `vmlinux` を作る

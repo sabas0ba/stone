@@ -1,0 +1,4 @@
+# a comment line in assembly
+ li a0, 'x
+sym_1: .word 0
+ .section .initcall0 .init

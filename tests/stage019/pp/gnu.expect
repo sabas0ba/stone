@@ -1,0 +1,16 @@
+f(a); f(a, b, c); g(a); g(a , b); h(); h(1, 2);
+#pragma GCC diagnostic push
+int p;
+int c0 = 0, c1 = 1;
+unsigned_ok;
+elif_ok;
+cond_ok;
+guard_once;
+inc1_next;
+inc2_last;
+x y; ab12; z; - -1;
+v(1) v(1,) v(1, 2);
+32 32 34 33;
+100 "logical.c";
+sc_ok1;
+sc_ok2;

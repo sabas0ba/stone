@@ -17,7 +17,9 @@
 # 読み捨てる。
 #
 # 道具は環境変数 KB18_BIN (ncc1・nas1・nld1・nobj1 の置き場) から，
-# リポジトリの根は KB18_ROOT から取る。
+# リポジトリの根は KB18_ROOT から取る。KB18_NPP に npp1 の経路があれば，
+# ホストの cpp の代わりに npp1 で前処理する (docs/stage019-linux.md 8 章)。
+# KB18_NPP_LOG (置き場) があれば npp1 の命令行を出力ごとに残す。
 set -eu
 
 root=${KB18_ROOT:?KB18_ROOT が無い}
@@ -100,14 +102,39 @@ preproc() {
     if [ "$cmodel" = medany ]; then
         addc -U__riscv_cmodel_medlow -D__riscv_cmodel_medany=1
     fi
-    # 依存の印の目標は出力の名前にする (fixdep が読む)
-    [ -n "$out" ] && addc -MT "$out"
+    # 依存の印の目標は出力の名前にする (fixdep が読む)。依存を求められた時だけ
+    # 付ける (gcc は -MD / -MMD の無い -MT を誤りとし，Kconfig の試しが落ちる)
+    if [ -n "$out" ] && grep -q -e '^-MM\{0,1\}D$' -e '^-Wp,-MM\{0,1\}D,' "$cppargs"; then
+        addc -MT "$out"
+    fi
+    if [ -n "${KB18_NPP:-}" ]; then
+        # npp1 は cc1 の形の選択肢を読む: -Wp,-MMD,<f> は -MMD <f>。-std は持たない
+        nargs=$(mktemp)
+        tmps="$tmps $nargs"
+        {
+            printf '%s\n' -P -include "$predef"
+            awk '/^-Wp,-MM?D,/ { i = index($0, ","); j = index(substr($0, i + 1), ",");
+                                 print substr($0, i + 1, j - 1); print substr($0, i + j + 1); next }
+                 { print }' "$cppargs"
+            printf '%s\n' -x "$xl" "$src"
+        } > "$nargs"
+        # KB18_NPP_LOG があれば，出力ごとに作業の場所と選択肢 (-o を除く。1 行 1 個)
+        # を残す (tests/stage019 が stone の上で同じ前処理を走らせる)
+        if [ -n "${KB18_NPP_LOG:-}" ] && [ -n "$out" ]; then
+            { pwd; cat "$nargs"; } > "$KB18_NPP_LOG/$(printf '%s' "$out" | tr '/' '_')"
+        fi
+    fi
     (
         IFS='
 '
         set -f
-        # shellcheck disable=SC2046,SC2086
-        "$HOSTCC" -E -P -undef $std -include "$predef" $(cat "$cppargs") -x "$xl" "$src" -o "$dst"
+        if [ -n "${KB18_NPP:-}" ]; then
+            # shellcheck disable=SC2046
+            "$KB18_NPP" $(cat "$nargs") -o "$dst"
+        else
+            # shellcheck disable=SC2046,SC2086
+            "$HOSTCC" -E -P -undef $std -include "$predef" $(cat "$cppargs") -x "$xl" "$src" -o "$dst"
+        fi
     )
 }
 
@@ -140,8 +167,10 @@ case "$mode" in
     [ -n "$out" ] || die "$mode に -o が無い"
     src=$1
     l=$(langof "$src")
-    i="$out.kb18.i"
-    s="$out.kb18.s"
+    # 中間の .i と .s は一時ファイルに置く。出力の隣に置くと，Kconfig の試し
+    # (-o /dev/null) を並べて走らせた時に /dev/null.* を取り合う
+    i=$(mktemp)
+    s=$(mktemp)
     tmps="$tmps $i $s"
     preproc "$src" "$i" "$l"
     if [ "$l" = c ]; then

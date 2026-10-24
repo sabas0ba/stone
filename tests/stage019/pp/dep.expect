@@ -1,0 +1,1 @@
+dep.o: dep.c pre.h guard.h inc1/../guard.h
