@@ -214,6 +214,8 @@ static char *out;
 static char *lang;                      /* -x の値 (0 は拡張子で決める) */
 static int medany;
 static int want_deps;                   /* -MD / -MMD (-Wp, の形を含む) */
+static char *dep_opt;                   /* 単独で書かれた -MD / -MMD */
+static char *dep_file;                  /* -MF の値 */
 static struct vec cppargs, ldargs, inputs;
 
 static int has_prefix(const char *s, const char *p)
@@ -296,7 +298,7 @@ static void parse(int argc, char **argv)
         } else if (strcmp(a, "-I") == 0 || strcmp(a, "-isystem") == 0 || strcmp(a, "-include") == 0
                    || strcmp(a, "-imacros") == 0 || strcmp(a, "-D") == 0 || strcmp(a, "-U") == 0
                    || strcmp(a, "-idirafter") == 0 || strcmp(a, "-iquote") == 0
-                   || strcmp(a, "-MF") == 0 || strcmp(a, "-MT") == 0 || strcmp(a, "-MQ") == 0) {
+                   || strcmp(a, "-MT") == 0 || strcmp(a, "-MQ") == 0) {
             if (!next)
                 die("選択肢の後に値が要る", a);
             vadd(&cppargs, a);
@@ -318,8 +320,15 @@ static void parse(int argc, char **argv)
         } else if (has_prefix(a, "-Wp,"))
             vadd(&cppargs, a + 4);
         else if (strcmp(a, "-MD") == 0 || strcmp(a, "-MMD") == 0) {
-            vadd(&cppargs, a);
+            /* npp1 は -MD / -MMD の次に記録の名前を取る。-MF と合わせて
+             * preproc で渡す */
+            dep_opt = xstrdup(a);
             want_deps = 1;
+        } else if (strcmp(a, "-MF") == 0) {
+            if (!next)
+                die("-MF の後に名前が要る", 0);
+            dep_file = xstrdup(next);
+            i++;
         } else if (has_prefix(a, "-mcmodel="))
             medany = strcmp(a + 9, "medany") == 0;
         else if (has_prefix(a, "-Wl,"))
@@ -382,6 +391,25 @@ static char *dep_target(const char *src)
     return t;
 }
 
+/* -MF の無い -MD / -MMD の記録の名前。GCC と同じく -o の名前の拡張子を .d に
+ * 替え，-o が無ければ入力の名前から作る */
+static char *dep_default(const char *src)
+{
+    char *t = dep_target(out ? out : src);
+    t[strlen(t) - 1] = 'd';
+    if (out && strchr(out, '/')) {
+        /* dep_target は場所を除くので，-o の場所を戻す */
+        const char *b = strrchr(out, '/');
+        long n = (long)(b - out) + 1;
+        char *r = xmalloc(n + (long)strlen(t) + 1);
+        memcpy(r, out, (size_t)n);
+        strcpy(r + n, t);
+        free(t);
+        return r;
+    }
+    return t;
+}
+
 /* 前処理する。dst が 0 なら標準出力へ */
 static int preproc(const char *src, const char *dst, int l)
 {
@@ -394,6 +422,13 @@ static int preproc(const char *src, const char *dst, int l)
     vadd(&a, "-include");
     vadd(&a, env_or("NCC_PREDEF", NCC_LIB "/predef.h"));
     vcat(&a, &cppargs);
+    if (dep_opt) {
+        vadd(&a, dep_opt);
+        vadd(&a, dep_file ? dep_file : dep_default(src));
+    } else if (dep_file) {
+        vadd(&a, "-MF");
+        vadd(&a, dep_file);
+    }
     if (medany) {
         vadd(&a, "-U__riscv_cmodel_medlow");
         vadd(&a, "-D__riscv_cmodel_medany=1");
