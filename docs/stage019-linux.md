@@ -274,3 +274,13 @@ libc26 の `malloc` は K&R の方式で，`free` がアドレス順のフリー
 | 引数の文字列の全長 (`NARGS`) | 4096 バイト | 32768 バイト |
 
 引数はユーザスタックの上端の下に写すので，フレームスタック 16 MiB のうち約 36 KiB を占める。syscall と配置は変えていない。7.2 では OS の変更を S5 に置いたが，S2 の終わりの判定 (stone の上で Kbuild の gcc の命令行のまま組める) に要るので S2 で入れた。`tools/os18.sh` は `OS18_KERNEL` でカーネルを選べる (既定は kernel29 のまま)。
+
+### 9.3 確かめたこと
+
+| 何を | どう | 結果 |
+|---|---|---|
+| Kbuild 全体 | `tools/kb18.sh run` を `KB18_NCC` (ホスト版の ncc) で回し，ホストの cpp で回した基準と `tools/kb18.sh cmp` で比べる | 1,260 個 (`Image` と依存の記録 `.cmd` を含む) がすべて一致。中間ファイルは残らない |
+| stone の上 | `tools/ncc19.sh stone`: Kbuild の記録の gcc の命令行を，頭の gcc を `/lib/ncc/ncc` に替えただけでそのまま kernel30 の上で走らせ，ホスト版の ncc と出力・依存の記録をバイト単位で比べる | `mm/highmem.o` (`-c` の `.c`)・`arch/riscv/kernel/head.o` (`.S`)・`asm-offsets.s` (`-S`)・`vdso.so.dbg` (`-shared -s` の結合) がすべて一致。4 つで約 4 分 |
+| 引数の上限 | 101 語の引数で ncc を起動する (tests/stage019) | kernel30 は通り，kernel29 は通らない |
+
+`-Wl,-T,<台本>` のように `-Wl,` の中に書かれた名前も，stone の根へ写すファイルとして拾う必要があった (ncc19.sh)。

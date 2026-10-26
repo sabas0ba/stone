@@ -109,8 +109,12 @@ stone() {
         fi
         # 3. 命令が名指すファイルと依存の記録のファイル
         {
+            # -Wl,a,b の中の名前 (-Wl,-T,<台本>) も拾う
             for w in $args; do
-                printf '%s\n' "$w"
+                case "$w" in
+                -Wl,*) printf '%s\n' "${w#-Wl,}" | tr ',' '\n' ;;
+                *) printf '%s\n' "$w" ;;
+                esac
             done
             [ -z "$dep" ] || dep_files "$work/ref/$key.d"
         } | while IFS= read -r f; do
