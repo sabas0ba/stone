@@ -10,7 +10,8 @@
 #
 # kernel29 は RAM 2 GiB を使い，sfs の窓は RAM ファイルの 0x6000_0000 から
 # 先にある (tools/gcc17.sh の run_cc1 と同じ)。イメージは 64 MiB 取る。
-# 項目の数の上限は既定で 1024。多い根は OS18_MAXENT で広げる
+# 項目の数の上限は既定で 1024。多い根は OS18_MAXENT で広げる。
+# カーネルは OS18_KERNEL (tmp/build の下の名前。既定 kernel29.bin) で替えられる
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -25,7 +26,8 @@ run() {
     root=$1
     out=$2
     [ -f "$root/go.sh" ] || die "go.sh が無い: $root"
-    for f in kernel29.bin sh2.bin; do
+    kernel=${OS18_KERNEL:-kernel29.bin}
+    for f in "$kernel" sh2.bin; do
         [ -s "tmp/build/$f" ] || die "OS の生成物が無い: tmp/build/$f (sh tools/build.sh stage017)"
     done
     cp tmp/build/sh2.bin "$root/sh2"
@@ -45,7 +47,7 @@ run() {
     *) rel=$w ;;
     esac
     STONE_QEMU_RAMFILE="$rel/run.ram" STONE_QEMU_RAM=2G \
-        sh tools/env.sh qemu tmp/build/kernel29.bin < /dev/null > "$out.console" 2>&1 || true
+        sh tools/env.sh qemu "tmp/build/$kernel" < /dev/null > "$out.console" 2>&1 || true
     dd if="$w/run.ram" of="$w/out.img" bs=64K iflag=skip_bytes,count_bytes \
         skip="$run_win" count="$imgsize" 2> /dev/null
     sh tools/sfs4.sh unpack "$w/out.img" "$out" > /dev/null \

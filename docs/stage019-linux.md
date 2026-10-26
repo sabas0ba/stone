@@ -243,3 +243,34 @@ libc26 の `malloc` は K&R の方式で，`free` がアドレス順のフリー
 - `tools/kb18cc.sh`: 依存を求められていない時にも `-MT` を付けていた。gcc は `-MD` / `-MMD` の無い `-MT` を誤りとするので，Kconfig と Kbuild の試し (`cc-option` など，`-o` を伴うもの) がすべて落ちていた。Stage 18 の rv32-stone はそのため `-march=rv32ima` など少ない選択肢で組まれていた。直した後は試しが通り，`CONFIG_CC_HAS_ASM_INLINE` などが入る。この設定でも起動は通る
 - `tools/kb18cc.sh`: 中間の `.i`・`.s` を出力の隣に置いていたので，`-o /dev/null` の試しを並べて走らせると取り合った。一時ファイルに移した
 - `tools/kb18.sh`: `KBUILD_BUILD_TIMESTAMP`・`KBUILD_BUILD_USER`・`KBUILD_BUILD_HOST` を固定し，同じ入力から同じ `vmlinux` を作る
+
+## 9. S2: ドライバ ncc と kernel30 (2026-10-26)
+
+### 9.1 ncc
+
+`stage019/ncc.c`。Kbuild が CROSS_COMPILE の gcc として呼ぶドライバで，Stage 18 の `tools/kb18cc.sh` (ホストの sh で書いた同じ役目のもの) を C で書き直したものである。命令行を読み，npp1・ncc1・nas1・nld1 を別のプログラムとして順に起動する (2026-10-26 決定。道具を 1 つに結合すると起動は速いが，npp1 と ncc1 を結合できる形に直す手間がかかる)。
+
+| 形 | 動き |
+|---|---|
+| `-E` | npp1 だけ。`-o` が無ければ標準出力へ |
+| `-S` / `-c` の `.c` | npp1 → ncc1 (→ nas1) |
+| `-c` の `.S` | npp1 (assembler-with-cpp) → nas1 |
+| `-c -x assembler` | nas1 (前処理しない) |
+| それ以外 | nld1 で結合する (`-Wl,` を分け，`-shared`・`-s`・`-r`・`-T` を渡す)。入力が `-` なら読み捨てて通す (Kconfig の試し) |
+| `--version`・`-dumpversion`・`-print-file-name=…`・`-v` | GCC 4.6.4 として答える (kb18cc.sh と同じ文字列) |
+
+- 前処理の選択肢: `-Wp,-MMD,<f>` は `-MMD <f>` にする。依存を求められた時だけ `-MT <出力>` を足す (`-o` が無ければ GCC と同じく入力の名前から `.o` を作る)。処理系の前定義は `-include` で必ず渡す。`-mcmodel=medany` は npp1 (`__riscv_cmodel_*`) と ncc1 に伝える。知らない `-W*`・`-f*`・`-m*` などは読み捨てる
+- 置き場: 道具・前定義・処理系の include の階層は，環境変数 `NCC_BIN`・`NCC_PREDEF`・`NCC_INCLUDE`，無ければ `/lib/ncc` の下を使う。stone の OS は今は環境変数を渡さない (libc26 の `getenv` は常に 0) ので，stone では `/lib/ncc` に置く
+- 中間ファイル: 出力の名前に `.ncc.i` / `.ncc.s` を足した所に置き，終わりに消す。出力が `/dev/` の下 (Kconfig の試しの `-o /dev/null`) か無い時は，作業の場所に `ncc-tmp-<番号>` で置く。ホストでは番号はプロセスの番号で，並べて走る試しでも取り合わない。stone の走行は逐次で `getpid` は常に 1 を返すが，取り合う相手が居ない
+- 子の起動: stone では libc26 の `spawn`，ホスト (`-DNCC_HOST`) では `fork`・`execv`・`waitpid`。同じソースを両方で組む
+
+### 9.2 kernel30
+
+`stage019/kernel30.c`。kernel29 の全文複製に spawn の引数の上限の拡大だけを入れた。Kbuild の gcc の命令行は最大 87 語・2.2 KB ある (rv32-stone の全命令の `.cmd` から数えた) が，kernel29 は 64 語・4096 バイトまでしか写さず，65 語目で E2BIG を返す。
+
+| | kernel29 | kernel30 |
+|---|---|---|
+| 引数の数 (`NARGV`) | 64 | 1024 |
+| 引数の文字列の全長 (`NARGS`) | 4096 バイト | 32768 バイト |
+
+引数はユーザスタックの上端の下に写すので，フレームスタック 16 MiB のうち約 36 KiB を占める。syscall と配置は変えていない。7.2 では OS の変更を S5 に置いたが，S2 の終わりの判定 (stone の上で Kbuild の gcc の命令行のまま組める) に要るので S2 で入れた。`tools/os18.sh` は `OS18_KERNEL` でカーネルを選べる (既定は kernel29 のまま)。
