@@ -3,7 +3,8 @@
 #
 #   kb18.sh run <出力> <設定の目標> [make の変数=値...]
 #       O=<出力> に設定を作り，vmlinux と arch/riscv/boot/Image まで組む。道具は CROSS_COMPILE で
-#       我々のものに差し替える。KB18_NPP を与えると前処理を npp1 で行う (tools/kb18cc.sh)
+#       我々のものに差し替える。KB18_NPP を与えると前処理を npp1 で行う (tools/kb18cc.sh)。
+#       KB18_NCC にドライバ ncc (ホスト版) の経路を与えると，gcc として kb18cc.sh の代わりに置く
 #
 #   kb18.sh cmp <出力 1> <出力 2>
 #       2 つの出力の生成物と依存の記録を比べる
@@ -37,7 +38,23 @@ make_tools() {
     for t in ncc1 nas1 nld1 nar1 nobj1; do
         [ -x "$host/$t" ] || die "$t が無い (sh tools/ncc18.sh host)"
     done
-    printf '#!/bin/sh\nexec sh "%s" "$@"\n' "$repo_root/tools/kb18cc.sh" > "$d/riscv32-stone-gcc"
+    if [ -n "${KB18_NCC:-}" ]; then
+        # ドライバ ncc (stage019/ncc.c のホスト版) を gcc として置く。道具は
+        # 1 か所に並べ，処理系の資料は kb18cc.sh と同じ経路を渡す (依存の記録と
+        # 命令行の -isystem が同じになるように)
+        [ -x "$KB18_NCC" ] || die "ncc が無い: $KB18_NCC"
+        [ -x "$repo_root/tmp/npp1/npp1" ] || die "npp1 が無い (tmp/npp1/npp1)"
+        mkdir -p "$d/ncc-bin"
+        ln -sf "$repo_root/tmp/npp1/npp1" "$d/ncc-bin/npp1"
+        for t in ncc1 nas1 nld1; do
+            ln -sf "$host/$t" "$d/ncc-bin/$t"
+        done
+        printf '#!/bin/sh\nNCC_BIN="%s" NCC_PREDEF="%s" NCC_INCLUDE="%s" exec "%s" "$@"\n' \
+            "$d/ncc-bin" "$repo_root/stage019/predef-rv32-gcc46.h" "$repo_root/stage019/include" \
+            "$KB18_NCC" > "$d/riscv32-stone-gcc"
+    else
+        printf '#!/bin/sh\nexec sh "%s" "$@"\n' "$repo_root/tools/kb18cc.sh" > "$d/riscv32-stone-gcc"
+    fi
     printf '#!/bin/sh\nexec "%s" "$@"\n' "$host/nld1" > "$d/riscv32-stone-ld"
     printf '#!/bin/sh\nexec "%s" "$@"\n' "$host/nar1" > "$d/riscv32-stone-ar"
     for t in nm objcopy objdump; do

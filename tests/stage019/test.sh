@@ -14,10 +14,18 @@
 #   6. stone の OS の上の npp1 が，Linux の C・.S・リンカ台本・asm-offsets で，
 #      ホストの cc で組んだ npp1 と同じ .i と .d を出すこと
 #
+# S2 (ドライバ ncc と kernel30。同 9 章) で見るのは
+#
+#   7. Kbuild を ncc で回した出力が，ホストの cpp で回した出力と一致すること
+#   8. stone の OS (kernel30) の上で，ncc が Kbuild の gcc の命令行のまま
+#      .c・.S・-S・結合 (-shared) を組み，ホストの ncc と同じ出力と依存の記録
+#      を出すこと
+#   9. kernel30 が 64 語を超える引数を子に渡せること (kernel29 は E2BIG)
+#
 # 2〜4 の期待は手で書いた (2 は規格の文面，3・4 はホストの gcc で一度確かめた)。
 # 比べる時は，空白の量に意味の無いもの (2) は空白を除き，空白の位置を見るもの
 # (3・4) は行の中の空白の量だけ詰める。
-# 5・6 は Linux のソースと flex (tools/kconfref.sh flex) が要るので，無ければ
+# 5〜8 は Linux のソースと flex (tools/kconfref.sh flex) が要るので，無ければ
 # 飛ばし，飛ばしたことを出す。
 set -u
 
@@ -105,19 +113,23 @@ section "npp1: Kbuild をホストの cpp で回した出力と一致する (doc
 linux=docs/external/linux54
 if [ -f "$linux/Makefile" ] && [ -x tmp/kconfref/flex/src/flex ] && command -v "$HOSTCC" > /dev/null 2>&1; then
     sh tools/ncc18.sh host > /dev/null 2>&1
-    mkdir -p tmp/npp1 "$out/log"
-    "$HOSTCC" -std=c89 -pedantic -Wno-long-long -Wall -Wextra -Werror -O1 \
-        -o tmp/npp1/npp1 stage019/npp1.c
-    report $? "host: npp1 をホストの cc で組む (C89 で警告無し)"
+    mkdir -p "$out/log"
+    sh tools/ncc19.sh host > /dev/null 2>&1
+    report $? "host: npp1 と ncc をホストの cc で組む (C89 で警告無し)"
     cfg="KCONFIG_ALLCONFIG=$repo_root/stage019/rv32-stone.config"
-    rm -rf "$out/kb-ref" "$out/kb-npp"
+    rm -rf "$out/kb-ref" "$out/kb-npp" "$out/kb-ncc"
     sh tools/kb18.sh run "$out/kb-ref" allnoconfig "$cfg" > "$out/kb-ref.log" 2>&1 &
     ref_pid=$!
+    KB18_NCC="$repo_root/tmp/npp1/ncc" \
+        sh tools/kb18.sh run "$out/kb-ncc" allnoconfig "$cfg" > "$out/kb-ncc.log" 2>&1 &
+    ncc_pid=$!
     KB18_NPP="$repo_root/tmp/npp1/npp1" KB18_NPP_LOG="$repo_root/$out/log" \
         sh tools/kb18.sh run "$out/kb-npp" allnoconfig "$cfg" > "$out/kb-npp.log" 2>&1
     r1=$?
     wait "$ref_pid"
     r2=$?
+    wait "$ncc_pid"
+    r3=$?
     [ $r1 -eq 0 ] && [ $r2 -eq 0 ]
     report $? "kbuild: npp1 とホストの cpp の両方で vmlinux と Image まで組む"
     sh tools/kb18.sh cmp "$out/kb-ref" "$out/kb-npp" > "$out/kb-cmp.log" 2>&1
@@ -134,8 +146,60 @@ if [ -f "$linux/Makefile" ] && [ -x tmp/kconfref/flex/src/flex ] && command -v "
         grep -q "^$u	same\$" "$out/stone.tsv"
         report $? "stone: $u の .i と .d がホストの npp1 と一致する"
     done
+
+    section "ncc: Kbuild をドライバ ncc で回した出力が一致する (docs/stage019-linux.md 9 章)"
+
+    [ $r3 -eq 0 ]
+    report $? "kbuild: ncc を gcc として vmlinux と Image まで組む"
+    sh tools/kb18.sh cmp "$out/kb-ref" "$out/kb-ncc" > "$out/kb-cmp-ncc.log" 2>&1
+    r=$?
+    tail -n 1 "$out/kb-cmp-ncc.log"
+    report $r "kbuild: ホストの cpp で回したものと生成物と依存の記録 (.cmd) がすべて一致する"
+    left=$(find "$out/kb-ncc" -name '*.ncc.[is]' -o -name 'ncc-tmp-*' | wc -l)
+    [ "$left" -eq 0 ]
+    report $? "kbuild: ncc の中間ファイルが残らない"
+
+    section "ncc: stone の上で Kbuild の gcc の命令行のまま組める (kernel30)"
+
+    nunits="mm/highmem.o arch/riscv/kernel/head.o arch/riscv/kernel/asm-offsets.s arch/riscv/kernel/vdso/vdso.so.dbg"
+    # shellcheck disable=SC2086
+    sh tools/ncc19.sh stone "$out/kb-ncc" "$out/nstone" $nunits > "$out/nstone.tsv" 2> "$out/nstone.err"
+    for u in $nunits; do
+        case "$u" in
+        *.o) what=".c を -c で組む" ;;
+        *.s) what=".c を -S で訳す" ;;
+        *) what="-shared -s で結合する" ;;
+        esac
+        case "$u" in
+        */head.o) what=".S を -c で組む" ;;
+        esac
+        grep -q "^$u	same\$" "$out/nstone.tsv"
+        report $? "stone: $u ($what) の出力と依存の記録がホストの ncc と一致する"
+    done
 else
     echo "skip Linux のソースか conf が無い (sh tools/fetch.sh linux54，sh tools/kconfref.sh flex)。**この節は検査していない**"
 fi
+
+section "kernel30: 64 語を超える引数を子に渡す (docs/stage019-linux.md 9 章)"
+
+# ncc -dumpversion に 100 語の読み捨てる引数を付けて起動する。kernel29 は
+# 65 語目で E2BIG を返して起動しない
+argroot="$out/args/root"
+mkdir -p "$argroot"
+cp tmp/build/ncc "$argroot/ncc"
+{
+    printf 'ncc -dumpversion'
+    for i in $(seq 1 100); do
+        printf ' -Wunused-%03d' "$i"
+    done
+    printf '\n'
+    echo 'echo "rc args $?"'
+} > "$argroot/go.sh"
+OS18_KERNEL=kernel30.bin sh tools/os18.sh run "$argroot" "$out/args/k30"
+grep -q '^4.6.4' "$out/args/k30.console" && grep -q '^rc args 0$' "$out/args/k30.console"
+report $? "kernel30: 101 語の引数で起動した ncc が答える"
+OS18_KERNEL=kernel29.bin sh tools/os18.sh run "$argroot" "$out/args/k29"
+! grep -q '^4.6.4' "$out/args/k29.console" && ! grep -q '^rc args 0$' "$out/args/k29.console"
+report $? "kernel29: 同じ起動は通らない (上限 64 語。比べる基準)"
 
 summary
