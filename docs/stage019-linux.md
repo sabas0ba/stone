@@ -284,3 +284,36 @@ libc26 の `malloc` は K&R の方式で，`free` がアドレス順のフリー
 | 引数の上限 | 101 語の引数で ncc を起動する (tests/stage019) | kernel30 は通り，kernel29 は通らない |
 
 `-Wl,-T,<台本>` のように `-Wl,` の中に書かれた名前も，stone の根へ写すファイルとして拾う必要があった (ncc19.sh)。
+
+## 10. S3: mk の新しい世代 mk21 (2026-10-28，設計)
+
+### 10.1 測ったこと
+
+rv32-stone の Kbuild が読む Makefile は 231 個・384 KB・11,007 行 (トップの Makefile，scripts/Kbuild.include・Makefile.*，arch/riscv/Makefile，降りる階層の Makefile と Kbuild)。サブ make は 212 回起動される。2 度目からは各階層の `.<名前>.cmd` (計 16 MB) も -include で読む。
+
+| 種類 | 使われ方 (出現の数) |
+|---|---|
+| 関数 | call 244・if 124・filter 52・patsubst 51・addprefix 50・shell 48・wildcard 43・filter-out 40・sort 38・subst 37・foreach 33・strip 20・notdir 19・dir 17・findstring 16・firstword 10・basename 10・error 8・origin 7・eval 7・abspath 6・warning 5・realpath 5・addsuffix 4・words 3・lastword 3 |
+| 指令 | ifeq 110・ifdef 97・ifneq 65・export 59・else 49・include 42・define 10・ifndef 9・-include 9・unexport 3 |
+| 特別な目標 | .PHONY・.DELETE_ON_ERROR・.SECONDARY・.SECONDEXPANSION |
+| 自動変数 | `$@` 235・`$<` 68・`$*` 15・`$(@D)` 14・`$^` 7・`$(@F)` 7・`$?` 2 |
+| 規則の形 | 静的型規則 12・順序だけの依存 (`|`) 1・置換参照 (`$(m:.o=-y)`) 9 |
+| make の変数 | MAKECMDGOALS 26・MAKEFLAGS 14・CURDIR 4・MAKEFILE_LIST 3・MAKE_VERSION 2 |
+
+mk20 (1,743 行) は固定の大きさの表 (規則 256・変数 512・展開 16 KiB) で，`define`・`eval`・`export`・静的型規則・複数の目標・二次展開・読み込んだ Makefile の作り直しを持たない。
+
+### 10.2 決めたこと (2026-10-28)
+
+- mk21 は mk20 を全文複製したうえで作り直す。表は動的に確保し，規則の扱い (複数の目標・静的型規則・順序だけの依存・目標特有と型特有の変数・`.SECONDEXPANSION`) を作り直す。GNU make のソースは参照せず，GNU make の文書が定める振舞いを実装する
+- 環境変数は S3 で OS に入れる (kernel31・libc27)。mk21 は `export` した変数と `MAKEFLAGS` を環境として子へ渡す。7.2 では S5 に置いていた
+- 確かめは ncc と同じく，mk21 をホスト向けにも組み (`MK_HOST`)，ホストの sh で命令を走らせて Kbuild 全体を GNU make と比べる。stone の上では，S4 の sh を待たずに確かめられる範囲 (小さな記述と sh2 で走る命令) で確かめる
+
+### 10.3 mk21 が持つもの
+
+- 読み: 行の継続，注釈，`=`・`:=`・`::=`・`+=`・`?=`，`override`・`export`・`unexport`，`define`/`endef`，`ifeq`/`ifneq`/`ifdef`/`ifndef`/`else` (`else ifeq` の形を含む)，`include`/`-include`/`sinclude`
+- 展開: `$(v)`・`${v}`・`$v`，名前の展開，置換参照，関数 (10.1 の全部と `info`・`word`・`wordlist`・`suffix`・`and`・`value`・`flavor`)。`eval` は展開した文字列を記述として読む
+- 規則: 複数の目標，型規則 (複数の目標の型規則は 1 回で全部を作る)，静的型規則，順序だけの依存，`::`，目標特有と型特有の変数，`.PHONY`・`.DELETE_ON_ERROR`・`.SECONDARY`・`.SECONDEXPANSION`
+- 実行: 命令は行ごとに展開し，行ごとに `$(SHELL) -c` で走らせる (stone では S4 の sh。今は sh2 に一時ファイルで渡す)。`@`・`-`・`+` の頭。`$(MAKE)` を含む行は `-n` でも走らせる。古さは時刻で判定する
+- 再帰: `$(MAKE)` は自身。命令行の変数の代入と選択肢は `MAKEFLAGS` で子へ渡す。`MAKELEVEL`・`CURDIR`・`MAKECMDGOALS`・`MAKEFILE_LIST`。`MAKE_VERSION` は比べる相手の GNU make と同じ 4.4.1 と答える
+- 読み込んだ Makefile に規則があれば作り直し，作り直したら最初から読み直す (Kbuild の `include/config/auto.conf`)
+- 選択肢: `-f`・`-C`・`-n`・`-s`・`-k`・`-r`・`-R`・`-B`・`-j` (受けて逐次に走らせる)・`--no-print-directory`・`V=` などの変数
