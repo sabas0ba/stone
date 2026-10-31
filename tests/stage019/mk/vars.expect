@@ -1,0 +1,11 @@
+A=a b C=a b c D=d1 d2 E=e
+G=x.c y.c z.c x.o y.o z.h -G u -G v
+H=[1] [2] [3] I=[p,q] [r,]
+J=yes no z b
+K=a b c 3 a b b b c
+L=a/ ./ b.c c a/b d.e/f .c p-a p-b a.x b.x
+M=bAnAnA a b an a.c c.h b.o
+N=file undefined undefined recursive simple
+O=eq P=def Q=undef R=from-eval S=set-S1 set-S2
+first
+second

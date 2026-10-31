@@ -22,6 +22,13 @@
 #      を出すこと
 #   9. kernel30 が 64 語を超える引数を子に渡せること (kernel29 は E2BIG)
 #
+# S3 (mk21。同 10 章) で見るのは
+#
+#  10. Kbuild を GNU make の代わりに mk21 で回した出力が GNU make のものと一致し，
+#      2 度目に走る命令の列も行ごとに一致すること
+#  11. 小さな記述 (tests/stage019/mk) を stone の上の mk21 で走らせた出力が，
+#      GNU make で作った期待と一致すること
+#
 # 2〜4 の期待は手で書いた (2 は規格の文面，3・4 はホストの gcc で一度確かめた)。
 # 比べる時は，空白の量に意味の無いもの (2) は空白を除き，空白の位置を見るもの
 # (3・4) は行の中の空白の量だけ詰める。
@@ -176,9 +183,54 @@ if [ -f "$linux/Makefile" ] && [ -x tmp/kconfref/flex/src/flex ] && command -v "
         grep -q "^$u	same\$" "$out/nstone.tsv"
         report $? "stone: $u ($what) の出力と依存の記録がホストの ncc と一致する"
     done
+
+    section "mk21: Kbuild を GNU make の代わりに回して一致する (docs/stage019-linux.md 10 章)"
+
+    sh tools/mk21.sh host > /dev/null 2>&1
+    report $? "host: mk21 をホストの cc で組む (C89 で警告無し)"
+    rm -rf "$out/kb-mk"
+    KB18_MAKE="$repo_root/tmp/mk21/mk21" KB18_NCC="$repo_root/tmp/npp1/ncc" \
+        sh tools/kb18.sh run "$out/kb-mk" allnoconfig "$cfg" > "$out/kb-mk.log" 2>&1
+    report $? "kbuild: mk21 で設定と vmlinux・Image まで組む"
+    sh tools/kb18.sh cmp "$out/kb-ref" "$out/kb-mk" > "$out/kb-cmp-mk.log" 2>&1
+    r=$?
+    tail -n 1 "$out/kb-cmp-mk.log"
+    report $r "kbuild: GNU make で回したものと生成物と依存の記録 (.cmd) がすべて一致する"
+    # 2 度目: 記録 (.cmd) を読み，GNU make と同じ命令だけを走らせる
+    for t in ref mk; do
+        mkprog=make
+        [ "$t" = mk ] && mkprog="$repo_root/tmp/mk21/mk21"
+        o="$repo_root/$out/kb-$t"
+        (
+            KB18_ROOT=$repo_root KB18_BIN=$repo_root/tmp/nas1/host
+            KBUILD_BUILD_TIMESTAMP='Thu Jan  1 00:00:00 UTC 1970' KBUILD_BUILD_USER=stone KBUILD_BUILD_HOST=stone
+            export KB18_ROOT KB18_BIN KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_USER KBUILD_BUILD_HOST
+            "$mkprog" -k -C "$linux" O="$o" ARCH=riscv CROSS_COMPILE="$o/kb18/bin/riscv32-stone-" \
+                LEX="$repo_root/tmp/kconfref/flex/src/flex" YACC=bison V=1 vmlinux Image
+        ) 2>&1 | grep -v 'Entering directory\|Leaving directory\|warning: #warning\|警告: #warning' \
+            | sed "s|$o|@|g; s|$repo_root/tmp/mk21/mk21|MAKE|g; s|^make |MAKE |; s|^mk\[|make[|" > "$out/re-$t.log"
+    done
+    diff "$out/re-ref.log" "$out/re-mk.log" > "$out/re.diff"
+    report $? "kbuild: 2 度目に走る命令の列が GNU make と行ごとに一致する"
 else
     echo "skip Linux のソースか conf が無い (sh tools/fetch.sh linux54，sh tools/kconfref.sh flex)。**この節は検査していない**"
 fi
+
+section "mk21: 小さな記述を stone の上で走らせる (docs/stage019-linux.md 10 章)"
+
+# 期待はホストの GNU make 4.4.1 で作り，ホスト版の mk21 とも一致を確かめた
+sh tools/mk21.sh stone "$out/mk" > "$out/mk.log" 2>&1
+for n in vars rules uptodate; do
+    case "$n" in
+    vars) what="変数・関数・条件・define と eval・define の命令の分割" ;;
+    rules) what="型規則・静的型規則・順序だけの依存・目標特有と型特有の変数・VPATH・複数の目標の型規則・二次展開" ;;
+    uptodate) what="依存の順に作る" ;;
+    esac
+    cmp -s "tests/stage019/mk/$n.expect" "$out/mk/$n.out"
+    report $? "stone: $n.mk ($what) が GNU make と同じ出力を出す"
+done
+[ "$(cat "$out/mk/uptodate2.out")" = "mk: Nothing to be done for 'all'." ]
+report $? "stone: 2 度目は何も作らない (時刻で古さを判定する)"
 
 section "kernel30: 64 語を超える引数を子に渡す (docs/stage019-linux.md 9 章)"
 

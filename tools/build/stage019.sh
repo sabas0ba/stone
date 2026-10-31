@@ -4,6 +4,7 @@
 #
 #   npp1      前処理器 (S1。8 章)
 #   ncc       gcc の命令行を受けるドライバ (S2。9 章)
+#   mk21      make の新しい世代 (S3。10 章)
 #   kernel30  spawn の引数の上限を広げたカーネル (S2。9 章)
 #
 # npp1 と ncc は stage018 と同じく libc26 と cc15as で組み，前処理は stage016 の
@@ -39,7 +40,7 @@ kern19() {
 }
 
 build_stage019() {
-    for p in npp1 ncc; do
+    for p in npp1 ncc mk21; do
         step "$p" "$p" \
             -- "stage019/$p.c" stage017/libc26/include/*.h \
                stage017/libc26/include/sys/*.h \
@@ -55,8 +56,8 @@ build_stage019() {
 }
 
 do_stage019() {
-    run_stage stage019 npp1 ncc kernel30.bin \
-        -- stage019/npp1.c stage019/ncc.c stage019/kernel30.c \
+    run_stage stage019 npp1 ncc mk21 kernel30.bin \
+        -- stage019/npp1.c stage019/ncc.c stage019/mk21.c stage019/kernel30.c \
            stage017/libc26/include/*.h stage017/libc26/include/sys/*.h \
            tmp/build/stage018.stamp tools/build/stage019.sh tools/bundle.sh \
            tools/ld18.sh

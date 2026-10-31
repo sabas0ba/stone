@@ -1,0 +1,10 @@
+cc -O src/a.c to out/a.o stem a
+cc -O -DB src/b.c to out/b.o stem b
+static out/s1.x from src/a.c stem s1
+static out/s2.x from src/a.c stem s2
+yacc src/g.y to out/g.tab.c grouped
+pv pattern-var
+child sees inherited
+late
+sec deps late
+all: out/a.o out/b.o out/s1.x out/s2.x out/g.tab.c x.pv inh sec order-only: out
