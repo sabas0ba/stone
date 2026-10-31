@@ -2535,8 +2535,16 @@ static void parse_buffer(const char *buf, size_t len, const char *fname, int lin
             size_t bs = 0;
             while (bs < lb.n && lb.s[lb.n - 1 - bs] == '\\')
                 bs++;
-            if (bs % 2 == 0 || p >= end)
+            if (bs % 2 == 0)
                 break;
+            if (p >= end) {
+                /* ファイルの終わりの \ は空の行へ継ぐものとして除く (GNU make と同じ) */
+                lb.n--;
+                while (lb.n > 0 && isblank_((unsigned char)lb.s[lb.n - 1]))
+                    lb.n--;
+                lb.s[lb.n] = 0;
+                break;
+            }
             lb.n--;
             while (lb.n > 0 && isblank_((unsigned char)lb.s[lb.n - 1]))
                 lb.n--;
