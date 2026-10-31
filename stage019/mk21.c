@@ -521,6 +521,9 @@ static char *expand(const char *s)
     return sb_take(&o);
 }
 
+static int env_building;        /* 子の環境を組んでいる途中 */
+static int env_cycle;           /* その途中で展開の輪に当たった */
+
 /* 変数の値を o に足す (遅延の変数はここで展開する) */
 static void var_value_into(struct sb *o, struct var *v)
 {
@@ -528,8 +531,15 @@ static void var_value_into(struct sb *o, struct var *v)
         sb_adds(o, v->value);
         return;
     }
-    if (v->expanding)
+    if (v->expanding) {
+        /* 子の環境を組む途中なら，その変数を環境から外すだけにする
+         * ($(shell) の中で輸出する変数がその $(shell) の変数自身を引く) */
+        if (env_building) {
+            env_cycle = 1;
+            return;
+        }
         die("*** Recursive variable '%s' references itself (eventually).  Stop.", v->name, 0);
+    }
     v->expanding = 1;
     expand_into(o, v->value, strlen(v->value));
     v->expanding = 0;
@@ -1118,20 +1128,8 @@ static int call_function(struct sb *o, const char *name, const char *args, size_
         pat = arg_exp(av[0], al[0]);
         rep = arg_exp(av[1], al[1]);
         text = arg_exp(av[2], al[2]);
-        {
-            /* 型と置き換えの前後の空白を除く */
-            const char *q = pat;
-            size_t l;
-            const char *w0 = next_word(&q, &l);
-            char *t = w0 ? xstrndup(w0, l) : xstrdup("");
-            free(pat);
-            pat = t;
-            q = rep;
-            w0 = next_word(&q, &l);
-            t = w0 ? xstrndup(w0, l) : xstrdup("");
-            free(rep);
-            rep = t;
-        }
+        /* 型と置き換えの空白はそのまま使う (GNU make と同じ。$(patsubst %, -G %, ..)
+         * の置き換えは頭の空白を含む) */
         p = text;
         while ((w = next_word(&p, &n)) != 0) {
             char *word = xstrndup(w, n), *stem;
@@ -1653,14 +1651,27 @@ static int delete_on_error;
 static int all_secondary;
 static char *default_goal;
 
+/* 名前の頭の ./ を除く (GNU make と同じく ./a と a を同じファイルとする) */
+static const char *norm_name(const char *name)
+{
+    while (name[0] == '.' && name[1] == '/' && name[2]) {
+        name += 2;
+        while (name[0] == '/' && name[1])
+            name++;
+    }
+    return name;
+}
+
 static struct file *file_get(const char *name)
 {
-    return ht_get(&files, name);
+    return ht_get(&files, norm_name(name));
 }
 
 static struct file *file_enter(const char *name)
 {
-    struct file *f = ht_get(&files, name);
+    struct file *f;
+    name = norm_name(name);
+    f = ht_get(&files, name);
     if (f)
         return f;
     f = xmalloc(sizeof *f);
@@ -1675,6 +1686,7 @@ static struct file *file_enter(const char *name)
 static void add_dep(struct file *f, const char *name, int oo)
 {
     struct dep *d;
+    name = norm_name(name);
     for (d = f->deps; d; d = d->next)
         if (d->oo == oo && strcmp(d->name, name) == 0)
             return;
@@ -1731,6 +1743,7 @@ struct pstate {
     /* 規則の文脈 (命令行を受ける目標) */
     int in_rule;
     struct file **rt;
+    struct dep ***rmark;        /* 各目標の，この規則が依存を足す前の末尾 */
     int nrt;
     struct prule *rp;
     struct cmds *rc;
@@ -1748,6 +1761,8 @@ static void end_rule(struct pstate *ps)
     ps->in_rule = 0;
     free(ps->rt);
     ps->rt = 0;
+    free(ps->rmark);
+    ps->rmark = 0;
     ps->nrt = 0;
     ps->rp = 0;
     ps->rc = 0;
@@ -1773,6 +1788,16 @@ static struct cmds *rule_cmds(struct pstate *ps)
             fprintf(stderr, "%s:%d: warning: ignoring old recipe for target '%s'\n", f->cmds->file, f->cmds->line, f->name);
         }
         f->cmds = ps->rc;
+        /* 命令を持つ規則の依存を先頭に移す ($< はその最初の依存) */
+        if (ps->rmark && ps->rmark[i] && *ps->rmark[i] && ps->rmark[i] != &f->deps) {
+            struct dep *seg = *ps->rmark[i], *last = seg;
+            while (last->next)
+                last = last->next;
+            *ps->rmark[i] = 0;
+            last->next = f->deps;
+            f->deps = seg;
+            f->dtail = ps->rmark[i];
+        }
     }
     return ps->rc;
 }
@@ -2168,7 +2193,7 @@ static void do_rule(struct pstate *ps, const char *line, size_t colon)
                 pattern = 1;
         if (pattern) {
             for (i = 0; i < targets.n; i++)
-                do_assign(ps, rest, 0, 0, targets.v[i]);
+                do_assign(ps, rest, 0, 0, norm_name(targets.v[i]));
         } else {
             tf = xmalloc((size_t)(targets.n + 1) * sizeof *tf);
             for (i = 0; i < targets.n; i++)
@@ -2200,19 +2225,20 @@ static void do_rule(struct pstate *ps, const char *line, size_t colon)
     memset(&ow, 0, sizeof ow);
     ps->in_rule = 1;
     ps->rt = xmalloc((size_t)(targets.n + 1) * sizeof(struct file *));
+    ps->rmark = xmalloc((size_t)(targets.n + 1) * sizeof(struct dep **));
     ps->nrt = 0;
     /* 静的型規則か (残りに深さ 0 の ':' がある) */
     kind = find_op(rest, &pos, &op, &vend);
     if (kind == FIND_RULE) {
         char *tpat_raw = trim(rest, pos), *tpat = expand(tpat_raw);
         char *dpat_raw = xstrdup(rest + pos + 1), *dpat = expand(dpat_raw);
-        char *tp = trim(tpat, strlen(tpat));
+        char *tp0 = trim(tpat, strlen(tpat)), *tp = xstrdup(norm_name(tp0));
         split_deps(dpat, &dw, &ow);
         for (i = 0; i < targets.n; i++) {
             char *stem;
             struct file *f;
             int j;
-            if (!pat_match(tp, targets.v[i], &stem)) {
+            if (!pat_match(tp, norm_name(targets.v[i]), &stem)) {
                 fflush(stdout);
                 fprintf(stderr, "%s:%d: target '%s' doesn't match the target pattern\n", ps->fname, ps->line, targets.v[i]);
                 continue;
@@ -2221,6 +2247,7 @@ static void do_rule(struct pstate *ps, const char *line, size_t colon)
             f->is_target = 1;
             free(f->stem);
             f->stem = stem;
+            ps->rmark[ps->nrt] = f->dtail;
             if (second_expansion && strchr(dpat, '$')) {
                 struct sb b;
                 memset(&b, 0, sizeof b);
@@ -2263,6 +2290,7 @@ static void do_rule(struct pstate *ps, const char *line, size_t colon)
         free(tpat_raw);
         free(tpat);
         free(tp);
+        free(tp0);
         free(dpat_raw);
         free(dpat);
     } else {
@@ -2275,8 +2303,10 @@ static void do_rule(struct pstate *ps, const char *line, size_t colon)
         if (pattern) {
             struct prule *pr = xmalloc(sizeof *pr);
             memset(pr, 0, sizeof *pr);
-            for (i = 0; i < targets.n; i++)
-                words_add(&pr->targets, targets.v[i], strlen(targets.v[i]));
+            for (i = 0; i < targets.n; i++) {
+                const char *t = norm_name(targets.v[i]);
+                words_add(&pr->targets, t, strlen(t));
+            }
             {
                 struct sb b, c;
                 memset(&b, 0, sizeof b);
@@ -2314,6 +2344,7 @@ static void do_rule(struct pstate *ps, const char *line, size_t colon)
                 }
                 f = file_enter(t);
                 f->is_target = 1;
+                ps->rmark[ps->nrt] = f->dtail;
                 if (second_expansion && strchr(dexp, '$'))
                     words_add(&f->deps2, dexp, strlen(dexp));
                 else {
@@ -2440,8 +2471,27 @@ static void parse_buffer(const char *buf, size_t len, const char *fname, int lin
             } else if (starts_kw(t, "define") || (strncmp(t, "define", 6) == 0 && t[6] == 0))
                 define_depth++;
             free(t);
-            if (def_body.n || def_body.s)
+            if (def_body.n || def_body.s) {
+                /* 前の行が \ で終わっていれば，通常の行と同じく空白 1 つで継ぐ
+                 * (GNU make と同じ。命令として使う時も継いだ形になる) */
+                size_t bs = 0;
+                while (bs < def_body.n && def_body.s[def_body.n - 1 - bs] == '\\')
+                    bs++;
+                if (bs % 2 == 1) {
+                    const char *q = p;
+                    def_body.n--;
+                    while (def_body.n > 0 && isblank_((unsigned char)def_body.s[def_body.n - 1]))
+                        def_body.n--;
+                    def_body.s[def_body.n] = 0;
+                    while (q < le && isblank_((unsigned char)*q))
+                        q++;
+                    sb_addc(&def_body, ' ');
+                    sb_addn(&def_body, q, (size_t)(le - q));
+                    p = nl ? nl + 1 : end;
+                    continue;
+                }
                 sb_addc(&def_body, '\n');
+            }
             sb_addn(&def_body, p, (size_t)(le - p));
             if (!def_body.s)
                 sb_need(&def_body, 0);
@@ -2759,8 +2809,13 @@ static char **build_env(void)
                 memset(&kv, 0, sizeof kv);
                 sb_adds(&kv, v->name);
                 sb_addc(&kv, '=');
+                env_building++;
+                env_cycle = 0;
                 var_value_into(&kv, v);
-                words_add(&out, kv.s, kv.n);
+                env_building--;
+                if (!env_cycle)
+                    words_add(&out, kv.s, kv.n);
+                env_cycle = 0;
                 free(kv.s);
             }
         }
@@ -2808,11 +2863,21 @@ static void free_env(char **env)
 
 /* ---- 命令を走らせる ---- */
 
+static char *self_path(const char *argv0);
+
 static char *shell_path(void)
 {
     struct var *v = vs_get(&globals, "SHELL");
     char *s = v ? expand(v->value) : xstrdup("/bin/sh"), *t = trim(s, strlen(s));
     free(s);
+#ifdef MK_HOST
+    /* / を含まない名前は PATH から探す */
+    if (!strchr(t, '/')) {
+        char *p = self_path(t);
+        free(t);
+        t = p;
+    }
+#endif
     return t;
 }
 
@@ -3055,7 +3120,8 @@ static void prule_deps(struct match *m, const char *text, const char *dirpfx, in
         if (strchr(word, '%')) {
             if (dirpfx)
                 sb_adds(&b, dirpfx);
-            pat_subst(&b, word, m->stem);
+            /* 型の頭の ./ は除く (GNU make と同じ) */
+            pat_subst(&b, norm_name(word), m->stem);
         } else
             sb_adds(&b, word);
         free(word);
@@ -3594,20 +3660,21 @@ static void set_makeflags(void)
         sb_addc(&b, 'R');
     if (opt_s)
         sb_addc(&b, 's');
-    if (opt_nopd) {
-        if (b.n)
-            sb_addc(&b, ' ');
-        sb_adds(&b, "--no-print-directory");
-    }
     for (i = 0; i < incdirs.n; i++) {
         if (b.n)
             sb_addc(&b, ' ');
         sb_adds(&b, "-I");
         quote_flag(&b, incdirs.v[i]);
     }
+    if (opt_nopd) {
+        if (b.n)
+            sb_addc(&b, ' ');
+        sb_adds(&b, "--no-print-directory");
+    }
+    /* 命令行の代入は後に書かれたものから並べる (GNU make と同じ) */
     if (cmdvars.n) {
         sb_adds(&b, " --");
-        for (i = 0; i < cmdvars.n; i++) {
+        for (i = cmdvars.n - 1; i >= 0; i--) {
             sb_addc(&b, ' ');
             quote_flag(&b, cmdvars.v[i]);
         }
@@ -3694,7 +3761,9 @@ static void parse_makeflags(const char *s, int with_vars)
     }
     for (i = 0; i < w.n; i++) {
         const char *a = w.v[i];
-        if (dashdash) {
+        /* -- の後でも - で始まる語は選択肢として読む (記述が MAKEFLAGS += で
+         * 後ろに足したもの) */
+        if (dashdash && a[0] != '-') {
             if (with_vars)
                 cmdline_assign(a);
             continue;
@@ -3864,11 +3933,18 @@ int main(int argc, char **argv)
             name = xstrndup(*e, (size_t)(eq - *e));
             if (strcmp(name, "SHELL") != 0 && strcmp(name, "MAKEFLAGS") != 0 && strcmp(name, "MAKELEVEL") != 0
                 && strcmp(name, "MAKE_RESTARTS") != 0)
+            {
                 vs_set(&globals, name, eq + 1, FL_RECURSIVE, OR_ENV);
+                /* 環境から来た変数は記述が書き換えても子へ輸出する (GNU make と同じ) */
+                if (valid_env_name(name))
+                    mark_export(name, EX_EXPORT);
+            }
             free(name);
         }
     }
 #endif
+    /* $(MAKE) は起動した時の場所で解く (-C で移る前) */
+    self = self_path(argv[0]);
     v = getenv("MAKEFLAGS");
     if (v)
         parse_makeflags(v, 1);
@@ -3945,7 +4021,6 @@ int main(int argc, char **argv)
         words_add(&goals, a, strlen(a));
     }
 
-    self = self_path(argv[0]);
     set_simple("MAKE", self, OR_DEFAULT);
     set_simple("MAKE_VERSION", MK_VERSION, OR_DEFAULT);
     {
@@ -3971,6 +4046,18 @@ int main(int argc, char **argv)
     set_simple(".SHELLFLAGS", "-c", OR_DEFAULT);
     set_simple("MAKEFILE_LIST", "", OR_FILE);
     set_makeflags();
+    {
+        /* 命令行の代入 (GNU make の MAKEOVERRIDES と同じ並び) */
+        struct sb b;
+        memset(&b, 0, sizeof b);
+        for (i = cmdvars.n - 1; i >= 0; i--) {
+            if (b.n)
+                sb_addc(&b, ' ');
+            quote_flag(&b, cmdvars.v[i]);
+        }
+        set_simple("MAKEOVERRIDES", sb_str(&b), OR_DEFAULT);
+        free(b.s);
+    }
 
     if ((opt_w || makelevel > 0) && !opt_nopd && !opt_s)
         dir_message("Entering");
@@ -3984,8 +4071,9 @@ int main(int argc, char **argv)
             }
     }
     for (i = 0; i < mkfiles.n; i++) {
+        int at = nmfiles;
         read_makefile(mkfiles.v[i], 0);
-        if (!mfiles[nmfiles - 1].path && !file_get(mkfiles.v[i]))
+        if (!mfiles[at].path && !file_get(mkfiles.v[i]))
             die("*** %s: No such file or directory.  Stop.", mkfiles.v[i], 0);
     }
 

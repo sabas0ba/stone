@@ -4,7 +4,8 @@
 #   kb18.sh run <出力> <設定の目標> [make の変数=値...]
 #       O=<出力> に設定を作り，vmlinux と arch/riscv/boot/Image まで組む。道具は CROSS_COMPILE で
 #       我々のものに差し替える。KB18_NPP を与えると前処理を npp1 で行う (tools/kb18cc.sh)。
-#       KB18_NCC にドライバ ncc (ホスト版) の経路を与えると，gcc として kb18cc.sh の代わりに置く
+#       KB18_NCC にドライバ ncc (ホスト版) の経路を与えると，gcc として kb18cc.sh の代わりに置く。
+#       KB18_MAKE を与えると make の代わりにそれを使う (mk21 のホスト版)
 #
 #   kb18.sh cmp <出力 1> <出力 2>
 #       2 つの出力の生成物と依存の記録を比べる
@@ -69,6 +70,9 @@ run_build() {
     mkdir -p "$out"
     out=$(CDPATH='' cd -- "$out" && pwd)
     make_tools "$out/kb18/bin"
+    # make は KB18_MAKE で替えられる (mk21 のホスト版と GNU make を比べる。
+    # docs/stage019-linux.md 10 章)
+    mk=${KB18_MAKE:-make}
     KB18_ROOT=$repo_root
     KB18_BIN=$host
     export KB18_ROOT KB18_BIN
@@ -81,11 +85,11 @@ run_build() {
     set -- O="$out" ARCH=riscv CROSS_COMPILE="$out/kb18/bin/riscv32-stone-" \
         LEX="$flexbin" YACC=bison "$@"
     if [ ! -f "$out/.config" ]; then
-        make -C "$linux" "$@" "$target" > "$out/kb18/config.out" 2>&1 \
+        "$mk" -C "$linux" "$@" "$target" > "$out/kb18/config.out" 2>&1 \
             || die "設定の目標が失敗した ($out/kb18/config.out)"
     fi
     # Image は arch/riscv/boot の objcopy -O binary (起動に使う。docs/stage018-ncc.md 17 章)
-    if make -k -C "$linux" "$@" V=1 vmlinux Image > "$out/kb18/build.out" 2>&1; then
+    if "$mk" -k -C "$linux" "$@" V=1 vmlinux Image > "$out/kb18/build.out" 2>&1; then
         echo "kb18.sh: vmlinux と Image ができた ($out/vmlinux，$out/arch/riscv/boot/Image)"
     else
         echo "kb18.sh: vmlinux の目標が失敗した ($out/kb18/build.out)" >&2
